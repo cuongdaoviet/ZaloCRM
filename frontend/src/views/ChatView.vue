@@ -33,6 +33,7 @@
       <div class="resize-handle resize-handle-left" @mousedown="startResize('right', $event)" />
       <ChatContactPanel
         :contact-id="selectedConv.contact.id"
+        :conversation-id="selectedConv.id"
         :contact="selectedConv.contact"
         @close="showContactPanel = false"
         @saved="fetchConversations()"

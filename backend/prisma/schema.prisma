@@ -61,13 +61,14 @@ model User {
   zaloAccounts     ZaloAccount[]
   zaloAccess       ZaloAccountAccess[]
   assignedContacts Contact[]           @relation("AssignedContacts")
-  appointments     Appointment[]
+  appointments       Appointment[]
   repliedMessages    Message[]           @relation("RepliedMessages")
   activityLogs       ActivityLog[]
   createdOrders      Order[]             @relation("CreatedOrders")
   quickReplies       QuickReply[]        @relation("CreatedQuickReplies")
   createdCampaigns   Campaign[]          @relation("CreatedCampaigns")
   keywordRuleAssigns KeywordRule[]       @relation("KeywordRuleAssign")
+  conversationNotes  ConversationNote[]  @relation("ConversationNotes")
 
   @@map("users")
 }
@@ -161,6 +162,7 @@ model Conversation {
   contact     Contact?     @relation(fields: [contactId], references: [id])
   messages    Message[]
   orders      Order[]
+  notes       ConversationNote[]
 
   @@unique([zaloAccountId, externalThreadId])
   @@map("conversations")
@@ -437,4 +439,22 @@ model KeywordRuleTrigger {
   @@unique([ruleId, conversationId])
   @@index([triggeredAt])
   @@map("keyword_rule_triggers")
+}
+
+// Internal sales notes pinned to a conversation — feature 0010
+// Visible to everyone with read access on the Zalo account; the customer
+// never sees these. Author + admin can edit/delete.
+model ConversationNote {
+  id             String   @id @default(uuid())
+  conversationId String   @map("conversation_id")
+  authorId       String   @map("author_id")
+  content        String
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  author       User         @relation("ConversationNotes", fields: [authorId], references: [id])
+
+  @@index([conversationId, createdAt(sort: Desc)])
+  @@map("conversation_notes")
 }

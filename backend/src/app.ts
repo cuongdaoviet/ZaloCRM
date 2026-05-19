@@ -45,6 +45,7 @@ import { kpiRoutes } from './modules/kpi/kpi-routes.js';
 import { campaignRoutes } from './modules/campaigns/campaign-routes.js';
 import { startCampaignWorker } from './modules/campaigns/campaign-worker.js';
 import { keywordRuleRoutes } from './modules/keyword-rules/keyword-rule-routes.js';
+import { conversationNoteRoutes } from './modules/conversation-notes/conversation-note-routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -144,6 +145,7 @@ async function bootstrap() {
   await app.register(kpiRoutes);
   await app.register(campaignRoutes);
   await app.register(keywordRuleRoutes);
+  await app.register(conversationNoteRoutes);
 
   // Liveness/readiness probe — also checks DB connectivity
   app.get('/health', async () => {
