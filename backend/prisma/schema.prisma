@@ -26,6 +26,7 @@ model Organization {
   quickReplies  QuickReply[]
   campaigns     Campaign[]
   keywordRules  KeywordRule[]
+  webhookDeliveries WebhookDelivery[]
 
   @@map("organizations")
 }
@@ -457,4 +458,24 @@ model ConversationNote {
 
   @@index([conversationId, createdAt(sort: Desc)])
   @@map("conversation_notes")
+}
+
+// Outbound webhook delivery attempts — feature 0014
+// Persists every call to the org's webhook URL so admins can debug + replay.
+model WebhookDelivery {
+  id             String   @id @default(uuid())
+  orgId          String   @map("org_id")
+  event          String
+  url            String
+  payload        String   @db.Text
+  signature      String?
+  responseStatus Int?     @map("response_status")
+  durationMs     Int?     @map("duration_ms")
+  errorMessage   String?  @map("error_message")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt(sort: Desc)])
+  @@map("webhook_deliveries")
 }
