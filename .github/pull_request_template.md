@@ -4,9 +4,9 @@ Xem AGENTS.md gốc trong ~/.claude/CLAUDE.md để biết workflow đầy đủ
 
 Branch protection trên `main` yêu cầu:
 - CI (Backend + Frontend) pass
-- 1 approving review
 - Conversation phải resolved
 - Branch up-to-date với main trước khi merge
+- (Hiện chưa bắt approval review — solo dev mode. Tăng lên 1 khi có reviewer khác.)
 -->
 
 ## Mô tả
