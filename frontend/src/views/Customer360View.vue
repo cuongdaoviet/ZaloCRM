@@ -83,7 +83,7 @@
         <v-col cols="12" md="8">
           <!-- Recent conversation -->
           <v-card class="mb-4">
-            <v-card-title class="d-flex align-center">
+            <v-card-title class="text-body-1 font-weight-medium d-flex align-center">
               <v-icon class="mr-2">mdi-message-text</v-icon>
               Tin nhắn gần nhất
               <v-spacer />
@@ -118,7 +118,7 @@
 
           <!-- Orders -->
           <v-card class="mb-4">
-            <v-card-title>
+            <v-card-title class="text-body-1 font-weight-medium">
               <v-icon class="mr-2">mdi-cart</v-icon>
               Đơn hàng ({{ overview.orders.length }})
             </v-card-title>
@@ -144,7 +144,7 @@
 
           <!-- Appointments -->
           <v-card class="mb-4">
-            <v-card-title>
+            <v-card-title class="text-body-1 font-weight-medium">
               <v-icon class="mr-2">mdi-calendar</v-icon>
               Lịch hẹn ({{ overview.appointments.length }})
             </v-card-title>
@@ -174,7 +174,7 @@
         <v-col cols="12" md="4">
           <!-- Notes -->
           <v-card class="mb-4">
-            <v-card-title>
+            <v-card-title class="text-body-1 font-weight-medium">
               <v-icon class="mr-2">mdi-note-text</v-icon>
               Ghi chú ({{ overview.notes.length }})
             </v-card-title>
@@ -194,7 +194,7 @@
 
           <!-- Activity timeline -->
           <v-card>
-            <v-card-title>
+            <v-card-title class="text-body-1 font-weight-medium">
               <v-icon class="mr-2">mdi-history</v-icon>
               Hoạt động
             </v-card-title>
