@@ -16,6 +16,7 @@ import {
   buildContactWhere,
   canTransition,
 } from './campaign-helpers.js';
+import { logActivityAsync } from '../activity/activity-service.js';
 
 const TARGETS_PAGE_DEFAULT = 50;
 const TARGETS_PAGE_MAX = 200;
@@ -156,6 +157,14 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
       logger.info(
         `[campaigns] user ${user.id} created ${campaignId} with ${contacts.length} targets`,
       );
+      logActivityAsync({
+        orgId: user.orgId,
+        userId: user.id,
+        action: 'campaign.created',
+        entityType: 'campaign',
+        entityId: campaignId,
+        details: { name: v.name, totalTargets: contacts.length, scheduledAt: v.scheduledAt },
+      });
       return reply.status(201).send(campaign);
     },
   );
@@ -165,28 +174,28 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
     '/api/v1/campaigns/:id/start',
     { preHandler: requireRole('owner', 'admin') },
     async (request, reply) => {
-      return transitionCampaign(request.params.id, request.user!.orgId, 'start', reply);
+      return transitionCampaign(request.params.id, request.user!.orgId, request.user!.id, 'start', reply);
     },
   );
   app.post<{ Params: { id: string } }>(
     '/api/v1/campaigns/:id/pause',
     { preHandler: requireRole('owner', 'admin') },
     async (request, reply) => {
-      return transitionCampaign(request.params.id, request.user!.orgId, 'pause', reply);
+      return transitionCampaign(request.params.id, request.user!.orgId, request.user!.id, 'pause', reply);
     },
   );
   app.post<{ Params: { id: string } }>(
     '/api/v1/campaigns/:id/resume',
     { preHandler: requireRole('owner', 'admin') },
     async (request, reply) => {
-      return transitionCampaign(request.params.id, request.user!.orgId, 'resume', reply);
+      return transitionCampaign(request.params.id, request.user!.orgId, request.user!.id, 'resume', reply);
     },
   );
   app.post<{ Params: { id: string } }>(
     '/api/v1/campaigns/:id/cancel',
     { preHandler: requireRole('owner', 'admin') },
     async (request, reply) => {
-      return transitionCampaign(request.params.id, request.user!.orgId, 'cancel', reply);
+      return transitionCampaign(request.params.id, request.user!.orgId, request.user!.id, 'cancel', reply);
     },
   );
 
@@ -263,6 +272,7 @@ export async function campaignRoutes(app: FastifyInstance): Promise<void> {
 async function transitionCampaign(
   campaignId: string,
   orgId: string,
+  userId: string,
   action: 'start' | 'pause' | 'resume' | 'cancel',
   reply: any,
 ): Promise<unknown> {
@@ -302,5 +312,13 @@ async function transitionCampaign(
   logger.info(
     `[campaigns] ${campaignId} transition ${campaign.status} → ${newStatus} via ${action}`,
   );
+  logActivityAsync({
+    orgId,
+    userId,
+    action: `campaign.${action === 'start' ? 'started' : action === 'cancel' ? 'cancelled' : action === 'pause' ? 'paused' : 'resumed'}`,
+    entityType: 'campaign',
+    entityId: campaignId,
+    details: { from: campaign.status, to: newStatus, name: campaign.name },
+  });
   return updated;
 }

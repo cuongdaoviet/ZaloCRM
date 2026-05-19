@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
 import { matchKeywords, shouldUpgradeStatus } from './keyword-rule-helpers.js';
+import { logActivityAsync } from '../activity/activity-service.js';
 
 export interface ProcessInput {
   orgId: string;
@@ -66,6 +67,19 @@ export async function processInboundForKeywordRules(opts: ProcessInput): Promise
       logger.info(
         `[keyword-rule] fired ${rule.id} on conversation ${opts.conversationId} (matched: "${matched}")`,
       );
+      logActivityAsync({
+        orgId: opts.orgId,
+        userId: null, // listener fires this, no user action
+        action: 'keyword_rule.fired',
+        entityType: 'keyword_rule',
+        entityId: rule.id,
+        details: {
+          ruleName: rule.name,
+          matchedKeyword: matched,
+          conversationId: opts.conversationId,
+          contactId: opts.contactId,
+        },
+      });
     }
   } catch (err) {
     logger.error('[keyword-rule] processInboundForKeywordRules error:', err);
