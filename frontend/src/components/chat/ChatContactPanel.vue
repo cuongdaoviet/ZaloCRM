@@ -56,6 +56,10 @@
 
       <!-- Orders sub-component -->
       <ChatOrders v-if="props.contactId" :contact-id="props.contactId" />
+
+      <!-- Internal sales notes (feature 0010) -->
+      <v-divider class="my-3" />
+      <ConversationNotes v-if="props.conversationId" :conversation-id="props.conversationId" />
     </div>
   </div>
 </template>
@@ -66,9 +70,11 @@ import type { Contact } from '@/composables/use-contacts';
 import { useChatContactPanel } from '@/composables/use-chat-contact-panel';
 import ChatAppointments from './ChatAppointments.vue';
 import ChatOrders from './ChatOrders.vue';
+import ConversationNotes from './ConversationNotes.vue';
 
 const props = defineProps<{
   contactId: string | null;
+  conversationId: string | null;
   contact: Contact | null;
 }>();
 
