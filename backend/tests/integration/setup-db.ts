@@ -22,27 +22,48 @@ let prisma: PrismaClient | null = null;
 export async function setupDb(): Promise<PrismaClient> {
   if (prisma) return prisma;
 
-  container = await new PostgreSqlContainer('postgres:16-alpine')
-    .withDatabase('zalocrm_test')
-    .withUsername('test')
-    .withPassword('test')
-    .start();
+  let url: string;
 
-  const url = container.getConnectionUri();
-  process.env.DATABASE_URL = url;
+  if (process.env.USE_CI_DB === '1') {
+    // CI path: a Postgres service container is already running. Reuse it and
+    // assume the schema has been pushed by the workflow step before tests run.
+    const ciUrl = process.env.DATABASE_URL;
+    if (!ciUrl) {
+      throw new Error('USE_CI_DB=1 but DATABASE_URL is not set');
+    }
+    url = ciUrl;
+  } else {
+    // Local path: spin up an ephemeral container via testcontainers and push
+    // the schema into it. Slower (~3s) but fully isolated.
+    container = await new PostgreSqlContainer('postgres:16-alpine')
+      .withDatabase('zalocrm_test')
+      .withUsername('test')
+      .withPassword('test')
+      .start();
 
-  // Push the Prisma schema to the fresh DB. Using execFileSync avoids any
-  // shell interpolation — only static arguments are passed.
-  // Prisma 7 with @prisma/adapter-pg doesn't auto-read DATABASE_URL; pass --url explicitly.
-  execFileSync('npx', ['prisma', 'db', 'push', '--accept-data-loss', '--url', url], {
-    cwd: BACKEND_ROOT,
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: 'pipe',
-  });
+    url = container.getConnectionUri();
+    process.env.DATABASE_URL = url;
+
+    // Push the Prisma schema to the fresh DB. execFileSync avoids any
+    // shell interpolation — only static arguments are passed.
+    // Prisma 7 with @prisma/adapter-pg doesn't auto-read DATABASE_URL.
+    execFileSync('npx', ['prisma', 'db', 'push', '--accept-data-loss', '--url', url], {
+      cwd: BACKEND_ROOT,
+      env: { ...process.env, DATABASE_URL: url },
+      stdio: 'pipe',
+    });
+  }
 
   const adapter = new PrismaPg({ connectionString: url });
   prisma = new PrismaClient({ adapter });
   await prisma.$connect();
+
+  // In CI the same DB is reused across test files. Make sure each
+  // beforeAll() starts with a clean slate.
+  if (process.env.USE_CI_DB === '1') {
+    await resetDb(prisma);
+  }
+
   return prisma;
 }
 
@@ -55,6 +76,7 @@ export async function teardownDb(): Promise<void> {
     await container.stop();
     container = null;
   }
+  // In CI the service container outlives the test process — nothing to stop.
 }
 
 export async function resetDb(client: PrismaClient): Promise<void> {
