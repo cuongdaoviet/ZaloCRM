@@ -23,9 +23,15 @@
 ### Postgres service container
 Workflow dùng GitHub Actions service container (`postgres:16-alpine`) thay vì testcontainers — đơn giản hơn, không cần docker-in-docker. Code test (`tests/integration/setup-db.ts`) tự detect `USE_CI_DB=1` và bỏ qua testcontainers, dùng `DATABASE_URL` có sẵn.
 
-## Bật branch protection cho `main`
+## Branch protection cho `main`
 
-GitHub Actions chỉ verify code; để chặn merge khi CI fail hoặc thiếu review, cần bật **branch protection rule**. Có 2 cách:
+> ✅ **Đã áp dụng** (2026-05-19). Cấu hình hiện tại: 1 approval review + 2 status checks (Backend, Frontend) + strict (branch phải up-to-date trước khi merge) + conversation resolution required + enforce trên cả admin + cấm force-push + cấm delete branch.
+
+Push trực tiếp vào `main` → GitHub reject với "Changes must be made through a pull request". Test verified.
+
+### Khi cần thay đổi rule
+
+GitHub Actions chỉ verify code; branch protection chặn merge nếu CI fail hoặc thiếu review. Có 2 cách điều chỉnh:
 
 ### Cách 1 — UI (đơn giản)
 
@@ -70,11 +76,19 @@ JSON
 
 > ⚠️ **Lưu ý:** chỉ chạy được sau khi CI workflow đã chạy **ít nhất 1 lần** trên một PR — vì status check names ("Backend (lint, build, test)" và "Frontend (type-check, build)") chỉ được GitHub register sau lần chạy đầu.
 
-### Thứ tự setup khuyến nghị
+### Inspect current protection state
 
-1. Merge PR CI này (tạo file `ci.yml`)
-2. Đợi CI chạy lần đầu trên một PR sau đó (vd. PR #2 sẽ được rebase và chạy CI)
-3. Sau khi CI pass lần đầu, mới bật branch protection (đảm bảo status check names có sẵn để chọn)
+```bash
+gh api repos/cuongdaoviet/ZaloCRM/branches/main/protection
+```
+
+### Disable protection (emergency only)
+
+```bash
+gh api -X DELETE repos/cuongdaoviet/ZaloCRM/branches/main/protection
+```
+
+Sau khi disable, **luôn re-enable** ngay khi xử lý xong incident.
 
 ## Khi CI fail
 
