@@ -22,6 +22,7 @@
       :loading="loadingMsgs"
       :sending="sendingMsg"
       @send="sendMessage"
+      @send-attachment="onSendAttachment"
       @toggle-contact-panel="showContactPanel = !showContactPanel"
       :show-contact-panel="showContactPanel"
       style="flex: 1; min-width: 300px;"
@@ -43,6 +44,11 @@
       v-model="showNewChatDialog"
       @created="onCreateConversation"
     />
+
+    <!-- Attachment upload error toast -->
+    <v-snackbar v-model="attachmentToast.show" :color="attachmentToast.color" timeout="4000">
+      {{ attachmentToast.text }}
+    </v-snackbar>
   </div>
 </template>
 
@@ -57,9 +63,20 @@ import { useChat } from '@/composables/use-chat';
 const {
   conversations, selectedConvId, selectedConv, messages,
   loadingConvs, loadingMsgs, sendingMsg, searchQuery, accountFilter,
-  fetchConversations, selectConversation, sendMessage, createConversation,
+  fetchConversations, selectConversation, sendMessage, sendAttachment, createConversation,
   initSocket, destroySocket,
 } = useChat();
+
+const attachmentToast = ref<{ show: boolean; text: string; color: string }>({
+  show: false, text: '', color: 'success',
+});
+
+async function onSendAttachment(file: File) {
+  const result = await sendAttachment(file);
+  if (!result.ok) {
+    attachmentToast.value = { show: true, text: result.error, color: 'error' };
+  }
+}
 
 function onFilterAccount(id: string | null) {
   accountFilter.value = id;

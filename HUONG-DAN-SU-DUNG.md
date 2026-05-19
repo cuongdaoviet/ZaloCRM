@@ -70,7 +70,16 @@ Giao diện chat chia 3 cột (kéo thả để thay đổi kích thước):
 3. Nhấn **Enter** để gửi
 4. **Shift + Enter** = xuống dòng
 
-> ℹ️ **Giới hạn hiện tại:** Giao diện chat web **chỉ hỗ trợ gửi tin nhắn dạng văn bản**. Để gửi ảnh, file đính kèm, sticker hoặc tin nhắn thoại, vui lòng dùng app Zalo trên điện thoại — tin nhắn và file vẫn được nhận và hiển thị bình thường trong giao diện CRM.
+### Gửi ảnh và file đính kèm
+
+1. Click biểu tượng **📎** (paperclip) bên trái ô nhập tin → chọn ảnh/file từ máy tính
+2. **Hoặc** kéo-thả file thẳng vào khung chat
+3. Preview hiện ngay phía trên ô nhập (ảnh: thumbnail; file: card với tên + size)
+4. Bấm **biểu tượng gửi** → file được đẩy lên Zalo
+
+**Loại tệp được hỗ trợ:** JPG, PNG, GIF, WebP, PDF, Word/Excel/PowerPoint, CSV, TXT, ZIP. **Tối đa 20MB/file.**
+
+> ℹ️ Sticker, tin nhắn thoại, và video clip ghi từ trình duyệt chưa hỗ trợ — vẫn cần dùng app Zalo trên điện thoại.
 
 ### Xem ảnh và file
 
