@@ -5,13 +5,17 @@
 1. [Đăng nhập](#1-đăng-nhập)
 2. [Kết nối Zalo](#2-kết-nối-zalo)
 3. [Chat với khách hàng](#3-chat-với-khách-hàng)
-4. [Quản lý khách hàng](#4-quản-lý-khách-hàng)
-5. [Lịch hẹn](#5-lịch-hẹn)
-6. [Dashboard & Báo cáo](#6-dashboard--báo-cáo)
-7. [Quản lý nhân viên](#7-quản-lý-nhân-viên)
-8. [API & Webhook](#8-api--webhook)
-9. [Câu hỏi thường gặp](#9-câu-hỏi-thường-gặp)
-10. [Quy tắc quan trọng](#10-quy-tắc-quan-trọng)
+4. [Tin nhắn mẫu (Quick replies)](#4-tin-nhắn-mẫu-quick-replies)
+5. [Auto-reply ngoài giờ](#5-auto-reply-ngoài-giờ)
+6. [Tìm kiếm tin nhắn](#6-tìm-kiếm-tin-nhắn)
+7. [Quản lý khách hàng](#7-quản-lý-khách-hàng)
+8. [Lịch hẹn](#8-lịch-hẹn)
+9. [Dashboard & Báo cáo](#9-dashboard--báo-cáo)
+10. [KPI & Leaderboard (admin/owner)](#10-kpi--leaderboard-adminowner)
+11. [Quản lý nhân viên](#11-quản-lý-nhân-viên)
+12. [API & Webhook](#12-api--webhook)
+13. [Câu hỏi thường gặp](#13-câu-hỏi-thường-gặp)
+14. [Quy tắc quan trọng](#14-quy-tắc-quan-trọng)
 
 ---
 
@@ -112,9 +116,128 @@ Giao diện chat chia 3 cột (kéo thả để thay đổi kích thước):
 2. Nhấn **+** → điền mã đơn, tổng tiền, trạng thái, ghi chú → **Tạo đơn hàng**
 3. Đơn hàng được gắn với cả **khách hàng** lẫn **cuộc trò chuyện** hiện tại, hiện thị đồng thời ở tab **Đơn hàng** và **Khách hàng**
 
+### Bắt đầu chat mới với khách hàng
+
+1. Trong cột trái của trang **Tin nhắn**, bấm **"Chat mới với khách hàng"** (nút màu xanh trên cùng)
+2. Dialog hiện ra → chọn **Tài khoản Zalo** (chỉ list account đang kết nối) → chọn **Khách hàng** (chỉ contact đã sync Zalo UID)
+3. Bấm **Bắt đầu** → cuộc trò chuyện mới xuất hiện ngay đầu danh sách + tự được chọn
+
+> 💡 Nếu autocomplete không tìm thấy khách hàng, vào **Tài khoản Zalo** → bấm icon **đồng bộ danh bạ** (👥) để sync. Hệ thống chỉ cho chat mới với contact đã có Zalo UID.
+
+### Đồng bộ lịch sử nhóm chat
+
+Khi mới thêm 1 tài khoản Zalo có sẵn nhiều nhóm, lịch sử cũ **chưa** xuất hiện trong CRM. Để load:
+
+1. Vào **Tài khoản Zalo** (chỉ admin/owner)
+2. Bấm icon **lịch sử** (📜 màu vàng) ở dòng tài khoản → dialog hiện ra
+3. Nhập **Group ID** (bỏ trống = sync TẤT CẢ nhóm) + **số tin / nhóm** (1-200, mặc định 50)
+4. Bấm **Đồng bộ** → kết quả hiện inline (`inserted: X, skipped: Y`)
+
+> ⚠️ Tin nhắn 1-1 (chat cá nhân) **không thể** sync lịch sử cũ — Zalo API không hỗ trợ. Tin nhắn mới đến từ thời điểm kết nối trở đi sẽ được lưu bình thường.
+
+### Tự bù tin nhắn offline
+
+Khi server CRM tạm dừng (vd: restart) và khách nhắn tin trong thời gian đó, sau khi server kết nối lại Zalo sẽ **tự đẩy lại** các tin đã miss → CRM lưu vào DB. Không cần thao tác thủ công.
+
 ---
 
-## 4. Quản lý khách hàng
+## 4. Tin nhắn mẫu (Quick replies)
+
+Sale thường gửi đi gửi lại các tin chuẩn (chào, gửi giá, hỏi địa chỉ giao hàng). Tin nhắn mẫu cho phép lưu và dùng nhanh bằng slash command.
+
+### Tạo tin nhắn mẫu
+
+1. Vào menu **Tin nhắn mẫu** → bấm **Tạo tin mẫu**
+2. Điền:
+   - **Shortcut**: 2-20 ký tự, chỉ chữ thường + số + `-` `_` (vd: `chao`, `gia_vp_5pcs`)
+   - **Nội dung**: tin nhắn (tối đa 2000 ký tự). Có thể chèn placeholder `{{contactName}}`, `{{firstName}}`
+   - **Phạm vi** (admin/owner mới chọn được):
+     - **Cá nhân** — chỉ bạn dùng
+     - **Cả tổ chức** — toàn team thấy + dùng
+3. Bấm **Lưu**
+
+### Dùng trong chat
+
+1. Mở 1 cuộc trò chuyện
+2. Ở ô gõ tin nhắn, gõ **`/`** ở đầu dòng → popover hiện danh sách tin mẫu
+3. Gõ tiếp shortcut để filter (vd: `/chao` → chỉ hiện tin có shortcut bắt đầu `chao`)
+4. **Mũi tên ↑/↓** để chọn, **Enter** hoặc **Tab** để chèn, **Esc** để đóng
+5. Placeholder tự thay thế: `{{contactName}}` → tên đầy đủ khách hàng, `{{firstName}}` → tên đầu (split theo dấu cách)
+
+> 💡 Bạn có thể chỉnh sửa tin sau khi chèn trước khi bấm gửi.
+
+### Quyền
+
+- **Member**: chỉ tạo template cá nhân, chỉ sửa/xoá template của chính mình
+- **Admin/Owner**: tạo cả 2 scope, sửa/xoá mọi template trong org
+
+---
+
+## 5. Auto-reply ngoài giờ
+
+Cấu hình cho từng tài khoản Zalo: ngoài giờ làm việc, tự reply 1 tin định sẵn khi khách nhắn.
+
+### Cấu hình
+
+1. Vào **Tài khoản Zalo** → bấm icon **mdi-message-reply-text-outline** (màu tím) — chỉ admin/owner thấy
+2. Dialog mở:
+   - **Bật auto-reply** — toggle on/off (có thể tạm tắt mà không xoá rule)
+   - **Ngày làm việc** — bấm các chip để chọn ngày (mặc định T2-T6). Trong giờ làm việc các ngày này → KHÔNG auto-reply
+   - **Giờ bắt đầu / kết thúc** — định nghĩa khung giờ làm việc (mặc định 8:00-18:00)
+   - **Múi giờ** — mặc định `Asia/Ho_Chi_Minh`
+   - **Nội dung auto-reply** — hỗ trợ placeholder như tin nhắn mẫu
+   - **Cooldown (phút)** — không gửi lại cho cùng 1 khách trong khoảng này (mặc định 240 = 4 giờ)
+3. Bấm **Lưu**
+
+### Quy tắc trigger
+
+Auto-reply **chỉ gửi** khi tất cả điều kiện sau đúng:
+
+- ✅ Rule đang bật
+- ✅ Tin nhắn từ khách (không phải bạn tự gửi)
+- ✅ Cuộc trò chuyện 1-1 (KHÔNG áp dụng cho group)
+- ✅ Hiện tại NGOÀI khung giờ làm việc đã cấu hình
+- ✅ Chưa từng auto-reply cho khách này trong cooldown
+- ✅ Bạn chưa tự reply trong 5 phút gần đây (nếu vừa reply → hệ thống coi như bạn đang active, skip)
+
+> 💡 Khi rule trigger, tin auto-reply **vẫn đếm** vào limit 200 tin/ngày để tránh block Zalo.
+
+### Xoá rule
+
+Bấm **Xoá rule** ở góc trái dưới dialog. Lịch sử cooldown cũng được xoá theo.
+
+---
+
+## 6. Tìm kiếm tin nhắn
+
+Vào menu **Tìm tin nhắn** (`/search`) để tra cứu chính xác trong toàn bộ message đã lưu.
+
+### Filter
+
+- **Từ khoá**: tối thiểu 2 ký tự, case-insensitive
+- **Từ ngày / Đến ngày**: lọc theo khoảng thời gian
+- **Người gửi**: "Từ khách" hoặc "Bạn gửi" (bỏ trống = cả hai)
+- **Loại tin**: Văn bản / Ảnh / File / Sticker / Link
+
+### Kết quả
+
+- Avatar khách + tên + thời gian + chip "Bạn gửi" (nếu là tin tự gửi)
+- **Snippet** — đoạn trích chứa từ khoá, từ khoá được **bôi vàng** để dễ thấy
+- Bấm vào dòng → mở `/chat` và chọn đúng cuộc trò chuyện đó
+
+### Pagination
+
+- Mặc định 30 kết quả / trang
+- Mũi tên ◀ ▶ ở góc phải để qua trang
+
+### Quyền
+
+- **Member**: chỉ thấy tin của Zalo account có quyền `read` trở lên
+- **Admin/Owner**: thấy toàn org
+
+---
+
+## 7. Quản lý khách hàng
 
 Vào menu **Khách hàng**
 
@@ -145,7 +268,7 @@ Vào menu **Khách hàng**
 
 ---
 
-## 5. Lịch hẹn
+## 8. Lịch hẹn
 
 Vào menu **Lịch hẹn**
 
@@ -178,7 +301,7 @@ Vào menu **Lịch hẹn**
 
 ---
 
-## 6. Dashboard & Báo cáo
+## 9. Dashboard & Báo cáo
 
 ### Dashboard (trang chủ)
 
@@ -200,7 +323,45 @@ Biểu đồ:
 
 ---
 
-## 7. Quản lý nhân viên
+## 10. KPI & Leaderboard (admin/owner)
+
+Vào menu **KPI & Leaderboard** (chỉ admin/owner thấy trong sidebar).
+
+### Date range
+
+Chọn từ dropdown trên cùng:
+- **Hôm nay / Hôm qua / 7 ngày qua / 30 ngày qua** — preset thường dùng
+- **Tháng này / Tháng trước** — đầy đủ tháng
+- **Tuỳ chọn…** — chọn từ ngày + đến ngày (tối đa 365 ngày)
+
+### KPI cards (6 chỉ số)
+
+Mỗi card hiện:
+- **Giá trị kỳ này** — formatted (đ cho doanh thu, số đếm cho phần còn lại)
+- **% thay đổi so với kỳ trước** — chip xanh khi tăng, đỏ khi giảm, xám khi không có data kỳ trước
+- 6 cards: Doanh thu / Số đơn / Khách mới / KH chuyển đổi / Tin nhắn gửi / Tin nhắn nhận
+
+> 💡 **Doanh thu** chỉ tính đơn có status `paid`, `shipped`, hoặc `completed` — đơn `new`/`confirmed`/`cancelled` không tính.
+> 💡 **Tin nhắn gửi** loại trừ auto-reply (chỉ tính tin có nhân viên gửi).
+
+### Leaderboard
+
+Bảng xếp hạng nhân viên với 4 tab:
+- **Doanh thu** — sale nào chốt được nhiều tiền nhất
+- **Số đơn** — sale nào tạo nhiều đơn nhất
+- **Tin gửi** — sale nào reply nhiều nhất
+- **KH mới** — sale nào nhận về nhiều contact mới nhất (theo `assigned_user_id`)
+
+Chuyển tab → chỉ bảng dưới reload, KPI cards trên giữ nguyên.
+
+### Khi không có data
+
+- Kỳ trước = 0 → delta hiện "—" thay vì "+∞"
+- Range không có activity → cards = 0, leaderboard hiện "Không có dữ liệu cho khoảng này"
+
+---
+
+## 11. Quản lý nhân viên
 
 Vào menu **Nhân viên** (chỉ Admin/Owner)
 
@@ -224,7 +385,7 @@ Vào menu **Nhân viên** (chỉ Admin/Owner)
 
 ---
 
-## 8. API & Webhook
+## 12. API & Webhook
 
 Dành cho lập trình viên muốn tích hợp ZaloCRM với hệ thống khác.
 
@@ -259,7 +420,7 @@ curl -X POST -H "X-API-Key: your-key" -H "Content-Type: application/json" \
 
 ---
 
-## 9. Câu hỏi thường gặp
+## 13. Câu hỏi thường gặp
 
 ### "Zalo bị ngắt kết nối?"
 
@@ -283,7 +444,7 @@ Liên hệ Admin/Owner để reset mật khẩu trong **Cài đặt → Nhân vi
 
 ---
 
-## 10. Quy tắc quan trọng
+## 14. Quy tắc quan trọng
 
 ### ❌ KHÔNG làm
 

@@ -25,7 +25,9 @@ Workflow dùng GitHub Actions service container (`postgres:16-alpine`) thay vì 
 
 ## Branch protection cho `main`
 
-> ✅ **Đã áp dụng** (2026-05-19). Cấu hình hiện tại: 1 approval review + 2 status checks (Backend, Frontend) + strict (branch phải up-to-date trước khi merge) + conversation resolution required + enforce trên cả admin + cấm force-push + cấm delete branch.
+> ✅ **Đã áp dụng** (2026-05-19). Cấu hình hiện tại: **0 approval** (solo dev mode — GitHub chặn author self-approve PR của mình) + 2 status checks (Backend, Frontend) + strict (branch phải up-to-date trước khi merge) + conversation resolution required + enforce trên cả admin + cấm force-push + cấm delete branch.
+>
+> Khi có thêm reviewer khác trong team, tăng `required_approving_review_count` lên 1 qua `gh api PUT` (xem snippet bên dưới).
 
 Push trực tiếp vào `main` → GitHub reject với "Changes must be made through a pull request". Test verified.
 
@@ -38,7 +40,7 @@ GitHub Actions chỉ verify code; branch protection chặn merge nếu CI fail h
 1. Vào `Settings` → `Branches` của repo
 2. **Add branch protection rule** → Branch name pattern: `main`
 3. Bật các option:
-   - ✅ **Require a pull request before merging** → Required approving reviews: **1**
+   - ✅ **Require a pull request before merging** → Required approving reviews: **0** (solo dev) hoặc **1** (có reviewer khác)
    - ✅ **Require status checks to pass before merging**
      - ✅ Require branches to be up to date before merging
      - Status checks: search "Backend (lint, build, test)" và "Frontend (type-check, build)" → tick cả 2
@@ -61,7 +63,7 @@ gh api -X PUT "repos/cuongdaoviet/ZaloCRM/branches/main/protection" \
   },
   "enforce_admins": true,
   "required_pull_request_reviews": {
-    "required_approving_review_count": 1,
+    "required_approving_review_count": 0,
     "dismiss_stale_reviews": true,
     "require_code_owner_reviews": false
   },
