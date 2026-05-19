@@ -7,7 +7,7 @@
       >
         <v-icon size="32" color="white">mdi-robot</v-icon>
       </div>
-      <h1 class="text-h5 font-weight-bold">Zalo<span style="color: #00F2FF;">CRM</span></h1>
+      <h1 class="text-h5 font-weight-bold">Zalo<span class="text-primary">CRM</span></h1>
       <p class="text-caption mt-1" style="color: #8892b0;">Liquid Silicon • Multi-Account Zalo Management</p>
     </div>
 

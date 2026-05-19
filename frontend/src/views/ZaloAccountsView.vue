@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="d-flex align-center mb-4">
-      <h1 class="text-h4">Tài khoản Zalo</h1>
+      <h1 class="text-h5">Tài khoản Zalo</h1>
       <v-spacer />
       <v-btn color="primary" prepend-icon="mdi-plus" @click="showAddDialog = true">Thêm Zalo</v-btn>
     </div>

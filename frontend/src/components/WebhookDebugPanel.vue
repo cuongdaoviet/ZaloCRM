@@ -1,6 +1,6 @@
 <template>
   <v-card class="mb-4">
-    <v-card-title class="d-flex align-center">
+    <v-card-title class="text-body-1 font-weight-medium d-flex align-center">
       <v-icon class="mr-2">mdi-webhook</v-icon>
       Webhook delivery log
       <v-spacer />

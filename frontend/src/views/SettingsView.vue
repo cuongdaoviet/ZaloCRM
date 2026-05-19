@@ -1,7 +1,7 @@
 <template>
   <div>
-    <h1 class="text-h4 mb-4">
-      <v-icon class="mr-2" style="color: #00F2FF;">mdi-cog-outline</v-icon>
+    <h1 class="text-h5 mb-4">
+      <v-icon class="mr-2" color="primary">mdi-cog-outline</v-icon>
       Cài đặt
     </h1>
 

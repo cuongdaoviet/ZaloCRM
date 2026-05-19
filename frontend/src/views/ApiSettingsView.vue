@@ -1,7 +1,7 @@
 <template>
   <div style="max-width: 700px;">
     <h1 class="text-h5 mb-4">
-      <v-icon class="mr-2" style="color: #00F2FF;">mdi-api</v-icon>
+      <v-icon class="mr-2" color="primary">mdi-api</v-icon>
       API & Webhook
     </h1>
 

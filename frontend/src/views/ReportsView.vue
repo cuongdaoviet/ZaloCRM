@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="d-flex align-center mb-4 flex-wrap gap-2">
-      <h1 class="text-h4">Báo cáo</h1>
+      <h1 class="text-h5">Báo cáo</h1>
       <v-spacer />
       <v-text-field
         v-model="dateFrom"

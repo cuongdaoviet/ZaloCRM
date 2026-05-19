@@ -13,7 +13,7 @@
           <v-icon size="18" color="white">mdi-robot</v-icon>
         </div>
         <v-app-bar-title>
-          <span class="font-weight-bold">Zalo</span><span style="color: #00F2FF;">CRM</span>
+          <span class="font-weight-bold">Zalo</span><span class="text-primary">CRM</span>
         </v-app-bar-title>
       </div>
 
@@ -28,10 +28,10 @@
         style="background: rgba(76,175,80,0.1); border: 1px solid rgba(76,175,80,0.2);"
       >
         <span
-          class="status-dot"
-          style="width: 8px; height: 8px; border-radius: 50%; background: #4CAF50; display: inline-block; margin-right: 8px;"
+          class="status-dot bg-success"
+          style="width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px;"
         ></span>
-        <span class="text-caption font-weight-bold" style="color: #4CAF50; letter-spacing: 1px;">ONLINE</span>
+        <span class="text-caption text-success font-weight-bold" style="letter-spacing: 1px;">ONLINE</span>
       </div>
 
       <span class="text-body-2 mr-3" v-if="authStore.user">{{ authStore.user.fullName }}</span>

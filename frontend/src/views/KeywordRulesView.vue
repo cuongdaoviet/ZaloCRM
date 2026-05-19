@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="d-flex align-center mb-4">
-      <h1 class="text-h4">Auto-tag từ keyword</h1>
+      <h1 class="text-h5">Auto-tag từ keyword</h1>
       <v-spacer />
       <v-btn
         v-if="authStore.isAdmin"
