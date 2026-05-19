@@ -93,6 +93,12 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/keyword-rules',
+    name: 'KeywordRules',
+    component: () => import('@/views/KeywordRulesView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('@/views/NotFoundView.vue'),
