@@ -29,6 +29,14 @@
             :loading="syncingHistory === item.id">
             <v-icon>mdi-history</v-icon>
           </v-btn>
+          <v-btn
+            v-if="authStore.isAdmin"
+            icon size="small" color="purple"
+            @click="openAutoReplyDialog(item)"
+            title="Cấu hình auto-reply ngoài giờ"
+          >
+            <v-icon>mdi-message-reply-text-outline</v-icon>
+          </v-btn>
           <v-btn v-if="item.liveStatus !== 'connected'" icon size="small" color="primary" @click="loginAccount(item.id)" title="Đăng nhập QR">
             <v-icon>mdi-qrcode</v-icon>
           </v-btn>
@@ -103,6 +111,13 @@
       :account-name="accessTarget?.displayName ?? accessTarget?.id ?? ''"
     />
 
+    <!-- Auto-reply dialog -->
+    <AutoReplyDialog
+      v-model="showAutoReplyDialog"
+      :account-id="autoReplyTarget?.id ?? ''"
+      :account-name="autoReplyTarget?.displayName ?? autoReplyTarget?.id ?? ''"
+    />
+
     <!-- Sync group history dialog -->
     <v-dialog v-model="showHistoryDialog" max-width="480">
       <v-card>
@@ -163,6 +178,7 @@ import { ref, onMounted } from 'vue';
 import { useZaloAccounts, type ZaloAccount } from '@/composables/use-zalo-accounts';
 import { useAuthStore } from '@/stores/auth';
 import ZaloAccessDialog from '@/components/settings/ZaloAccessDialog.vue';
+import AutoReplyDialog from '@/components/settings/AutoReplyDialog.vue';
 import { api } from '@/api/index';
 
 const {
@@ -180,10 +196,12 @@ const syncing = ref<string | null>(null);
 const syncingHistory = ref<string | null>(null);
 const showDeleteDialog = ref(false);
 const showAccessDialog = ref(false);
+const showAutoReplyDialog = ref(false);
 const showHistoryDialog = ref(false);
 const newAccountName = ref('');
 const deleteTarget = ref<ZaloAccount | null>(null);
 const accessTarget = ref<ZaloAccount | null>(null);
+const autoReplyTarget = ref<ZaloAccount | null>(null);
 const historyTarget = ref<ZaloAccount | null>(null);
 const historyGroupId = ref('');
 const historyCount = ref(50);
@@ -262,6 +280,11 @@ function confirmDelete(account: ZaloAccount) {
 function openAccess(account: ZaloAccount) {
   accessTarget.value = account;
   showAccessDialog.value = true;
+}
+
+function openAutoReplyDialog(account: ZaloAccount) {
+  autoReplyTarget.value = account;
+  showAutoReplyDialog.value = true;
 }
 
 async function handleDeleteAccount() {

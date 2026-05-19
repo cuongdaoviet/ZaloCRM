@@ -10,6 +10,7 @@ import {
   processZaloMessage,
   type UserInfoCacheEntry,
 } from './zalo-message-helpers.js';
+import { maybeAutoReply } from '../auto-reply/auto-reply-service.js';
 
 export type { UserInfoCacheEntry };
 
@@ -48,6 +49,17 @@ export function attachZaloListener(ctx: ListenerContext): void {
           accountId,
           message: result.message,
           conversationId: result.conversationId,
+        });
+
+        // Feature 0005: fire-and-forget auto-reply evaluation. Errors are
+        // swallowed inside maybeAutoReply so they never break the listener.
+        void maybeAutoReply({
+          accountId,
+          conversationId: result.conversationId,
+          senderUid: String(message.data?.uidFrom || ''),
+          threadType: isGroup ? 'group' : 'user',
+          isSelf: !!message.isSelf,
+          conversationContactId: result.contactId,
         });
       }
     } catch (err) {
