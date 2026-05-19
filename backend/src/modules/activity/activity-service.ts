@@ -6,6 +6,7 @@
  */
 import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
+import { trackBackground } from '../../shared/utils/background-tasks.js';
 
 export interface LogActivityInput {
   orgId: string;
@@ -42,5 +43,5 @@ export async function logActivity(opts: LogActivityInput): Promise<void> {
  * sequence anything after the log write (most cases).
  */
 export function logActivityAsync(opts: LogActivityInput): void {
-  void logActivity(opts);
+  trackBackground(logActivity(opts));
 }
