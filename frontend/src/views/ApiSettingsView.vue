@@ -51,6 +51,12 @@
       </v-card-text>
     </v-card>
 
+    <!-- Webhook debug panel — admin only -->
+    <WebhookDebugPanel
+      v-if="authStore.isAdmin"
+      @notify="(text, color) => showSnack(text, color)"
+    />
+
     <!-- API Docs -->
     <v-card>
       <v-card-title class="text-body-1">API Documentation</v-card-title>
@@ -82,6 +88,10 @@ Webhook events:
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { api } from '@/api';
+import { useAuthStore } from '@/stores/auth';
+import WebhookDebugPanel from '@/components/WebhookDebugPanel.vue';
+
+const authStore = useAuthStore();
 
 const apiKey = ref('');
 const generatingKey = ref(false);
@@ -92,8 +102,8 @@ const testing = ref(false);
 
 const snack = ref({ show: false, text: '', color: 'success' });
 
-function showSnack(text: string, color = 'success') {
-  snack.value = { show: true, text, color };
+function showSnack(text: string, color: string | undefined = 'success') {
+  snack.value = { show: true, text, color: color ?? 'success' };
 }
 
 async function loadApiKey() {
