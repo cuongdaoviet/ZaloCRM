@@ -116,7 +116,16 @@
       </div>
 
       <!-- Input -->
-      <div class="pa-2 d-flex align-end chat-input-area">
+      <div class="pa-2 d-flex align-end chat-input-area" style="position: relative;">
+        <QuickReplyPopover
+          ref="popoverRef"
+          :open="quickReplyOpen"
+          :query="quickReplyQuery"
+          :replies="quickReplies"
+          :highlighted-index="quickReplyHighlighted"
+          @select="applyQuickReply"
+          @hover="quickReplyHighlighted = $event"
+        />
         <v-btn
           icon size="small" variant="text" class="mr-1"
           title="Đính kèm ảnh hoặc file"
@@ -132,9 +141,10 @@
         />
         <v-textarea
           v-model="inputText"
-          :placeholder="pendingFile ? 'Thêm ghi chú (tuỳ chọn)...' : 'Nhập tin nhắn...'"
+          :placeholder="pendingFile ? 'Thêm ghi chú (tuỳ chọn)...' : 'Nhập tin nhắn... (gõ / để dùng tin mẫu)'"
           variant="solo-filled" density="compact" hide-details auto-grow rows="1" max-rows="3"
-          @keydown.enter.exact.prevent="handleSend"
+          @keydown="onTextareaKeyDown"
+          @input="onInputUpdate"
           class="flex-grow-1 mr-2"
         />
         <v-btn
@@ -160,9 +170,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, computed } from 'vue';
+import { ref, watch, nextTick, computed, onMounted } from 'vue';
 import type { Conversation, Message } from '@/composables/use-chat';
+import {
+  useQuickReplies,
+  substitutePlaceholders,
+  type QuickReply,
+} from '@/composables/use-quick-replies';
 import { api } from '@/api/index';
+import QuickReplyPopover from './QuickReplyPopover.vue';
 
 const props = defineProps<{
   conversation: Conversation | null;
@@ -259,6 +275,86 @@ function handleSend() {
   if (!inputText.value.trim()) return;
   emit('send', inputText.value);
   inputText.value = '';
+}
+
+// ── Quick replies (feature 0004) ─────────────────────────────────────────────
+const { replies: quickReplies, fetchReplies } = useQuickReplies();
+const popoverRef = ref<{ filtered: QuickReply[] } | null>(null);
+const quickReplyOpen = ref(false);
+const quickReplyQuery = ref('');
+const quickReplyHighlighted = ref(0);
+
+onMounted(() => fetchReplies());
+
+/**
+ * Detect a slash command at the cursor: the input must end with `/<word>`
+ * where `<word>` is at the very start of input OR immediately follows a
+ * whitespace character. This avoids triggering inside words like `bạn/chị`.
+ */
+function detectSlashCommand(value: string): string | null {
+  // Pull the last "word" — characters since the last space or start of string
+  const lastSpaceIdx = Math.max(value.lastIndexOf(' '), value.lastIndexOf('\n'));
+  const lastWord = value.slice(lastSpaceIdx + 1);
+  if (!lastWord.startsWith('/')) return null;
+  const query = lastWord.slice(1);
+  // Limit query length so we don't keep popover open forever
+  if (query.length > 30) return null;
+  return query;
+}
+
+function onInputUpdate() {
+  const q = detectSlashCommand(inputText.value);
+  if (q === null) {
+    quickReplyOpen.value = false;
+    return;
+  }
+  quickReplyOpen.value = true;
+  quickReplyQuery.value = q;
+  quickReplyHighlighted.value = 0;
+}
+
+function onTextareaKeyDown(e: KeyboardEvent) {
+  if (!quickReplyOpen.value) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+    return;
+  }
+  const items = popoverRef.value?.filtered ?? [];
+  if (items.length === 0) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      quickReplyOpen.value = false;
+    }
+    return;
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    quickReplyHighlighted.value = (quickReplyHighlighted.value + 1) % items.length;
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    quickReplyHighlighted.value = (quickReplyHighlighted.value - 1 + items.length) % items.length;
+  } else if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    applyQuickReply(items[quickReplyHighlighted.value]);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    quickReplyOpen.value = false;
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+    applyQuickReply(items[quickReplyHighlighted.value]);
+  }
+}
+
+function applyQuickReply(reply: QuickReply) {
+  const text = inputText.value;
+  // Replace the trailing /<query> with the resolved content
+  const lastSpaceIdx = Math.max(text.lastIndexOf(' '), text.lastIndexOf('\n'));
+  const prefix = text.slice(0, lastSpaceIdx + 1);
+  const resolved = substitutePlaceholders(reply.content, props.conversation?.contact);
+  inputText.value = prefix + resolved;
+  quickReplyOpen.value = false;
 }
 function formatMessageTime(d: string) { return new Date(d).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }); }
 function openFile(url: string) { window.open(url, '_blank'); }

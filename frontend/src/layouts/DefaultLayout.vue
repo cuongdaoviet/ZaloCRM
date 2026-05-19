@@ -111,6 +111,7 @@ const menuItems = [
   { title: 'Đơn hàng', icon: 'mdi-cart-outline', path: '/orders' },
   { title: 'Báo cáo', icon: 'mdi-chart-arc', path: '/reports' },
   { title: 'Nhân viên', icon: 'mdi-account-cog-outline', path: '/settings' },
+  { title: 'Tin nhắn mẫu', icon: 'mdi-message-flash-outline', path: '/quick-replies' },
   { title: 'API & Webhook', icon: 'mdi-api', path: '/api-settings' },
 ];
 

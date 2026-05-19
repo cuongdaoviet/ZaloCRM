@@ -23,6 +23,7 @@ model Organization {
   dailyStats    DailyMessageStat[]
   settings      AppSetting[]
   orders        Order[]
+  quickReplies  QuickReply[]
 
   @@map("organizations")
 }
@@ -62,6 +63,7 @@ model User {
   repliedMessages  Message[]           @relation("RepliedMessages")
   activityLogs     ActivityLog[]
   createdOrders    Order[]             @relation("CreatedOrders")
+  quickReplies     QuickReply[]        @relation("CreatedQuickReplies")
 
   @@map("users")
 }
@@ -280,6 +282,23 @@ model Order {
   @@map("orders")
 }
 
+// Reusable message templates ("quick replies") — feature 0004
+model QuickReply {
+  id              String   @id @default(uuid())
+  orgId           String   @map("org_id")
+  createdByUserId String   @map("created_by_user_id")
+  shortcut        String   // lowercase a-z0-9_-, 2-20 chars
+  content         String
+  scope           String   @default("user") // "user" (private) or "org" (shared)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy User         @relation("CreatedQuickReplies", fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, scope])
+  @@index([createdByUserId])
+  @@map("quick_replies")
 // Auto-reply / out-of-office rule per Zalo account (feature 0005)
 model AutoReplyRule {
   id              String   @id @default(uuid())

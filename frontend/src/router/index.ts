@@ -69,6 +69,9 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/quick-replies',
+    name: 'QuickReplies',
+    component: () => import('@/views/QuickRepliesView.vue'),
     path: '/search',
     name: 'MessageSearch',
     component: () => import('@/views/MessageSearchView.vue'),
