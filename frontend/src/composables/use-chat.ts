@@ -145,6 +145,31 @@ export function useChat() {
     socket = null;
   }
 
+  /**
+   * Create (or reuse) a conversation with a contact. Used by the "+ New chat"
+   * dialog. Pushes the conversation to the head of the list and auto-selects
+   * it. Returns the conversation id so callers can react.
+   */
+  async function createConversation(accountId: string, contactId: string): Promise<string | null> {
+    try {
+      const res = await api.post('/conversations', { accountId, contactId });
+      const conv = res.data as Conversation;
+
+      // De-dupe in the local list (idempotent endpoint may return existing)
+      const idx = conversations.value.findIndex(c => c.id === conv.id);
+      if (idx >= 0) {
+        conversations.value.splice(idx, 1);
+      }
+      conversations.value.unshift(conv);
+
+      await selectConversation(conv.id);
+      return conv.id;
+    } catch (err) {
+      console.error('Failed to create conversation:', err);
+      return null;
+    }
+  }
+
   return {
     conversations,
     selectedConvId,
@@ -158,6 +183,7 @@ export function useChat() {
     fetchConversations,
     selectConversation,
     sendMessage,
+    createConversation,
     initSocket,
     destroySocket,
   };
