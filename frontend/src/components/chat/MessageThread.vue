@@ -46,7 +46,7 @@
         <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-2" />
         <div v-for="msg in messages" :key="msg.id" class="mb-2 d-flex" :class="msg.senderType === 'self' ? 'justify-end' : 'justify-start'">
           <div style="max-width: 70%;">
-            <div v-if="conversation.threadType === 'group' && msg.senderType !== 'self'" class="text-caption mb-1" style="color: #00F2FF; font-weight: 500;">
+            <div v-if="conversation.threadType === 'group' && msg.senderType !== 'self'" class="text-caption text-primary font-weight-medium mb-1">
               {{ msg.senderName || 'Unknown' }}
             </div>
             <div class="message-bubble pa-2 px-3 rounded-lg" :class="msg.senderType === 'self' ? 'bg-primary text-white' : 'bg-white'" style="word-wrap: break-word;">
@@ -78,7 +78,7 @@
               <div v-else-if="isReminderMessage(msg)" class="reminder-card">
                 <div class="d-flex align-center mb-1">
                   <v-icon size="16" color="warning" class="mr-1">mdi-calendar-clock</v-icon>
-                  <span class="text-caption font-weight-bold" style="color: #FFB74D;">Nhắc hẹn</span>
+                  <span class="text-caption text-warning font-weight-bold">Nhắc hẹn</span>
                 </div>
                 <div class="text-body-2">{{ getReminderTitle(msg) }}</div>
                 <div v-if="getReminderTime(msg)" class="text-caption mt-1" style="opacity: 0.7;">
@@ -459,7 +459,7 @@ watch(() => props.messages.length, async () => { await nextTick(); if (messagesC
 
 <style scoped>
 .message-bubble { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); }
-.reminder-card { padding: 8px 12px; border-left: 3px solid #FFB74D; border-radius: 8px; background: rgba(255, 183, 77, 0.08); }
+.reminder-card { padding: 8px 12px; border-left: 3px solid rgb(var(--v-theme-warning)); border-radius: 8px; background: rgba(var(--v-theme-warning), 0.08); }
 .file-card { display: flex; align-items: center; padding: 8px 12px; border-radius: 8px; background: rgba(0, 242, 255, 0.05); border: 1px solid rgba(0, 242, 255, 0.1); }
 .chat-image { max-width: 100%; max-height: 300px; border-radius: 12px; cursor: pointer; transition: transform 0.2s; }
 .chat-image:hover { transform: scale(1.02); }
@@ -481,6 +481,6 @@ watch(() => props.messages.length, async () => { await nextTick(); if (messagesC
   align-items: center;
   justify-content: center;
   pointer-events: none;
-  color: #00F2FF;
+  color: rgb(var(--v-theme-primary));
 }
 </style>

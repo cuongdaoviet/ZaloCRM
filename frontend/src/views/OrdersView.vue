@@ -2,7 +2,7 @@
   <div>
     <div class="d-flex align-center mb-4">
       <h1 class="text-h5">
-        <v-icon class="mr-2" style="color: #00F2FF;">mdi-cart-outline</v-icon>
+        <v-icon class="mr-2" color="primary">mdi-cart-outline</v-icon>
         Đơn hàng
       </h1>
       <v-spacer />

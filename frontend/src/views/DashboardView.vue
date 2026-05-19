@@ -1,7 +1,7 @@
 <template>
   <div>
     <h1 class="text-h5 mb-4">
-      <v-icon class="mr-2" style="color: #00F2FF;">mdi-view-dashboard</v-icon>
+      <v-icon class="mr-2" color="primary">mdi-view-dashboard</v-icon>
       Dashboard
     </h1>
     <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-4" />
