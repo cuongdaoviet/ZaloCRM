@@ -24,10 +24,20 @@
     >
       <!-- Avatar -->
       <template #item.avatarUrl="{ item }">
-        <v-avatar size="32" color="grey-lighten-2">
-          <v-img v-if="item.avatarUrl" :src="item.avatarUrl" />
-          <v-icon v-else size="18">mdi-account</v-icon>
-        </v-avatar>
+        <div class="d-flex align-center" style="gap: 4px;">
+          <v-avatar size="32" color="grey-lighten-2">
+            <v-img v-if="item.avatarUrl" :src="item.avatarUrl" />
+            <v-icon v-else size="18">mdi-account</v-icon>
+          </v-avatar>
+          <v-btn
+            icon size="x-small" variant="text"
+            :to="`/contacts/${item.id}`"
+            @click.stop
+            title="Xem 360°"
+          >
+            <v-icon size="16">mdi-account-eye</v-icon>
+          </v-btn>
+        </div>
       </template>
 
       <!-- Source chip -->
