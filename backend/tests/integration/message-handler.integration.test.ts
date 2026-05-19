@@ -154,15 +154,59 @@ describe('handleIncomingMessage — integration (real Postgres)', () => {
     expect(convCount).toBe(1); // only one conversation row reused
 
     const conv = await prisma.conversation.findFirst();
-    // FIXME(known-bug): createConversation seeds unreadCount=1 AND
-    // updateConversationAfterMessage increments by 1 on the same insert,
-    // so the first contact message lands as unreadCount=2 (instead of 1).
-    // After 2 contact messages: 1 (create) + 1 (update msg1) + 1 (update msg2) = 3.
-    // Not in scope for feature 0001-sync-history; capture current behavior here.
-    expect(conv?.unreadCount).toBe(3);
+    // unreadCount math is owned by updateConversationAfterMessage: +1 per
+    // contact message, reset to 0 per self message. Two contact messages → 2.
+    expect(conv?.unreadCount).toBe(2);
+    expect(conv?.isReplied).toBe(false);
   });
 
-  it('increments unreadCount only for non-self messages', async () => {
+  it('first contact message creates conversation with unreadCount=1 (not double-counted)', async () => {
+    const { handleIncomingMessage } = await import('../../src/modules/chat/message-handler.js');
+    const { account } = await seedOrgAndAccount();
+
+    await handleIncomingMessage({
+      accountId: account.id,
+      senderUid: 'uid-F',
+      senderName: 'Frank',
+      content: 'first',
+      contentType: 'text',
+      msgId: 'zalo-first',
+      timestamp: Date.now(),
+      isSelf: false,
+      threadId: 'uid-F',
+      threadType: 'user' as const,
+      attachments: [],
+    });
+
+    const conv = await prisma.conversation.findFirst();
+    expect(conv?.unreadCount).toBe(1);
+    expect(conv?.isReplied).toBe(false);
+  });
+
+  it('first self message creates conversation with unreadCount=0 and isReplied=true', async () => {
+    const { handleIncomingMessage } = await import('../../src/modules/chat/message-handler.js');
+    const { account } = await seedOrgAndAccount();
+
+    await handleIncomingMessage({
+      accountId: account.id,
+      senderUid: 'uid-self',
+      senderName: '',
+      content: 'hi from me',
+      contentType: 'text',
+      msgId: 'zalo-self',
+      timestamp: Date.now(),
+      isSelf: true,
+      threadId: 'uid-G',
+      threadType: 'user' as const,
+      attachments: [],
+    });
+
+    const conv = await prisma.conversation.findFirst();
+    expect(conv?.unreadCount).toBe(0);
+    expect(conv?.isReplied).toBe(true);
+  });
+
+  it('self reply resets unreadCount and flips isReplied=true', async () => {
     const { handleIncomingMessage } = await import('../../src/modules/chat/message-handler.js');
     const { account } = await seedOrgAndAccount();
     const base = {
@@ -176,11 +220,23 @@ describe('handleIncomingMessage — integration (real Postgres)', () => {
       attachments: [],
     };
 
-    await handleIncomingMessage({ ...base, content: 'from contact', msgId: 'zalo-c1', isSelf: false });
-    await handleIncomingMessage({ ...base, content: 'self reply', msgId: 'zalo-c2', isSelf: true });
+    // Two contact messages → unreadCount=2, isReplied=false
+    await handleIncomingMessage({ ...base, content: 'c1', msgId: 'zalo-c1', isSelf: false });
+    await handleIncomingMessage({ ...base, content: 'c2', msgId: 'zalo-c2', isSelf: false });
+    let conv = await prisma.conversation.findFirst();
+    expect(conv?.unreadCount).toBe(2);
+    expect(conv?.isReplied).toBe(false);
 
-    const conv = await prisma.conversation.findFirst();
-    expect(conv?.unreadCount).toBe(0); // reset when self replies
+    // Self reply → unreadCount=0, isReplied=true
+    await handleIncomingMessage({ ...base, content: 'self reply', msgId: 'zalo-c3', isSelf: true });
+    conv = await prisma.conversation.findFirst();
+    expect(conv?.unreadCount).toBe(0);
     expect(conv?.isReplied).toBe(true);
+
+    // Another contact message → unreadCount=1 again
+    await handleIncomingMessage({ ...base, content: 'c4', msgId: 'zalo-c4', isSelf: false });
+    conv = await prisma.conversation.findFirst();
+    expect(conv?.unreadCount).toBe(1);
+    expect(conv?.isReplied).toBe(false);
   });
 });

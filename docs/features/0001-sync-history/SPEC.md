@@ -131,7 +131,7 @@ Dùng `@testcontainers/postgresql` spin up Postgres 16 ephemeral, chạy `prisma
 
 ### 9.3. Bugs phát hiện thêm trong quá trình test
 
-- **Bug `unreadCount` double-count:** `findOrCreateConversation` seed `unreadCount: 1` + `updateConversationAfterMessage` increment +1 trên cùng 1 insert đầu tiên → conversation mới có `unreadCount = 2` sau 1 tin contact. Test marked với `FIXME(known-bug)`. Out of scope feature này, nhưng cần fix riêng.
+- ~~**Bug `unreadCount` double-count:** `findOrCreateConversation` seed `unreadCount: 1` + `updateConversationAfterMessage` increment +1 trên cùng 1 insert đầu tiên → conversation mới có `unreadCount = 2` sau 1 tin contact.~~ → **Đã fix** trong cùng PR này: `findOrCreateConversation` tạo conv với defaults schema (`unreadCount=0, isReplied=true`), để mọi logic count tập trung ở `updateConversationAfterMessage`. Test integration verify cả 4 case (new+self, new+contact, transition contact→self, reset cycle).
 
 ## 10. Cách test thủ công
 
