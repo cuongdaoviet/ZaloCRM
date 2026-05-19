@@ -87,6 +87,7 @@ model ZaloAccount {
   access        ZaloAccountAccess[]
   conversations Conversation[]
   dailyStats    DailyMessageStat[]
+  autoReplyRule AutoReplyRule?
 
   @@map("zalo_accounts")
 }
@@ -180,6 +181,8 @@ model Message {
   repliedBy    User?        @relation("RepliedMessages", fields: [repliedByUserId], references: [id])
 
   @@index([zaloMsgId])
+  // Powers /search/messages: filter by conversation, sort by sentAt desc
+  @@index([conversationId, sentAt(sort: Desc)])
   @@map("messages")
 }
 
@@ -296,4 +299,40 @@ model QuickReply {
   @@index([orgId, scope])
   @@index([createdByUserId])
   @@map("quick_replies")
+// Auto-reply / out-of-office rule per Zalo account (feature 0005)
+model AutoReplyRule {
+  id              String   @id @default(uuid())
+  zaloAccountId   String   @unique @map("zalo_account_id")
+  enabled         Boolean  @default(true)
+  // Active window — when a message arrives OUTSIDE this window, auto-reply fires.
+  // daysOfWeek is a 7-bit mask: bit 0 = Sun, bit 1 = Mon, ..., bit 6 = Sat
+  // Default 0b0111110 = 62 = Mon..Fri.
+  daysOfWeek      Int      @default(62) @map("days_of_week")
+  startMinute     Int      @default(480) @map("start_minute") // 08:00
+  endMinute       Int      @default(1080) @map("end_minute")  // 18:00
+  timezone        String   @default("Asia/Ho_Chi_Minh")
+  message         String   // reply text — supports {{contactName}} / {{firstName}}
+  cooldownMinutes Int      @default(240) @map("cooldown_minutes")
+  lastTriggeredAt DateTime? @map("last_triggered_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  zaloAccount ZaloAccount        @relation(fields: [zaloAccountId], references: [id], onDelete: Cascade)
+  history     AutoReplyHistory[]
+
+  @@map("auto_reply_rules")
+}
+
+// Cooldown ledger — one row per (rule, contact) tracking the last auto-reply
+model AutoReplyHistory {
+  id         String   @id @default(uuid())
+  ruleId     String   @map("rule_id")
+  contactUid String   @map("contact_uid")
+  sentAt     DateTime @default(now()) @map("sent_at")
+
+  rule AutoReplyRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleId, contactUid])
+  @@index([sentAt])
+  @@map("auto_reply_history")
 }

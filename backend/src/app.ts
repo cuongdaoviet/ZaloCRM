@@ -40,6 +40,7 @@ import { publicApiRoutes } from './modules/api/public-api-routes.js';
 import { webhookSettingsRoutes } from './modules/api/webhook-settings-routes.js';
 import { orderRoutes } from './modules/orders/order-routes.js';
 import { quickReplyRoutes } from './modules/quick-replies/quick-reply-routes.js';
+import { autoReplyRoutes } from './modules/auto-reply/auto-reply-routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -135,6 +136,7 @@ async function bootstrap() {
   await app.register(webhookSettingsRoutes);
   await app.register(orderRoutes);
   await app.register(quickReplyRoutes);
+  await app.register(autoReplyRoutes);
 
   // Liveness/readiness probe — also checks DB connectivity
   app.get('/health', async () => {
