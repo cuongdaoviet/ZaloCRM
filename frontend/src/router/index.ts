@@ -69,6 +69,12 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/search',
+    name: 'MessageSearch',
+    component: () => import('@/views/MessageSearchView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('@/views/NotFoundView.vue'),

@@ -178,6 +178,8 @@ model Message {
   repliedBy    User?        @relation("RepliedMessages", fields: [repliedByUserId], references: [id])
 
   @@index([zaloMsgId])
+  // Powers /search/messages: filter by conversation, sort by sentAt desc
+  @@index([conversationId, sentAt(sort: Desc)])
   @@map("messages")
 }
 
