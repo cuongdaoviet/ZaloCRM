@@ -48,7 +48,7 @@
     <v-navigation-drawer v-model="drawer" :rail="rail" permanent @click="rail = false">
       <v-list density="compact" nav class="mt-2">
         <v-list-item
-          v-for="item in menuItems"
+          v-for="item in visibleMenuItems"
           :key="item.path"
           :to="item.path"
           :prepend-icon="item.icon"
@@ -82,7 +82,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useTheme } from 'vuetify';
 import { useAuthStore } from '@/stores/auth';
 import { useRouter } from 'vue-router';
@@ -101,7 +101,14 @@ onMounted(() => {
   theme.global.name.value = isDark.value ? 'dark' : 'light';
 });
 
-const menuItems = [
+interface MenuItem {
+  title: string;
+  icon: string;
+  path: string;
+  adminOnly?: boolean;
+}
+
+const menuItems: MenuItem[] = [
   { title: 'Dashboard', icon: 'mdi-view-dashboard-outline', path: '/' },
   { title: 'Tin nhắn', icon: 'mdi-message-text-outline', path: '/chat' },
   { title: 'Tìm tin nhắn', icon: 'mdi-text-search', path: '/search' },
@@ -110,10 +117,15 @@ const menuItems = [
   { title: 'Lịch hẹn', icon: 'mdi-calendar-clock-outline', path: '/appointments' },
   { title: 'Đơn hàng', icon: 'mdi-cart-outline', path: '/orders' },
   { title: 'Báo cáo', icon: 'mdi-chart-arc', path: '/reports' },
+  { title: 'KPI & Leaderboard', icon: 'mdi-trophy-outline', path: '/kpi', adminOnly: true },
   { title: 'Nhân viên', icon: 'mdi-account-cog-outline', path: '/settings' },
   { title: 'Tin nhắn mẫu', icon: 'mdi-message-flash-outline', path: '/quick-replies' },
   { title: 'API & Webhook', icon: 'mdi-api', path: '/api-settings' },
 ];
+
+const visibleMenuItems = computed(() =>
+  menuItems.filter((m) => !m.adminOnly || authStore.isAdmin),
+);
 
 function toggleTheme() {
   isDark.value = !isDark.value;
