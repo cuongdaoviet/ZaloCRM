@@ -299,6 +299,8 @@ model QuickReply {
   @@index([orgId, scope])
   @@index([createdByUserId])
   @@map("quick_replies")
+}
+
 // Auto-reply / out-of-office rule per Zalo account (feature 0005)
 model AutoReplyRule {
   id              String   @id @default(uuid())
