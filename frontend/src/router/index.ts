@@ -33,6 +33,12 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/contacts/:id',
+    name: 'Customer360',
+    component: () => import('@/views/Customer360View.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/zalo-accounts',
     name: 'ZaloAccounts',
     component: () => import('@/views/ZaloAccountsView.vue'),

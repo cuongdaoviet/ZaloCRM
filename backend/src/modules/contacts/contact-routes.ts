@@ -7,6 +7,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { authMiddleware } from '../auth/auth-middleware.js';
 import { logger } from '../../shared/utils/logger.js';
+import { logActivityAsync } from '../activity/activity-service.js';
 
 type QueryParams = Record<string, string>;
 
@@ -175,7 +176,10 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
       const { id } = request.params as { id: string };
       const body = request.body as Record<string, any>;
 
-      const existing = await prisma.contact.findFirst({ where: { id, orgId: user.orgId }, select: { id: true } });
+      const existing = await prisma.contact.findFirst({
+        where: { id, orgId: user.orgId },
+        select: { id: true, status: true, assignedUserId: true },
+      });
       if (!existing) return reply.status(404).send({ error: 'Contact not found' });
 
       const updateData: any = {
@@ -205,6 +209,30 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
           _count: { select: { conversations: true } },
         },
       });
+
+      if (body.status !== undefined && body.status !== existing.status) {
+        logActivityAsync({
+          orgId: user.orgId,
+          userId: user.id,
+          action: 'contact.status_changed',
+          entityType: 'contact',
+          entityId: id,
+          details: { from: existing.status, to: body.status },
+        });
+      }
+      if (
+        body.assignedUserId !== undefined &&
+        body.assignedUserId !== existing.assignedUserId
+      ) {
+        logActivityAsync({
+          orgId: user.orgId,
+          userId: user.id,
+          action: 'contact.assigned',
+          entityType: 'contact',
+          entityId: id,
+          details: { from: existing.assignedUserId, to: body.assignedUserId },
+        });
+      }
 
       return updated;
     } catch (err) {
