@@ -42,6 +42,8 @@ import { orderRoutes } from './modules/orders/order-routes.js';
 import { quickReplyRoutes } from './modules/quick-replies/quick-reply-routes.js';
 import { autoReplyRoutes } from './modules/auto-reply/auto-reply-routes.js';
 import { kpiRoutes } from './modules/kpi/kpi-routes.js';
+import { campaignRoutes } from './modules/campaigns/campaign-routes.js';
+import { startCampaignWorker } from './modules/campaigns/campaign-worker.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -139,6 +141,7 @@ async function bootstrap() {
   await app.register(quickReplyRoutes);
   await app.register(autoReplyRoutes);
   await app.register(kpiRoutes);
+  await app.register(campaignRoutes);
 
   // Liveness/readiness probe — also checks DB connectivity
   app.get('/health', async () => {
@@ -182,6 +185,7 @@ async function bootstrap() {
     logger.info(`Environment: ${config.nodeEnv}`);
     startAppointmentReminder(io);
     startZaloHealthCheck();
+    startCampaignWorker(io);
   } catch (err) {
     logger.error('Failed to start server:', err);
     process.exit(1);
