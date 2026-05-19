@@ -73,7 +73,7 @@
             class="mb-3"
           />
           <p class="text-caption text-grey mb-2">
-            💡 Placeholder: <code>{{ '{{contactName}}' }}</code> và <code>{{ '{{firstName}}' }}</code>
+            💡 Placeholder: <code v-pre>{{contactName}}</code> và <code v-pre>{{firstName}}</code>
             sẽ được thay tên khách hàng khi chèn.
           </p>
           <v-select
