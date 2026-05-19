@@ -11,6 +11,7 @@ import {
   type UserInfoCacheEntry,
 } from './zalo-message-helpers.js';
 import { maybeAutoReply } from '../auto-reply/auto-reply-service.js';
+import { processInboundForKeywordRules } from '../keyword-rules/keyword-rule-service.js';
 
 export type { UserInfoCacheEntry };
 
@@ -60,6 +61,16 @@ export function attachZaloListener(ctx: ListenerContext): void {
           threadType: isGroup ? 'group' : 'user',
           isSelf: !!message.isSelf,
           conversationContactId: result.contactId,
+        });
+
+        // Feature 0009: fire-and-forget keyword auto-tag evaluation.
+        void processInboundForKeywordRules({
+          orgId: result.orgId,
+          conversationId: result.conversationId,
+          contactId: result.contactId,
+          threadType: isGroup ? 'group' : 'user',
+          isSelf: !!message.isSelf,
+          content: result.message.content,
         });
       }
     } catch (err) {

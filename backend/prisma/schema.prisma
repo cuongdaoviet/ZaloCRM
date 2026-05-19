@@ -25,6 +25,7 @@ model Organization {
   orders        Order[]
   quickReplies  QuickReply[]
   campaigns     Campaign[]
+  keywordRules  KeywordRule[]
 
   @@map("organizations")
 }
@@ -61,11 +62,12 @@ model User {
   zaloAccess       ZaloAccountAccess[]
   assignedContacts Contact[]           @relation("AssignedContacts")
   appointments     Appointment[]
-  repliedMessages  Message[]           @relation("RepliedMessages")
-  activityLogs     ActivityLog[]
-  createdOrders    Order[]             @relation("CreatedOrders")
-  quickReplies     QuickReply[]        @relation("CreatedQuickReplies")
-  createdCampaigns Campaign[]          @relation("CreatedCampaigns")
+  repliedMessages    Message[]           @relation("RepliedMessages")
+  activityLogs       ActivityLog[]
+  createdOrders      Order[]             @relation("CreatedOrders")
+  quickReplies       QuickReply[]        @relation("CreatedQuickReplies")
+  createdCampaigns   Campaign[]          @relation("CreatedCampaigns")
+  keywordRuleAssigns KeywordRule[]       @relation("KeywordRuleAssign")
 
   @@map("users")
 }
@@ -395,4 +397,44 @@ model CampaignTarget {
   @@unique([campaignId, contactId])
   @@index([campaignId, status])
   @@map("campaign_targets")
+}
+
+// Keyword-based auto-tagging rule — feature 0009
+// When an inbound (contact-sent) message in a 1-1 thread contains any of the
+// configured keywords, this rule's actions are applied to the contact:
+// add a tag, set/upgrade the pipeline status, or assign to a user.
+model KeywordRule {
+  id             String   @id @default(uuid())
+  orgId          String   @map("org_id")
+  name           String
+  enabled        Boolean  @default(true)
+  keywords       Json     // string[] — substring match, case-insensitive
+  addTag         String?  @map("add_tag")
+  setStatus      String?  @map("set_status") // pipeline enum
+  assignToUserId String?  @map("assign_to_user_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  org          Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  assignToUser User?                @relation("KeywordRuleAssign", fields: [assignToUserId], references: [id])
+  triggers     KeywordRuleTrigger[]
+
+  @@index([orgId, enabled])
+  @@map("keyword_rules")
+}
+
+// Ledger so the same rule doesn't fire twice on the same conversation
+model KeywordRuleTrigger {
+  id             String   @id @default(uuid())
+  ruleId         String   @map("rule_id")
+  conversationId String   @map("conversation_id")
+  contactId      String   @map("contact_id")
+  matchedKeyword String   @map("matched_keyword")
+  triggeredAt    DateTime @default(now()) @map("triggered_at")
+
+  rule KeywordRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleId, conversationId])
+  @@index([triggeredAt])
+  @@map("keyword_rule_triggers")
 }
