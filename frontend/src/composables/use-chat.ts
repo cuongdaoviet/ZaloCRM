@@ -109,7 +109,10 @@ export function useChat() {
     sendingMsg.value = true;
     try {
       const res = await api.post(`/conversations/${selectedConvId.value}/messages`, { content });
-      messages.value.push(res.data);
+      // Socket may race the HTTP response — dedup before pushing
+      if (!messages.value.find((m) => m.id === res.data.id)) {
+        messages.value.push(res.data);
+      }
     } catch (err) {
       console.error('Failed to send message:', err);
     } finally {
@@ -133,7 +136,9 @@ export function useChat() {
         form,
         { headers: { 'Content-Type': 'multipart/form-data' } },
       );
-      messages.value.push(res.data);
+      if (!messages.value.find((m) => m.id === res.data.id)) {
+        messages.value.push(res.data);
+      }
       return { ok: true, message: res.data };
     } catch (err: any) {
       const error = err.response?.data?.error || err.message || 'Gửi file thất bại';

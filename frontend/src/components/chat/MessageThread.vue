@@ -266,6 +266,8 @@ function formatBytes(bytes: number): string {
 }
 
 function handleSend() {
+  // Guard against double-fire while a previous send is still in flight
+  if (props.sending) return;
   // Attachment path takes precedence — text caption can be sent separately afterwards
   if (pendingFile.value) {
     emit('send-attachment', pendingFile.value);
@@ -314,6 +316,11 @@ function onInputUpdate() {
 }
 
 function onTextareaKeyDown(e: KeyboardEvent) {
+  // Vietnamese IME (and other composition-based IMEs) fires a final Enter
+  // keydown when committing a candidate. isComposing=true means the user is
+  // still composing — pressing Enter at that moment must not send.
+  if (e.isComposing || e.keyCode === 229) return;
+
   if (!quickReplyOpen.value) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
