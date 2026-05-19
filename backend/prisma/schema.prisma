@@ -24,6 +24,7 @@ model Organization {
   settings      AppSetting[]
   orders        Order[]
   quickReplies  QuickReply[]
+  campaigns     Campaign[]
 
   @@map("organizations")
 }
@@ -64,6 +65,7 @@ model User {
   activityLogs     ActivityLog[]
   createdOrders    Order[]             @relation("CreatedOrders")
   quickReplies     QuickReply[]        @relation("CreatedQuickReplies")
+  createdCampaigns Campaign[]          @relation("CreatedCampaigns")
 
   @@map("users")
 }
@@ -88,6 +90,7 @@ model ZaloAccount {
   conversations Conversation[]
   dailyStats    DailyMessageStat[]
   autoReplyRule AutoReplyRule?
+  campaigns     Campaign[]
 
   @@map("zalo_accounts")
 }
@@ -128,11 +131,12 @@ model Contact {
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
-  org           Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  assignedUser  User?          @relation("AssignedContacts", fields: [assignedUserId], references: [id])
-  conversations Conversation[]
-  appointments  Appointment[]
-  orders        Order[]
+  org             Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  assignedUser    User?            @relation("AssignedContacts", fields: [assignedUserId], references: [id])
+  conversations   Conversation[]
+  appointments    Appointment[]
+  orders          Order[]
+  campaignTargets CampaignTarget[]
 
   @@map("contacts")
 }
@@ -337,4 +341,58 @@ model AutoReplyHistory {
   @@unique([ruleId, contactUid])
   @@index([sentAt])
   @@map("auto_reply_history")
+}
+
+// Bulk message campaign — feature 0008
+// A campaign owns a snapshot of contacts (CampaignTarget rows) and is driven
+// by a cron worker that picks running campaigns and sends to pending targets
+// with a randomized delay between messages.
+model Campaign {
+  id              String   @id @default(uuid())
+  orgId           String   @map("org_id")
+  createdByUserId String   @map("created_by_user_id")
+  zaloAccountId   String   @map("zalo_account_id")
+  name            String
+  message         String   // text, 1-2000 chars; supports {{contactName}} / {{firstName}}
+  status          String   @default("draft") // draft|scheduled|running|paused|completed|cancelled
+  scheduledAt     DateTime? @map("scheduled_at") // null = send immediately on start
+  startedAt       DateTime? @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+  filterSnapshot  Json     @default("{}") @map("filter_snapshot") // {status?:[], source?:[], tags?:[]}
+  totalTargets    Int      @default(0) @map("total_targets")
+  sentCount       Int      @default(0) @map("sent_count")
+  failedCount     Int      @default(0) @map("failed_count")
+  skippedCount    Int      @default(0) @map("skipped_count")
+  isDeleted       Boolean  @default(false) @map("is_deleted")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  org         Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy   User             @relation("CreatedCampaigns", fields: [createdByUserId], references: [id])
+  zaloAccount ZaloAccount      @relation(fields: [zaloAccountId], references: [id])
+  targets     CampaignTarget[]
+
+  @@index([status, scheduledAt])
+  @@index([orgId, createdAt(sort: Desc)])
+  @@map("campaigns")
+}
+
+// One row per (campaign, contact). Worker iterates over pending and updates
+// to sent/failed/skipped.
+model CampaignTarget {
+  id           String    @id @default(uuid())
+  campaignId   String    @map("campaign_id")
+  contactId    String    @map("contact_id")
+  status       String    @default("pending") // pending|sent|failed|skipped
+  errorMessage String?   @map("error_message")
+  sentAt       DateTime? @map("sent_at")
+  attemptCount Int       @default(0) @map("attempt_count")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact  Contact  @relation(fields: [contactId], references: [id])
+
+  @@unique([campaignId, contactId])
+  @@index([campaignId, status])
+  @@map("campaign_targets")
 }
