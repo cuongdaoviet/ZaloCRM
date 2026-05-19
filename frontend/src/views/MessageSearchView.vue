@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h1 class="text-h4 mb-4">Tìm kiếm tin nhắn</h1>
+    <h1 class="text-h5 mb-4">Tìm kiếm tin nhắn</h1>
 
     <v-card class="pa-4 mb-4">
       <div class="d-flex flex-wrap" style="gap: 12px;">

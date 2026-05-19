@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="d-flex align-center mb-4">
-      <h1 class="text-h4">KPI &amp; Leaderboard</h1>
+      <h1 class="text-h5">KPI &amp; Leaderboard</h1>
       <v-spacer />
       <v-select
         v-model="period"
