@@ -54,6 +54,16 @@ export async function handleIncomingMessage(
     });
     if (!account) return null;
 
+    // Dedupe by zaloMsgId — protect against duplicate inserts when offline
+    // messages or history sync overlap with realtime events.
+    if (msg.msgId) {
+      const existing = await prisma.message.findFirst({
+        where: { zaloMsgId: msg.msgId },
+        select: { id: true },
+      });
+      if (existing) return null;
+    }
+
     const contactId = await upsertContact(msg, account.orgId);
 
     const conversation = await findOrCreateConversation(msg, account.orgId, contactId);
