@@ -178,4 +178,82 @@ export async function chatRoutes(app: FastifyInstance) {
 
     return { success: true };
   });
+
+  // ── Create new conversation with a contact (feature 0002) ────────────────
+  app.post<{ Body: { accountId?: string; contactId?: string } }>(
+    '/api/v1/conversations',
+    async (request, reply) => {
+      const user = request.user!;
+      const { accountId, contactId } = request.body ?? {};
+
+      if (!accountId || !contactId) {
+        return reply.status(400).send({ error: 'accountId và contactId là bắt buộc' });
+      }
+
+      // Verify account belongs to user's org
+      const account = await prisma.zaloAccount.findFirst({
+        where: { id: accountId, orgId: user.orgId },
+        select: { id: true },
+      });
+      if (!account) return reply.status(404).send({ error: 'Zalo account không tồn tại' });
+
+      // Verify contact belongs to user's org + has a Zalo UID (synced)
+      const contact = await prisma.contact.findFirst({
+        where: { id: contactId, orgId: user.orgId },
+        select: { id: true, zaloUid: true },
+      });
+      if (!contact) return reply.status(404).send({ error: 'Khách hàng không tồn tại' });
+      if (!contact.zaloUid) {
+        return reply
+          .status(400)
+          .send({ error: 'Khách hàng chưa được sync từ Zalo (chưa có zaloUid)' });
+      }
+
+      // Permission gate: members need 'chat' permission on the Zalo account
+      if (!['owner', 'admin'].includes(user.role)) {
+        const access = await prisma.zaloAccountAccess.findFirst({
+          where: { zaloAccountId: accountId, userId: user.id },
+        });
+        const level = access?.permission;
+        if (level !== 'chat' && level !== 'admin') {
+          return reply
+            .status(403)
+            .send({ error: 'Không có quyền chat trên tài khoản Zalo này' });
+        }
+      }
+
+      // Idempotent: return existing conversation if one already exists
+      const existing = await prisma.conversation.findFirst({
+        where: { zaloAccountId: accountId, externalThreadId: contact.zaloUid },
+        include: {
+          contact: { select: { id: true, fullName: true, phone: true, avatarUrl: true, zaloUid: true } },
+          zaloAccount: { select: { id: true, displayName: true, zaloUid: true } },
+        },
+      });
+      if (existing) {
+        return reply.status(200).send({ ...existing, messages: [] });
+      }
+
+      const created = await prisma.conversation.create({
+        data: {
+          id: randomUUID(),
+          orgId: user.orgId,
+          zaloAccountId: accountId,
+          contactId: contact.id,
+          threadType: 'user',
+          externalThreadId: contact.zaloUid,
+          lastMessageAt: null,
+        },
+        include: {
+          contact: { select: { id: true, fullName: true, phone: true, avatarUrl: true, zaloUid: true } },
+          zaloAccount: { select: { id: true, displayName: true, zaloUid: true } },
+        },
+      });
+
+      logger.info(
+        `[chat] User ${user.id} created conversation ${created.id} with contact ${contact.id}`,
+      );
+      return reply.status(201).send({ ...created, messages: [] });
+    },
+  );
 }

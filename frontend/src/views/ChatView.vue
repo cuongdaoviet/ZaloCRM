@@ -9,6 +9,7 @@
         v-model:search="searchQuery"
         @select="selectConversation"
         @filter-account="onFilterAccount"
+        @new-chat="showNewChatDialog = true"
       />
       <!-- Resize handle -->
       <div class="resize-handle" @mousedown="startResize('left', $event)" />
@@ -36,6 +37,12 @@
         @saved="fetchConversations()"
       />
     </div>
+
+    <!-- New chat dialog -->
+    <NewChatDialog
+      v-model="showNewChatDialog"
+      @created="onCreateConversation"
+    />
   </div>
 </template>
 
@@ -44,12 +51,13 @@ import { ref, onMounted, onUnmounted, watch } from 'vue';
 import ConversationList from '@/components/chat/ConversationList.vue';
 import MessageThread from '@/components/chat/MessageThread.vue';
 import ChatContactPanel from '@/components/chat/ChatContactPanel.vue';
+import NewChatDialog from '@/components/chat/NewChatDialog.vue';
 import { useChat } from '@/composables/use-chat';
 
 const {
   conversations, selectedConvId, selectedConv, messages,
   loadingConvs, loadingMsgs, sendingMsg, searchQuery, accountFilter,
-  fetchConversations, selectConversation, sendMessage,
+  fetchConversations, selectConversation, sendMessage, createConversation,
   initSocket, destroySocket,
 } = useChat();
 
@@ -59,6 +67,11 @@ function onFilterAccount(id: string | null) {
 }
 
 const showContactPanel = ref(false);
+const showNewChatDialog = ref(false);
+
+async function onCreateConversation(params: { accountId: string; contactId: string }) {
+  await createConversation(params.accountId, params.contactId);
+}
 
 // Resizable panel widths (restored from localStorage)
 const leftWidth = ref(parseInt(localStorage.getItem('chat-left-width') || '320'));
