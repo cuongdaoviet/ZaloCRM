@@ -120,6 +120,7 @@ const menuItems: MenuItem[] = [
   { title: 'KPI & Leaderboard', icon: 'mdi-trophy-outline', path: '/kpi', adminOnly: true },
   { title: 'Chiến dịch', icon: 'mdi-bullhorn-outline', path: '/campaigns', adminOnly: true },
   { title: 'Auto-tag keyword', icon: 'mdi-tag-text-outline', path: '/keyword-rules' },
+  { title: 'Hoạt động', icon: 'mdi-history', path: '/activity', adminOnly: true },
   { title: 'Nhân viên', icon: 'mdi-account-cog-outline', path: '/settings' },
   { title: 'Tin nhắn mẫu', icon: 'mdi-message-flash-outline', path: '/quick-replies' },
   { title: 'API & Webhook', icon: 'mdi-api', path: '/api-settings' },

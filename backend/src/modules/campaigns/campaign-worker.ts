@@ -19,6 +19,7 @@ import {
   applyMessagePlaceholders,
   nextSendDelayMs,
 } from './campaign-helpers.js';
+import { logActivityAsync } from '../activity/activity-service.js';
 
 const BATCH_SIZE = 10;
 const MAX_CONCURRENT_CAMPAIGNS_PER_TICK = 5;
@@ -108,6 +109,18 @@ async function processCampaignBatch(campaignId: string): Promise<void> {
       });
       emitStatus(campaignId, 'completed');
       logger.info(`[campaign-worker] campaign ${campaignId} completed`);
+      logActivityAsync({
+        orgId: campaign.orgId,
+        userId: null, // system event
+        action: 'campaign.completed',
+        entityType: 'campaign',
+        entityId: campaignId,
+        details: {
+          sentCount: campaign.sentCount,
+          failedCount: campaign.failedCount,
+          skippedCount: campaign.skippedCount,
+        },
+      });
     }
     return;
   }
@@ -132,6 +145,14 @@ async function processCampaignBatch(campaignId: string): Promise<void> {
       });
       emitStatus(campaignId, 'paused', { reason: limit.reason });
       logger.warn(`[campaign-worker] ${campaignId} paused — rate limit: ${limit.reason}`);
+      logActivityAsync({
+        orgId: campaign.orgId,
+        userId: null,
+        action: 'campaign.paused',
+        entityType: 'campaign',
+        entityId: campaignId,
+        details: { reason: 'rate_limit', detail: limit.reason },
+      });
       return;
     }
 
