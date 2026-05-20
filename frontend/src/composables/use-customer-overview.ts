@@ -1,6 +1,15 @@
 import { ref } from 'vue';
 import { api } from '@/api/index';
 
+// Feature 0019 Phase B — tags are enriched objects { id, name, color, emoji }.
+// `tagNames` is the back-compat string[] shim, deprecated in Phase C.
+export interface OverviewContactTag {
+  id: string;
+  name: string;
+  color: string;
+  emoji: string | null;
+}
+
 export interface OverviewContact {
   id: string;
   fullName: string | null;
@@ -9,7 +18,9 @@ export interface OverviewContact {
   avatarUrl: string | null;
   source: string | null;
   status: string | null;
-  tags: string[];
+  tags: OverviewContactTag[];
+  /** Deprecated: kept for clients still expecting bare string[]. Drops in Phase C. */
+  tagNames: string[];
   nextAppointment: string | null;
   assignedUser: { id: string; fullName: string } | null;
   createdAt: string;
