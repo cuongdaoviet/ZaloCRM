@@ -107,6 +107,30 @@
         <div v-if="!loading && messages.length === 0" class="text-center pa-8 text-grey">Chưa có tin nhắn</div>
       </div>
 
+      <!-- Appointment suggestion chip (feature 0017) -->
+      <div v-if="appointmentSuggestion && !suggestionDismissed" class="px-2 pt-2">
+        <v-chip
+          color="primary"
+          variant="tonal"
+          prepend-icon="mdi-calendar-clock"
+          closable
+          @click:close="suggestionDismissed = true"
+        >
+          <span class="text-body-2">
+            Gợi ý lịch hẹn: {{ formatSuggestionTime(appointmentSuggestion.date) }}
+          </span>
+          <v-btn
+            size="x-small"
+            variant="text"
+            class="ml-2"
+            color="primary"
+            @click.stop="emitAppointmentSuggest"
+          >
+            Tạo
+          </v-btn>
+        </v-chip>
+      </div>
+
       <!-- Pending attachment preview -->
       <div v-if="pendingFile" class="pa-2 pb-0">
         <v-card variant="outlined" class="pa-2 d-flex align-center">
@@ -184,6 +208,10 @@ import {
   substitutePlaceholders,
   type QuickReply,
 } from '@/composables/use-quick-replies';
+import {
+  useAppointmentParser,
+  type ParsedAppointment,
+} from '@/composables/use-appointment-parser';
 import { api } from '@/api/index';
 import QuickReplyPopover from './QuickReplyPopover.vue';
 
@@ -201,6 +229,7 @@ const emit = defineEmits<{
   'send-attachment': [file: File];
   'toggle-contact-panel': [];
   'toggle-pin': [];
+  'appointment-suggest': [payload: ParsedAppointment];
 }>();
 
 const inputText = ref('');
@@ -464,6 +493,49 @@ async function syncAppointment(msg: Message) {
 }
 
 watch(() => props.messages.length, async () => { await nextTick(); if (messagesContainer.value) messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight; });
+
+// ── Appointment suggestion (feature 0017) ─────────────────────────────────────
+const { parseLatestIncoming } = useAppointmentParser();
+const appointmentSuggestion = ref<ParsedAppointment | null>(null);
+const suggestionDismissed = ref(false);
+let lastSuggestedPhrase: string | null = null;
+
+async function refreshAppointmentSuggestion() {
+  // Skip parser when nothing to parse — avoid useless calls during empty
+  // states (e.g. before a conversation is opened).
+  if (!props.messages?.length) {
+    appointmentSuggestion.value = null;
+    lastSuggestedPhrase = null;
+    return;
+  }
+  const parsed = await parseLatestIncoming(props.messages);
+  appointmentSuggestion.value = parsed;
+  // A genuinely new suggestion → clear the dismissed flag so the user sees it.
+  if (parsed && parsed.matchedPhrase !== lastSuggestedPhrase) {
+    lastSuggestedPhrase = parsed.matchedPhrase;
+    suggestionDismissed.value = false;
+  }
+}
+
+watch(
+  () => props.messages.map((m) => m.id).join(','),
+  () => { refreshAppointmentSuggestion(); },
+);
+
+function formatSuggestionTime(iso: string): string {
+  const d = new Date(iso);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const mon = String(d.getMonth() + 1).padStart(2, '0');
+  return `${hh}:${mm}, ${day}/${mon}`;
+}
+
+function emitAppointmentSuggest() {
+  if (!appointmentSuggestion.value) return;
+  emit('appointment-suggest', appointmentSuggestion.value);
+  suggestionDismissed.value = true;
+}
 </script>
 
 <style scoped>
