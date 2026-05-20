@@ -138,6 +138,11 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── GET /api/v1/contacts/:id — detail with appointments + conversation count
+  // Feature 0019 Phase B: junction table is now the source of truth for tags.
+  // We return a rich `tags: [{id, name, color, emoji}]` shape AND a legacy
+  // `tagNames: string[]` so clients still expecting bare strings keep working
+  // through the deprecation cycle (removed in Phase C).
+  // Archived tags are filtered out by default.
   app.get('/api/v1/contacts/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const user = request.user!;
@@ -149,11 +154,37 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
           assignedUser: { select: { id: true, fullName: true, email: true } },
           appointments: { orderBy: { appointmentDate: 'desc' }, take: 10 },
           _count: { select: { conversations: true } },
+          contactTags: {
+            where: { tag: { archivedAt: null } },
+            include: {
+              tag: {
+                select: { id: true, name: true, color: true, emoji: true },
+              },
+            },
+            orderBy: { tag: { order: 'asc' } },
+          },
         },
       });
 
       if (!contact) return reply.status(404).send({ error: 'Contact not found' });
-      return contact;
+
+      const enrichedTags = contact.contactTags.map((ct) => ({
+        id: ct.tag.id,
+        name: ct.tag.name,
+        color: ct.tag.color,
+        emoji: ct.tag.emoji,
+      }));
+      // Strip the heavy join out of the wire payload and replace `tags` with
+      // the enriched shape. `tagNames` is the back-compat shim for any
+      // client still reading bare strings.
+      const { contactTags, tags: legacyTagsJson, ...rest } = contact;
+      void contactTags;
+      void legacyTagsJson;
+      return {
+        ...rest,
+        tags: enrichedTags,
+        tagNames: enrichedTags.map((t) => t.name),
+      };
     } catch (err) {
       logger.error('[contacts] Detail error:', err);
       return reply.status(500).send({ error: 'Failed to fetch contact' });
@@ -309,8 +340,34 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // Return the updated contact so the FE can refresh chips immediately.
-      const updated = await prisma.contact.findUnique({ where: { id } });
-      return updated;
+      // Phase B: include the enriched tag shape so chips render with color/emoji.
+      const updated = await prisma.contact.findUnique({
+        where: { id },
+        include: {
+          contactTags: {
+            where: { tag: { archivedAt: null } },
+            include: {
+              tag: { select: { id: true, name: true, color: true, emoji: true } },
+            },
+            orderBy: { tag: { order: 'asc' } },
+          },
+        },
+      });
+      if (!updated) return reply.status(404).send({ error: 'Contact not found' });
+      const enrichedTags = updated.contactTags.map((ct) => ({
+        id: ct.tag.id,
+        name: ct.tag.name,
+        color: ct.tag.color,
+        emoji: ct.tag.emoji,
+      }));
+      const { contactTags, tags: legacyTagsJson, ...rest } = updated;
+      void contactTags;
+      void legacyTagsJson;
+      return {
+        ...rest,
+        tags: enrichedTags,
+        tagNames: enrichedTags.map((t) => t.name),
+      };
     } catch (err) {
       logger.error('[contacts] Update tags error:', err);
       return reply.status(500).send({ error: 'Failed to update tags' });

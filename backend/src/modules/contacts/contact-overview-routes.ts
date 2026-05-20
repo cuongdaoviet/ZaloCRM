@@ -49,13 +49,30 @@ export async function contactOverviewRoutes(app: FastifyInstance): Promise<void>
         mergedFrom = lookupContact.id;
       }
 
+      // Feature 0019 Phase B: read tags from the junction with full color/emoji.
+      // Archived tags are filtered out by default so the chip list matches what
+      // the user actually has live.
       const contact = await prisma.contact.findFirst({
         where: { id: targetId, orgId: user.orgId },
         include: {
           assignedUser: { select: { id: true, fullName: true } },
+          contactTags: {
+            where: { tag: { archivedAt: null } },
+            include: {
+              tag: { select: { id: true, name: true, color: true, emoji: true } },
+            },
+            orderBy: { tag: { order: 'asc' } },
+          },
         },
       });
       if (!contact) return reply.status(404).send({ error: 'Không tồn tại' });
+
+      const enrichedTags = contact.contactTags.map((ct) => ({
+        id: ct.tag.id,
+        name: ct.tag.name,
+        color: ct.tag.color,
+        emoji: ct.tag.emoji,
+      }));
 
       // Pick the most-recently-active conversation for primaryConversation
       const primaryConv = await prisma.conversation.findFirst({
@@ -166,7 +183,10 @@ export async function contactOverviewRoutes(app: FastifyInstance): Promise<void>
           avatarUrl: contact.avatarUrl,
           source: contact.source,
           status: contact.status,
-          tags: contact.tags,
+          // Phase B: rich tag objects with color/emoji. `tagNames` is the
+          // back-compat shim for clients still expecting string[].
+          tags: enrichedTags,
+          tagNames: enrichedTags.map((t) => t.name),
           nextAppointment: contact.nextAppointment,
           assignedUser: contact.assignedUser,
           createdAt: contact.createdAt,

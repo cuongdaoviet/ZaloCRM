@@ -425,4 +425,92 @@ describe('Customer 360 overview', () => {
     expect(activities[0].details).toEqual({ from: owner.id, to: member.id });
     await app.close();
   });
+
+  // ── Feature 0019 Phase B: read-path switch on overview ────────────────────
+  it('Phase B: tags returned as enriched [{id,name,color,emoji}] from junction', async () => {
+    const { org, owner, contact } = await seedFullScenario('Tags');
+    const tagHot = await prisma.crmTag.create({
+      data: {
+        orgId: org.id,
+        name: 'Hot',
+        normalizedName: 'hot',
+        color: '#FF5722',
+        emoji: '🔥',
+      },
+    });
+    const tagVip = await prisma.crmTag.create({
+      data: {
+        orgId: org.id,
+        name: 'VIP',
+        normalizedName: 'vip',
+        color: '#FFD700',
+        emoji: '⭐',
+      },
+    });
+    await prisma.contactTag.createMany({
+      data: [
+        { contactId: contact.id, tagId: tagHot.id },
+        { contactId: contact.id, tagId: tagVip.id },
+      ],
+    });
+
+    const app = await buildApp({ id: owner.id, orgId: org.id, role: 'owner' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/contacts/${contact.id}/overview`,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.payload);
+
+    expect(Array.isArray(body.contact.tags)).toBe(true);
+    expect(body.contact.tags).toHaveLength(2);
+    const byName = new Map<string, any>(body.contact.tags.map((t: any) => [t.name, t]));
+    expect(byName.get('Hot')).toMatchObject({
+      id: tagHot.id,
+      color: '#FF5722',
+      emoji: '🔥',
+    });
+    expect(byName.get('VIP')).toMatchObject({
+      id: tagVip.id,
+      color: '#FFD700',
+      emoji: '⭐',
+    });
+    // tagNames shim covers legacy callers.
+    expect((body.contact.tagNames as string[]).sort()).toEqual(['Hot', 'VIP']);
+    await app.close();
+  });
+
+  it('Phase B: archived tags are excluded from the overview tag list', async () => {
+    const { org, owner, contact } = await seedFullScenario('Archived');
+    const liveTag = await prisma.crmTag.create({
+      data: { orgId: org.id, name: 'Active', normalizedName: 'active' },
+    });
+    const archivedTag = await prisma.crmTag.create({
+      data: {
+        orgId: org.id,
+        name: 'Stale',
+        normalizedName: 'stale',
+        archivedAt: new Date('2026-01-01'),
+        isActive: false,
+      },
+    });
+    await prisma.contactTag.createMany({
+      data: [
+        { contactId: contact.id, tagId: liveTag.id },
+        { contactId: contact.id, tagId: archivedTag.id },
+      ],
+    });
+
+    const app = await buildApp({ id: owner.id, orgId: org.id, role: 'owner' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/contacts/${contact.id}/overview`,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.payload);
+    const names = body.contact.tags.map((t: any) => t.name);
+    expect(names).toEqual(['Active']);
+    expect(body.contact.tagNames).toEqual(['Active']);
+    await app.close();
+  });
 });

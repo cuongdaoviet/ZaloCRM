@@ -1041,3 +1041,59 @@ rows. Returns counters for what changed.
   observing the dual-write).
 - **Push CRM-only tags back to Zalo** — out of Phase 1 scope entirely.
   Sync is one-way (Zalo → CRM).
+
+## Feature 0019 — CRM tags (Phase B: backfill + read-path switch)
+
+Phase B promotes the `ContactTag` junction to **source of truth** for tag
+reads on contact-shaped endpoints. Writers keep dual-writing the legacy
+`contact.tags` Json column so campaigns and KPI dashboards continue to
+work; that column is removed in Phase C.
+
+### One-shot backfill — `prisma/scripts/0019-backfill-tags.ts`
+
+Idempotent migration that converts existing `contact.tags` strings into
+relational rows. Run via:
+
+```bash
+npm run db:preflight-tags                                  # dry audit
+npm run db:backfill-tags -- --dry-run                      # rollback at end
+npm run db:backfill-tags                                   # apply
+npm run db:backfill-tags -- --org-id=<uuid>                # single org
+```
+
+Per-org transaction. Case-folded (`"VIP" / "vip" / "Vip"` collapse).
+Existing `CrmTag` rows whose `normalizedName` matches a legacy string are
+adopted — no duplicate rows, original color / group preserved. Defensive
+parsing: `null` / whitespace / non-string entries are skipped with
+structured warnings; entries > 50 chars are truncated and warned.
+
+Reports land at `/tmp/0019-preflight-report.json` and
+`/tmp/0019-backfill-report.json`.
+
+### Updated response shape: contact tag fields
+
+The endpoints below now return tags as an enriched array of objects AND a
+`tagNames: string[]` shim. `tagNames` is **deprecated** and will be
+removed in Phase C — clients should migrate to the rich shape.
+
+Affected endpoints:
+
+- `GET /api/v1/contacts/:id` — adds `contactTags` join, response gains
+  `tags: [{id, name, color, emoji}]` + `tagNames: string[]`.
+- `PUT /api/v1/contacts/:id/tags` — response shape now matches `GET /:id`
+  (was previously the raw contact row).
+- `GET /api/v1/contacts/:id/overview` — `contact.tags` is enriched;
+  `contact.tagNames` is the shim.
+
+Archived tags are filtered out of these responses by default.
+
+**Not migrated in Phase B** (still read from `contact.tags` Json):
+
+- `GET /api/v1/campaigns/.../preview` filter resolver — campaigns still
+  save names in `filter.tags`. Migration to `filter.tagIds` is tracked in
+  Phase C.
+- `GET /api/v1/contacts` list endpoint — already filtered through the
+  junction in Phase A (no change here).
+- Duplicate detection list — surfaces raw `contact.tags` so the merge
+  service can do array math; reading from the junction would not change
+  observable behavior in Phase B.

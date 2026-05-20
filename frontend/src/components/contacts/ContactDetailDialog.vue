@@ -190,17 +190,22 @@ function emptyForm(): FormState {
 }
 
 /**
- * Resolve a `contact.tags` array (legacy = names) into tag IDs using the cache.
- * Names that don't yet exist in the cache are skipped silently — they'll be
- * created via the legacy {tags} body path on save if needed.
+ * Resolve a `contact.tags` array into tag IDs. Phase B servers return rich
+ * `{id, name, color, emoji}` objects so we can read the id directly; older
+ * payloads still arrive as `string[]` and we look up the cache by name.
+ * Unknown names are skipped silently — they'll be created via the legacy
+ * `{tags}` body path on save.
  */
-function namesToIds(names: string[] | null | undefined): string[] {
-  if (!Array.isArray(names)) return [];
+function namesToIds(tags: unknown[] | null | undefined): string[] {
+  if (!Array.isArray(tags)) return [];
   const out: string[] = [];
-  for (const n of names) {
-    if (typeof n !== 'string') continue;
-    const tag = resolveByName(n);
-    if (tag) out.push(tag.id);
+  for (const t of tags) {
+    if (typeof t === 'string') {
+      const cached = resolveByName(t);
+      if (cached) out.push(cached.id);
+    } else if (t && typeof t === 'object' && typeof (t as { id?: unknown }).id === 'string') {
+      out.push((t as { id: string }).id);
+    }
   }
   return out;
 }

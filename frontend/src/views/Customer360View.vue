@@ -29,17 +29,17 @@
               <span v-if="overview.contact.email" class="ml-4"><v-icon size="14">mdi-email</v-icon> {{ overview.contact.email }}</span>
               <span v-if="overview.contact.source" class="ml-4"><v-icon size="14">mdi-source-branch</v-icon> {{ overview.contact.source }}</span>
             </div>
-            <div v-if="(overview.contact.tags || []).length" class="mt-2">
+            <div v-if="enrichedTags.length" class="mt-2">
               <span
-                v-for="t in overview.contact.tags"
-                :key="t"
+                v-for="t in enrichedTags"
+                :key="t.id || t.name"
                 class="mr-1 mb-1 d-inline-block tag-clickable"
                 @click="navigateToTag(t)"
               >
                 <TagChip
-                  :name="t"
-                  :color="resolveColor(t)"
-                  :emoji="resolveEmoji(t)"
+                  :name="t.name"
+                  :color="t.color"
+                  :emoji="t.emoji"
                 />
               </span>
             </div>
@@ -233,7 +233,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   useCustomerOverview,
@@ -244,28 +244,58 @@ import {
 import TagChip from '@/components/tags/TagChip.vue';
 import { useCrmTags } from '@/composables/use-crm-tags';
 
+interface EnrichedTag {
+  id: string | null;
+  name: string;
+  color: string;
+  emoji: string | null;
+}
+
 const route = useRoute();
 const router = useRouter();
 const { overview, loading, error, fetchOverview } = useCustomerOverview();
 
-// Feature 0019: enrich chips with color/emoji from the CRM tag cache.
+// Feature 0019 Phase B: the overview endpoint now returns enriched tag
+// objects `{ id, name, color, emoji }` AND a `tagNames: string[]` shim.
+// Resolve from the rich shape first, fall back to the name-based cache
+// lookup for old payloads still in flight.
 const { loadTags, resolveByName } = useCrmTags();
 loadTags();
 
-function resolveColor(name: string): string {
-  return resolveByName(name)?.color ?? '#9E9E9E';
-}
-function resolveEmoji(name: string): string | null {
-  return resolveByName(name)?.emoji ?? null;
-}
+const enrichedTags = computed<EnrichedTag[]>(() => {
+  const c = overview.value?.contact;
+  if (!c) return [];
+  const rawTags = (c as { tags?: unknown }).tags;
+  if (Array.isArray(rawTags)) {
+    return rawTags.map((t) => {
+      if (typeof t === 'string') {
+        const cached = resolveByName(t);
+        return {
+          id: cached?.id ?? null,
+          name: t,
+          color: cached?.color ?? '#9E9E9E',
+          emoji: cached?.emoji ?? null,
+        };
+      }
+      // Already an enriched object from Phase B.
+      return {
+        id: t.id ?? null,
+        name: t.name,
+        color: t.color ?? '#9E9E9E',
+        emoji: t.emoji ?? null,
+      };
+    });
+  }
+  return [];
+});
 
-function navigateToTag(name: string) {
-  const tag = resolveByName(name);
-  if (tag) {
+function navigateToTag(tag: EnrichedTag) {
+  if (tag.id) {
     router.push({ path: '/contacts', query: { tagIds: tag.id } });
   } else {
-    // Fall back to name-based query for tags not yet in cache (Phase A).
-    router.push({ path: '/contacts', query: { tags: name } });
+    // Legacy fallback for any chip that came through as a string with no
+    // matching CrmTag in cache — preserves the pre-Phase-B click target.
+    router.push({ path: '/contacts', query: { tags: tag.name } });
   }
 }
 

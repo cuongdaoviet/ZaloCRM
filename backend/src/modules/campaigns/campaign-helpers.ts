@@ -146,6 +146,9 @@ export function buildContactWhere(
   if (filter.tags && filter.tags.length > 0) {
     // tags is a JSONB array; Prisma's `array_contains` matches when ANY of the
     // requested tags is present in the row's tags array.
+    // TODO(0019 Phase C): migrate to `filter.tagIds` reading from `contactTags`
+    // junction. Campaigns still save names in `filter.tags` via
+    // CampaignCreateDialog — keep the JSON path until that dialog migrates.
     where.tags = { array_contains: filter.tags };
   }
   return where;
