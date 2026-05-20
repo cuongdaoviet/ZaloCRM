@@ -73,6 +73,7 @@ model User {
   keywordRuleAssigns KeywordRule[]       @relation("KeywordRuleAssign")
   conversationNotes  ConversationNote[]  @relation("ConversationNotes")
   preferences        UserPreference[]
+  createdFriendshipAttempts FriendshipAttempt[] @relation("CreatedFriendshipAttempts")
 
   @@map("users")
 }
@@ -99,6 +100,8 @@ model ZaloAccount {
   autoReplyRule AutoReplyRule?
   campaigns     Campaign[]
   pinnedConversations PinnedConversation[]
+  friendshipAttempts FriendshipAttempt[]
+  friends       Friend[]
 
   @@map("zalo_accounts")
 }
@@ -152,6 +155,8 @@ model Contact {
   campaignTargets CampaignTarget[]
   mergedInto      Contact?         @relation("ContactMerges", fields: [mergedIntoId], references: [id])
   mergedChildren  Contact[]        @relation("ContactMerges")
+  attempts        FriendshipAttempt[]
+  friends         Friend[]
 
   @@index([orgId, mergedIntoId])
   @@map("contacts")
@@ -562,4 +567,64 @@ model DuplicateGroup {
   @@unique([orgId, contactIdsHash])
   @@index([orgId, status, detectedAt(sort: Desc)])
   @@map("duplicate_groups")
+}
+
+// ─── Feature 0020 — Friendship lifecycle ─────────────────────────────────────
+// Sale dùng zca-js để tra Zalo UID từ phone rồi gửi lời mời kết bạn. Vòng đời
+// queued → looking_up → sent → accepted | declined | timeout | error |
+// cancelled là `FriendshipAttempt`. Khi accepted, một `Friend` row được tạo
+// (unique theo `(zaloAccountId, zaloUid)`) làm bằng chứng quan hệ đã kết nối.
+// Worker xử lý batch mỗi 30s, listener bắt sự kiện `friend_event` từ zca-js.
+// Mỗi cặp (contactId, zaloAccountId) có tối đa MỘT attempt active tại một
+// thời điểm — xem BR-0005 trong SPEC.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FriendshipAttempt {
+  id              String    @id @default(uuid())
+  orgId           String    @map("org_id")
+  contactId       String    @map("contact_id")
+  zaloAccountId   String    @map("zalo_account_id")
+  createdByUserId String?   @map("created_by_user_id")
+  state           String    @default("queued") // queued|looking_up|sent|accepted|declined|timeout|error|cancelled
+  zaloUidFound    String?   @map("zalo_uid_found")
+  requestMsg      String?   @map("request_msg")
+  resolvedMsg     String?   @map("resolved_msg")
+  errorCode       String?   @map("error_code")
+  errorDetail     String?   @map("error_detail")
+  queuedAt        DateTime  @default(now()) @map("queued_at")
+  lookedUpAt      DateTime? @map("looked_up_at")
+  sentAt          DateTime? @map("sent_at")
+  decidedAt       DateTime? @map("decided_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  contact     Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  zaloAccount ZaloAccount @relation(fields: [zaloAccountId], references: [id], onDelete: Cascade)
+  createdBy   User?       @relation("CreatedFriendshipAttempts", fields: [createdByUserId], references: [id])
+  friend      Friend?
+
+  @@index([orgId, state])
+  @@index([zaloAccountId, state])
+  @@index([contactId, zaloAccountId, state])
+  @@map("friendship_attempts")
+}
+
+model Friend {
+  id            String   @id @default(uuid())
+  orgId         String   @map("org_id")
+  zaloAccountId String   @map("zalo_account_id")
+  zaloUid       String   @map("zalo_uid")
+  contactId     String?  @map("contact_id")
+  attemptId     String?  @unique @map("attempt_id")
+  displayName   String?  @map("display_name")
+  avatarUrl     String?  @map("avatar_url")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  zaloAccount ZaloAccount        @relation(fields: [zaloAccountId], references: [id], onDelete: Cascade)
+  contact     Contact?           @relation(fields: [contactId], references: [id])
+  attempt     FriendshipAttempt? @relation(fields: [attemptId], references: [id])
+
+  @@unique([zaloAccountId, zaloUid])
+  @@index([orgId, createdAt(sort: Desc)])
+  @@map("friends")
 }

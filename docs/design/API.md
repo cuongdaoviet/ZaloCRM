@@ -559,6 +559,96 @@ List duplicate groups for the caller's org, newest first.
 | `page` | integer | no | Default 1. |
 | `limit` | integer | no | Default 50, max 200. |
 
+---
+
+## Feature 0020 — Friendship lifecycle
+
+Tracks the Sale → Lead → Friend flow on Zalo. A `FriendshipAttempt` is the
+state machine row (`queued → looking_up → sent → accepted | declined |
+timeout | error | cancelled`); a `Friend` is the durable relation once
+accepted. A node-cron worker picks queued rows every 30 seconds, calls
+`findUser` and `sendFriendRequest` through zca-js (respecting the same
+`zaloRateLimiter` quota as send-message), and a socket listener flips
+attempts to `accepted` / `declined` when Zalo pushes the event.
+
+All endpoints are JWT-protected and org-scoped. Members see only their own
+attempts; owners and admins see the whole org (BR-0003).
+
+### POST `/api/v1/contacts/:id/friendship`
+
+Enqueue a single attempt.
+
+**Auth:** JWT + at least one of (owner/admin role, owns the Zalo account,
+or `ZaloAccountAccess.permission ∈ {chat, admin}` for the target account).
+
+**Request body:**
+
+```json
+{ "zaloAccountId": "uuid", "message": "Chào {{firstName}}" }
+```
+
+- `zaloAccountId` (string, required).
+- `message` (string, optional, ≤ 200 chars). Supports `{{contactName}}` and
+  `{{firstName}}`.
+
+**Response 201 —** the new `FriendshipAttempt` row, `state = "queued"`.
+
+**Errors:**
+
+- `400 contact_missing_phone` — Contact has no `phone`.
+- `400 invalid_message` — message exceeds 200 chars or wrong type.
+- `403 forbidden` — caller lacks BR-0001 permission.
+- `404 contact_not_found` / `zalo_account_not_found` — cross-org or missing row.
+- `409 attempt_already_active` — there's already an active attempt for this
+  `(contactId, zaloAccountId)` pair.
+
+### POST `/api/v1/friendship-attempts/bulk`
+
+Bulk enqueue with partial success. Skips contacts that are missing phone or
+already have an active attempt — the response itemizes both buckets.
+
+**Request body:**
+
+```json
+{
+  "zaloAccountId": "uuid",
+  "contactIds": ["uuid", "uuid", "..."],
+  "message": "Hi"
+}
+```
+
+- `contactIds` (≥ 1, ≤ 500 unique values).
+
+**Response 201:**
+
+```json
+{
+  "queued": [{ "contactId": "uuid", "attemptId": "uuid" }],
+  "skipped": [
+    { "contactId": "uuid", "reason": "contact_missing_phone" },
+    { "contactId": "uuid", "reason": "attempt_already_active:sent" }
+  ],
+  "totalQueued": 1,
+  "totalSkipped": 2
+}
+```
+
+`reason` values include `contact_not_found`, `contact_missing_phone`,
+`attempt_already_active:<state>`, `insert_failed`.
+
+**Errors:** `400`, `403` (same as single enqueue, applied to the whole batch).
+
+### GET `/api/v1/friendship-attempts`
+
+List with filters + pagination.
+
+**Query params:**
+
+- `state` — CSV of states (e.g. `state=sent,looking_up`).
+- `zaloAccountId`, `contactId` — exact match.
+- `from`, `to` — ISO dates, filter on `queuedAt`.
+- `page`, `limit` — defaults 1 and 20; `limit` capped at 100.
+
 **Response 200:**
 
 ```json
@@ -727,3 +817,60 @@ Mark the group as a false positive so the next scan does not re-create it.
   contact has been merged, the response is the **primary's** overview with
   `mergedInto = primary.id` and `mergedFrom = original.id` so the FE can
   redirect the URL.
+
+---
+
+  "attempts": [
+    {
+      "id": "uuid",
+      "state": "sent",
+      "zaloUidFound": "9999",
+      "contact": { "id": "uuid", "fullName": "KH", "phone": "...", "avatarUrl": null },
+      "zaloAccount": { "id": "uuid", "displayName": "Sale Hương" },
+      "createdBy": { "id": "uuid", "fullName": "..." },
+      "queuedAt": "2026-05-20T10:00:00Z",
+      "sentAt": "2026-05-20T10:00:32Z"
+    }
+  ],
+  "total": 23,
+  "page": 1,
+  "limit": 20,
+  "totalPages": 2
+}
+```
+
+### GET `/api/v1/friendship-attempts/:id`
+
+Same shape as the list element. `404` for cross-org access or when a member
+tries to view someone else's attempt.
+
+### POST `/api/v1/friendship-attempts/:id/cancel`
+
+**Permission:** creator OR owner/admin (BR-0002).
+
+Only valid when the attempt is in `queued` or `looking_up` — once we hit
+`sent` the invite has left the server and Zalo provides no recall mechanism
+(BR-0008).
+
+**Response 200:** updated attempt with `state = "cancelled"`.
+
+**Errors:**
+
+- `403 forbidden` — caller is not the creator and not owner/admin.
+- `404 not_found` — cross-org or missing.
+- `409 cannot_cancel` — attempt is not in a cancellable state.
+
+### Activity events
+
+Every transition emits an `ActivityLog` row via `logActivityAsync`:
+
+| Action | Trigger | userId |
+|---|---|---|
+| `friendship.queued` | enqueue / bulk enqueue | caller |
+| `friendship.lookup_failed` | findUser said no Zalo | null (system) |
+| `friendship.sent` | sendFriendRequest succeeded | null |
+| `friendship.accepted` | listener ADD or already-friends shortcut | null |
+| `friendship.declined` | listener REJECT_REQUEST | null |
+| `friendship.timeout` | sweep > FRIENDSHIP_TIMEOUT_DAYS | null |
+| `friendship.cancelled` | manual cancel | caller |
+| `friendship.error` | worker failed | null |

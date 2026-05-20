@@ -90,6 +90,16 @@
               auto-grow
             />
           </v-col>
+
+          <!-- Feature 0020: friendship lifecycle, only on existing contacts -->
+          <v-col v-if="!isNew && props.contact?.id" cols="12">
+            <v-divider class="mb-3" />
+            <div class="text-subtitle-2 mb-2">Kết bạn Zalo</div>
+            <FriendshipBadge
+              :contact-id="props.contact.id"
+              :not-on-zalo="notOnZaloMeta"
+            />
+          </v-col>
         </v-row>
       </v-card-text>
 
@@ -117,6 +127,7 @@
 import { ref, watch, computed } from 'vue';
 import type { Contact } from '@/composables/use-contacts';
 import { SOURCE_OPTIONS, STATUS_OPTIONS, useContacts } from '@/composables/use-contacts';
+import FriendshipBadge from '@/components/contacts/FriendshipBadge.vue';
 
 const props = defineProps<{
   modelValue: boolean;
@@ -137,6 +148,15 @@ const show = computed({
 });
 
 const isNew = computed(() => !props.contact?.id);
+
+// Feature 0020: surface Contact.metadata.notOnZalo to the friendship badge.
+// metadata isn't on the Contact interface yet so we read defensively.
+const notOnZaloMeta = computed<{ checkedAt: string; by: string } | null>(() => {
+  const meta = (props.contact as unknown as { metadata?: Record<string, unknown> } | null)?.metadata;
+  const v = meta?.notOnZalo as { checkedAt?: string; by?: string } | undefined;
+  if (v?.checkedAt && v?.by) return { checkedAt: v.checkedAt, by: v.by };
+  return null;
+});
 
 interface FormState {
   fullName: string;
