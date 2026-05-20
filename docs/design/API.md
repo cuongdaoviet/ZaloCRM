@@ -1230,3 +1230,91 @@ Archived tags are filtered out of these responses by default.
   corresponding scripts under `prisma/scripts/0019-*-tags.ts` — these were
   one-shot Phase B migrations and no longer apply.
 - `tagNames: string[]` field on every response that previously carried it.
+
+---
+
+## Feature 0022 — Conversation filters
+
+Adds chip-row filters to `ConversationList` (chưa đọc / chưa trả lời /
+thời gian / tag) plus an aggregate counts endpoint for badge numbers.
+Wire-format param names match ZaloCRM-3.0 `FilterRail` so a future
+sidebar swap doesn't change the API contract. See
+[features/0022-conversation-filters/SPEC.md](../features/0022-conversation-filters/SPEC.md).
+
+### GET `/api/v1/conversations` — added query params
+
+| Param | Type | Description |
+|---|---|---|
+| `unread` | `'1' \| 'true' \| ''` | Only conversations with `unreadCount > 0` |
+| `unreplied` | `'1' \| 'true' \| ''` | Only conversations with `isReplied = false` |
+| `dateFrom` | `YYYY-MM-DD` | `lastMessageAt >= start of dateFrom` (UTC) |
+| `dateTo` | `YYYY-MM-DD` | `lastMessageAt <= end of dateTo` (UTC) |
+| `from` | `YYYY-MM-DD` | Legacy alias for `dateFrom` (3.0 back-compat) |
+| `to` | `YYYY-MM-DD` | Legacy alias for `dateTo` |
+| `tags` | `CSV of CrmTag UUIDs` | OR-match against `ContactTag` junction |
+
+Filters compose AND with each other and with the existing `search` and
+`accountId` params. Empty / missing → no-op (back-compat preserved).
+
+Invalid dates return **400** with a Vietnamese error message:
+
+```json
+{ "error": "dateFrom không hợp lệ" }
+```
+
+#### Deviation from ZaloCRM-3.0
+
+3.0's `tags` param carried tag **names** because it pre-dated the
+ContactTag junction (Phase 0019-C). After the junction migration we
+switched to tag **UUIDs**. The `TagPicker` component already returns
+`string[]` of IDs so the FE wire payload is unchanged from FE
+implementation perspective.
+
+3.0 filters that are NOT yet implemented (deferred to future features):
+`tab`, `accountIds[]` (multi), `statusId`, `assignedUserId`, `hasZalo`,
+`scoreMin/scoreMax`, `relationshipKindAny`, `threadType`, `groupInbox`.
+
+### GET `/api/v1/conversations/counts`
+
+Aggregate badge counts for the chip row.
+
+**Query params:**
+
+| Param | Type | Description |
+|---|---|---|
+| `accountId` | `UUID` | (Optional) scope to one Zalo account |
+
+**Response 200:**
+
+```json
+{ "unread": 12, "unreplied": 7, "total": 84 }
+```
+
+ACL: same as `/conversations` — members see counts only across Zalo
+accounts they have access to; cross-org returns `{ 0, 0, 0 }`.
+
+Counts are unfiltered by `dateFrom/dateTo/tags` — they're whole-inbox
+totals so the chip badge represents "X tin chưa đọc tổng cộng",
+independent of the currently-active filter chips.
+
+#### Route ordering note
+
+`/api/v1/conversations/counts` is registered **before**
+`/api/v1/conversations/:id` to prevent Fastify from interpreting
+`counts` as a `:id` param (same pattern as Feature 0015's
+`/conversations/pinned`).
+
+### User preference key
+
+`chat.conversation_filters` is added to the user-preferences allowed-key
+list. The frontend persists the filter chip state via `usePref(...)`:
+
+```ts
+interface ConversationFilters {
+  unread: boolean;
+  unreplied: boolean;
+  dateFrom: string;
+  dateTo: string;
+  tagIds: string[];
+}
+```

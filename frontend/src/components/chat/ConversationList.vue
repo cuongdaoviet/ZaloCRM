@@ -35,6 +35,17 @@
       />
     </div>
 
+    <!-- Filter chip row (feature 0022) -->
+    <ConversationFilters
+      v-if="filters"
+      :filters="filters"
+      :has-active-filters="hasActiveFilters ?? false"
+      :unread-total="unreadTotal ?? 0"
+      :unreplied-total="unrepliedTotal ?? 0"
+      @update:state="$emit('update:filters', $event)"
+      @reset="$emit('reset-filters')"
+    />
+
     <!-- List -->
     <v-list class="flex-grow-1 overflow-y-auto pa-0" density="compact">
       <v-progress-linear v-if="loading" indeterminate color="primary" />
@@ -160,7 +171,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import type { Conversation } from '@/composables/use-chat';
+import type { Conversation, ConversationFilters as ConvFilters } from '@/composables/use-chat';
+import ConversationFilters from '@/components/chat/ConversationFilters.vue';
 import { api } from '@/api/index';
 
 const props = defineProps<{
@@ -176,6 +188,11 @@ const props = defineProps<{
    * Falls back to the parent's list order when omitted.
    */
   pinnedOrder?: string[];
+  // Feature 0022 — conversation filters (chip row above the list)
+  filters?: ConvFilters;
+  hasActiveFilters?: boolean;
+  unreadTotal?: number;
+  unrepliedTotal?: number;
 }>();
 
 defineEmits<{
@@ -184,6 +201,12 @@ defineEmits<{
   'filter-account': [accountId: string | null];
   'new-chat': [];
   'toggle-pin': [id: string];
+  // Feature 0022 — emit the full ConversationFilters object so the parent
+  // composable can sync its reactive ref. Parent also receives the
+  // 3.0-shape wire payload via the `update:filters` emit from
+  // ConversationFilters.vue if it needs it.
+  'update:filters': [filters: ConvFilters];
+  'reset-filters': [];
 }>();
 
 // Split the incoming list into pinned vs. unpinned. When `pinnedOrder` is

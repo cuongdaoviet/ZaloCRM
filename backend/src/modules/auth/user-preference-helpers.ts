@@ -15,6 +15,8 @@ export const ALLOWED_KEYS: readonly string[] = [
   'ui.sidebar_collapsed',
   'ui.sound_on',
   'chat.default_account_filter',
+  // Feature 0022 — Conversation filters (chip-row state persisted per user)
+  'chat.conversation_filters',
   'contacts.last_filter',
   'dashboard.refresh_interval',
 ];
