@@ -28,6 +28,7 @@ import { startAppointmentReminder } from './modules/contacts/appointment-reminde
 import { dashboardRoutes } from './modules/dashboard/dashboard-routes.js';
 import { reportRoutes } from './modules/dashboard/report-routes.js';
 import { userRoutes } from './modules/auth/user-routes.js';
+import { userPreferenceRoutes } from './modules/auth/user-preference-routes.js';
 import { teamRoutes } from './modules/auth/team-routes.js';
 import { orgRoutes } from './modules/auth/org-routes.js';
 import { zaloAccessRoutes } from './modules/zalo/zalo-access-routes.js';
@@ -136,6 +137,7 @@ async function bootstrap() {
   await app.register(dashboardRoutes);
   await app.register(reportRoutes);
   await app.register(userRoutes);
+  await app.register(userPreferenceRoutes);
   await app.register(teamRoutes);
   await app.register(orgRoutes);
   await app.register(zaloAccessRoutes);

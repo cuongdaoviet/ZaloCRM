@@ -345,3 +345,87 @@ the same component.
 segment. Fastify's radix-tree router matches static segments before
 parameters, so the literal `pinned` route always wins — even though both are
 3-segment GETs.
+
+---
+
+## Feature 0016 — User preferences
+
+Per-user JSON KV store for UI preferences (theme, density, sidebar state,
+last-used filters, ...) so they follow the user across devices. All routes
+authenticate via JWT and scope to `req.user.id` — there is no `orgId`
+filter because preferences are strictly user-scoped.
+
+**Validation:** by **key allowlist**, not by value shape. Values can be any
+JSON (string/number/object/array/null). The allowlist lives in
+`backend/src/modules/auth/user-preference-helpers.ts`:
+
+```
+ui.theme
+ui.density
+ui.sidebar_collapsed
+ui.sound_on
+chat.default_account_filter
+contacts.last_filter
+dashboard.refresh_interval
+```
+
+A key must (a) match `/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/` AND (b) appear
+in the allowlist. A well-formed key that isn't in the allowlist is rejected
+on PUT to prevent typos becoming silent data. Value size is capped at
+**4096 chars** after `JSON.stringify`.
+
+### GET `/api/v1/me/preferences`
+
+Returns the full map for the caller.
+
+**Response 200:**
+```json
+{
+  "ui.theme": "dark",
+  "contacts.last_filter": { "status": ["new"], "pageSize": 50 }
+}
+```
+
+Returns `{}` if the user has no preferences yet.
+
+### GET `/api/v1/me/preferences/:key`
+
+Single value lookup.
+
+**Response 200:**
+```json
+{ "key": "ui.theme", "value": "dark" }
+```
+
+**Errors:**
+- `404 Không tồn tại` — key not set, or key is malformed / not in allowlist.
+  (We intentionally surface both as 404 so the allowlist shape isn't leaked
+  to read traffic.)
+
+### PUT `/api/v1/me/preferences/:key`
+
+Upsert. Body must be `{ "value": <any JSON> }`.
+
+**Response 200:**
+```json
+{
+  "id": "uuid",
+  "userId": "uuid",
+  "key": "ui.theme",
+  "value": "dark",
+  "updatedAt": "2026-05-20T10:00:00.000Z"
+}
+```
+
+`value: null` is a valid payload and stores SQL `null`. Omitting `value` from
+the body is **not** the same as `value: null` — it returns 400.
+
+**Errors:**
+- `400 Key không hợp lệ` — malformed key or not in allowlist.
+- `400 Body phải có field value` — body missing `value`.
+- `400 Giá trị vượt quá 4096 ký tự` — `JSON.stringify(value).length > 4096`.
+
+### DELETE `/api/v1/me/preferences/:key`
+
+Idempotent — always returns `204` whether or not the row existed. Invalid
+keys also return `204` (they can't be in the table anyway).
