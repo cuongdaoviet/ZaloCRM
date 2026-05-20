@@ -81,20 +81,30 @@ styled chip. Add `@` trigger in the composer that opens a member picker.
 ## P1 — feature parity with 3.0
 
 ### 0027 — MinIO/S3 file storage + attachment mirror
-**Status:** ❌
+**Status:** ✅ shipped
 **Source:** v3.0 release notes — "MinIO/S3 storage", "Chat attachments
 mirror lên MinIO".
-**Why now:** Today, attachments forward to Zalo and we store only Zalo's
-CDN URL. If Zalo's CDN expires the URL or rotates the file, our CRM loses
-the file too. No local copy = no auditability + no historical search.
-**Rough scope:**
-- Add MinIO service to `docker-compose.yml`
-- Backend: install `@minio/client`, async-upload-after-forward in the
-  attachments POST route + the message-handler for inbound files
-- Switch `Message.attachments[].url` to point at our MinIO URL
-- Signed-URL endpoint for FE to render
-- Retention policy decision (forever? N days?)
-- ~400 LOC + ops decision on storage class + lifecycle
+**SPEC:** [`docs/features/0027-minio-attachment-mirror/SPEC.md`](docs/features/0027-minio-attachment-mirror/SPEC.md)
+**What shipped:**
+- `minio` + `minio-init` services in `docker-compose.yml` and
+  `docker-compose.dev.yml`, plus a `minio_data` volume.
+- `backend/src/shared/storage/minio-client.ts` — official `minio` SDK
+  wrapper. `uploadBuffer()` + `ensureBucket()`. Called from `app.ts`
+  startup (process exits if MinIO unreachable — EC-0001).
+- Outbound: `POST /api/v1/conversations/:id/attachments` uploads to
+  MinIO BEFORE forwarding to Zalo. `Message.content` now stores the
+  MinIO URL; `attachments[]` gets a `url` field. New error codes:
+  `storage_failed` / `zalo_send_failed`.
+- Inbound: `message-handler.ts` mirrors `image/video/file` Zalo CDN
+  URLs to MinIO (best-effort). The JSON envelope's `href`/`hdUrl`/
+  `thumb` fields are rewritten in place; mirror failure keeps the
+  original URL (BR-0008).
+- 6 env vars: `S3_ENDPOINT`, `S3_PUBLIC_URL`, `S3_BUCKET`,
+  `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION`.
+- API.md documents the URL pattern + new error codes.
+**Out of scope (deferred to phase 2):** retention policy, orphan sweep
+job, signed URLs, per-org buckets, dedup, FE storage usage dashboard,
+backfill of pre-0027 Zalo CDN URLs.
 
 ### 0028 — Sticker support (proxy `getStickersDetail` + picker)
 **Status:** ❌

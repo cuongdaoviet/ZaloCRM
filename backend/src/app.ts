@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { Prisma } from '@prisma/client';
 import { config } from './config/index.js';
 import { prisma } from './shared/database/prisma-client.js';
+import { ensureBucket } from './shared/storage/minio-client.js';
 import { logger } from './shared/utils/logger.js';
 import { authRoutes } from './modules/auth/auth-routes.js';
 import { zaloRoutes } from './modules/zalo/zalo-routes.js';
@@ -205,6 +206,18 @@ async function bootstrap() {
   });
 
   // ── Start ─────────────────────────────────────────────────────────────────
+
+  // Feature 0027 — verify MinIO is reachable and the attachments bucket
+  // exists BEFORE we accept any requests. If MinIO is down, crashing on
+  // startup is preferable to silently accepting uploads that vanish.
+  // EC-0001: this is the gate that turns "uploads vanish" into "deploy fails".
+  try {
+    await ensureBucket();
+    logger.info(`[minio] bucket ${config.s3Bucket} ready`);
+  } catch (err) {
+    logger.error('[minio] ensureBucket failed — refusing to start:', err);
+    process.exit(1);
+  }
 
   try {
     await app.listen({ port: config.port, host: config.host });

@@ -15,6 +15,11 @@ const zaloPoolMock = {
   getInstance: vi.fn(() => ({ api: { sendMessage: sendMessageMock } })),
 };
 
+// Feature 0027 — mock the MinIO wrapper. Tests assert what we passed to
+// the wrapper, not what MinIO did on the wire. We never spin up a real
+// MinIO container — the SPEC explicitly forbids it (test strategy §).
+const uploadBufferMock = vi.fn();
+
 vi.mock('../../src/shared/database/prisma-client.js', async () => ({
   get prisma() {
     return prisma;
@@ -22,6 +27,11 @@ vi.mock('../../src/shared/database/prisma-client.js', async () => ({
 }));
 vi.mock('../../src/shared/utils/logger.js', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+vi.mock('../../src/shared/storage/minio-client.js', () => ({
+  uploadBuffer: uploadBufferMock,
+  ensureBucket: vi.fn().mockResolvedValue(undefined),
+  minioClient: {},
 }));
 vi.mock('../../src/modules/zalo/zalo-pool.js', () => ({ zaloPool: zaloPoolMock }));
 vi.mock('../../src/modules/zalo/zalo-rate-limiter.js', () => ({
@@ -128,6 +138,13 @@ describe('POST .../conversations/:id/attachments (integration)', () => {
       attachment: [{ msgId: 999_888 }],
     });
     zaloPoolMock.getInstance.mockReturnValue({ api: { sendMessage: sendMessageMock } });
+    // Default: MinIO upload succeeds and returns a predictable mirror URL.
+    uploadBufferMock.mockImplementation(async (_buf: Buffer, mime: string, name?: string) => ({
+      key: `2026-05-21/uuid-test${name?.endsWith('.png') ? '.png' : ''}`,
+      url: `http://minio.test/zalocrm-attachments/2026-05-21/uuid-test-${name || 'file'}`,
+      size: _buf.length,
+      mimeType: mime,
+    }));
   });
 
   it('AC-0001: uploads an image, persists Message with contentType=image and forwards to zca-js', async () => {
@@ -144,12 +161,21 @@ describe('POST .../conversations/:id/attachments (integration)', () => {
     expect(res.statusCode).toBe(201);
     const msg = JSON.parse(res.payload);
     expect(msg.contentType).toBe('image');
-    expect(msg.content).toBe('photo.png');
+    // Feature 0027 — `content` is now the MinIO URL (AC-0003), not the
+    // original filename. Frontend's getImageUrl() handles the http:// form.
+    expect(msg.content).toMatch(/^http:\/\/minio\.test\/zalocrm-attachments\//);
+    expect(msg.content).toContain('photo.png');
     expect(msg.zaloMsgId).toBe('999888');
     expect(msg.attachments).toEqual([
-      expect.objectContaining({ filename: 'photo.png', mimeType: 'image/png' }),
+      expect.objectContaining({
+        filename: 'photo.png',
+        mimeType: 'image/png',
+        url: expect.stringContaining('photo.png'),
+      }),
     ]);
 
+    // MinIO upload happened BEFORE zca-js (BR-0004 step 3 before step 4).
+    expect(uploadBufferMock).toHaveBeenCalledOnce();
     expect(sendMessageMock).toHaveBeenCalledOnce();
     const [payload, threadId, threadType] = sendMessageMock.mock.calls[0];
     expect(payload.attachments).toHaveLength(1);
@@ -160,6 +186,7 @@ describe('POST .../conversations/:id/attachments (integration)', () => {
 
     const persisted = await prisma.message.findFirst();
     expect(persisted?.contentType).toBe('image');
+    expect(persisted?.content).toMatch(/^http:\/\/minio\.test\//);
     await app.close();
   });
 
@@ -289,7 +316,7 @@ describe('POST .../conversations/:id/attachments (integration)', () => {
     await app.close();
   });
 
-  it('returns 502 when zca-js sendMessage throws', async () => {
+  it('returns 502 zalo_send_failed when zca-js sendMessage throws AFTER MinIO succeeds (BR-0006)', async () => {
     const { org, user, conv } = await seed();
     sendMessageMock.mockRejectedValueOnce(new Error('zalo timeout'));
     const app = await buildApp({ id: user.id, orgId: org.id, role: 'admin' });
@@ -301,7 +328,10 @@ describe('POST .../conversations/:id/attachments (integration)', () => {
       ...body,
     });
     expect(res.statusCode).toBe(502);
-    expect(await prisma.message.count()).toBe(0); // no message persisted on Zalo failure
+    expect(JSON.parse(res.payload).code).toBe('zalo_send_failed');
+    // MinIO upload happened (orphan acceptable, EC-0006), Zalo never persisted.
+    expect(uploadBufferMock).toHaveBeenCalledOnce();
+    expect(await prisma.message.count()).toBe(0);
     await app.close();
   });
 

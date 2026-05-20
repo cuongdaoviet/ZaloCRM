@@ -9,7 +9,11 @@ import { requireZaloAccess } from '../zalo/zalo-access-middleware.js';
 import { zaloPool } from '../zalo/zalo-pool.js';
 import { zaloRateLimiter } from '../zalo/zalo-rate-limiter.js';
 import { logger } from '../../shared/utils/logger.js';
+import { uploadBuffer } from '../../shared/storage/minio-client.js';
 import { randomUUID } from 'node:crypto';
+import { writeFile, unlink, mkdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type { Server } from 'socket.io';
 
 type QueryParams = Record<string, string>;
@@ -425,66 +429,113 @@ export async function chatRoutes(app: FastifyInstance) {
       // zca-js AttachmentSource requires filename to have an extension like `${string}.${string}`
       const safeFilename = filename.includes('.') ? filename : `${filename}.bin`;
 
-      // Build the AttachmentSource buffer payload for zca-js
-      const attachmentSource = {
-        data: buffer,
-        filename: safeFilename as `${string}.${string}`,
-        metadata: { totalSize: buffer.length },
-      };
+      // Feature 0027 — MinIO/S3 attachment mirror.
+      // Flow (BR-0004):
+      //   1. Save buffer to a tmp file (some zca-js code paths need a path).
+      //   2. Upload buffer to MinIO BEFORE calling Zalo. On failure → 502
+      //      `storage_failed` with no Zalo call (BR-0005) — we never want
+      //      a Message row that points at a Zalo CDN URL we couldn't mirror.
+      //   3. Call zca-js with the buffer (existing AttachmentSource shape).
+      //   4. Persist Message with the **MinIO URL** as `content` so the FE
+      //      can render it via `getImageUrl()` / `<img src>` without needing
+      //      Zalo's auth. The `attachments` JSON field keeps the metadata.
+      //   5. Delete the tmp file in `finally` (swallow errors).
+      // If zca-js fails AFTER MinIO succeeds (BR-0006) → 502
+      // `zalo_send_failed`, MinIO object is left as an orphan (acceptable
+      // per EC-0006, documented in RUNBOOK).
+      const tmpDir = path.join(tmpdir(), 'zalocrm-upload', randomUUID());
+      const tmpPath = path.join(tmpDir, safeFilename);
+      let mirrorUrl: string | null = null;
 
       try {
-        zaloRateLimiter.recordSend(conversation.zaloAccountId);
-        const threadId = conversation.externalThreadId || '';
-        const threadType = conversation.threadType === 'group' ? 1 : 0;
-        const sendResult = await instance.api.sendMessage(
-          { msg: '', attachments: [attachmentSource] },
-          threadId,
-          threadType,
-        );
+        await mkdir(tmpDir, { recursive: true });
+        await writeFile(tmpPath, buffer);
 
-        const zaloMsgId =
-          sendResult?.attachment?.[0]?.msgId !== undefined
-            ? String(sendResult.attachment[0].msgId)
-            : null;
+        try {
+          const mirror = await uploadBuffer(buffer, mimeType, safeFilename);
+          mirrorUrl = mirror.url;
+        } catch (err) {
+          logger.error('[chat] MinIO upload failed:', err);
+          return reply
+            .status(502)
+            .send({ error: 'Không lưu được file lên bộ nhớ', code: 'storage_failed' });
+        }
 
-        const message = await prisma.message.create({
-          data: {
-            id: randomUUID(),
+        try {
+          zaloRateLimiter.recordSend(conversation.zaloAccountId);
+          const threadId = conversation.externalThreadId || '';
+          const threadType = conversation.threadType === 'group' ? 1 : 0;
+
+          // Pass the buffer (existing contract — keeps the single-file API
+          // shape). We've already mirrored to MinIO so the local copy is
+          // safe; if Zalo throws here we orphan the MinIO object.
+          const attachmentSource = {
+            data: buffer,
+            filename: safeFilename as `${string}.${string}`,
+            metadata: { totalSize: buffer.length },
+          };
+          const sendResult = await instance.api.sendMessage(
+            { msg: '', attachments: [attachmentSource] },
+            threadId,
+            threadType,
+          );
+
+          const zaloMsgId =
+            sendResult?.attachment?.[0]?.msgId !== undefined
+              ? String(sendResult.attachment[0].msgId)
+              : null;
+
+          const message = await prisma.message.create({
+            data: {
+              id: randomUUID(),
+              conversationId: id,
+              zaloMsgId,
+              senderType: 'self',
+              senderUid: conversation.zaloAccount.zaloUid || '',
+              senderName: 'Staff',
+              // AC-0003: `content` is the MinIO URL. FE's getImageUrl()
+              // handles `content.startsWith('http')` directly.
+              content: mirrorUrl,
+              contentType: isImage ? 'image' : 'file',
+              attachments: [
+                {
+                  filename: safeFilename,
+                  size: buffer.length,
+                  mimeType,
+                  url: mirrorUrl,
+                },
+              ],
+              sentAt: new Date(),
+              repliedByUserId: user.id,
+            },
+          });
+
+          await prisma.conversation.update({
+            where: { id },
+            data: { lastMessageAt: new Date(), isReplied: true, unreadCount: 0 },
+          });
+
+          const io = (app as any).io as Server | undefined;
+          io?.emit('chat:message', {
+            accountId: conversation.zaloAccountId,
+            message,
             conversationId: id,
-            zaloMsgId,
-            senderType: 'self',
-            senderUid: conversation.zaloAccount.zaloUid || '',
-            senderName: 'Staff',
-            content: safeFilename,
-            contentType: isImage ? 'image' : 'file',
-            attachments: [
-              {
-                filename: safeFilename,
-                size: buffer.length,
-                mimeType,
-              },
-            ],
-            sentAt: new Date(),
-            repliedByUserId: user.id,
-          },
-        });
+          });
 
-        await prisma.conversation.update({
-          where: { id },
-          data: { lastMessageAt: new Date(), isReplied: true, unreadCount: 0 },
-        });
-
-        const io = (app as any).io as Server | undefined;
-        io?.emit('chat:message', {
-          accountId: conversation.zaloAccountId,
-          message,
-          conversationId: id,
-        });
-
-        return reply.status(201).send(message);
-      } catch (err) {
-        logger.error('[chat] Send attachment error:', err);
-        return reply.status(502).send({ error: 'Gửi file qua Zalo thất bại' });
+          return reply.status(201).send(message);
+        } catch (err) {
+          // BR-0006 — MinIO succeeded but Zalo failed. We orphan the MinIO
+          // object on purpose; replaying with the same buffer would create
+          // a second object. RUNBOOK documents the manual sweep.
+          logger.error('[chat] Send attachment to Zalo failed:', err);
+          return reply
+            .status(502)
+            .send({ error: 'Gửi file qua Zalo thất bại', code: 'zalo_send_failed' });
+        }
+      } finally {
+        // Best-effort cleanup — disk-full or permission issues here are
+        // already a problem we'd see from the writeFile above.
+        await unlink(tmpPath).catch(() => {});
       }
     },
   );
