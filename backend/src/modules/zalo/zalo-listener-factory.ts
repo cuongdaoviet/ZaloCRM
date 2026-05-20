@@ -12,6 +12,7 @@ import {
 } from './zalo-message-helpers.js';
 import { maybeAutoReply } from '../auto-reply/auto-reply-service.js';
 import { processInboundForKeywordRules } from '../keyword-rules/keyword-rule-service.js';
+import { handleFriendEvent } from '../friendship/friendship-listener.js';
 
 export type { UserInfoCacheEntry };
 
@@ -117,6 +118,13 @@ export function attachZaloListener(ctx: ListenerContext): void {
       await handleMessageUndo(accountId, String(msgId));
       io?.emit('chat:deleted', { accountId, msgId: String(msgId) });
     }
+  });
+
+  // Feature 0020: friend-request lifecycle events (accepted / declined / etc).
+  // Errors swallowed inside handleFriendEvent so they can never break the
+  // listener — see friendship-listener.ts.
+  listener.on('friend_event', (event: any) => {
+    void handleFriendEvent(accountId, event);
   });
 
   listener.on('closed', (code: number, reason: string) => {

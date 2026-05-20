@@ -49,6 +49,8 @@ import { autoReplyRoutes } from './modules/auto-reply/auto-reply-routes.js';
 import { kpiRoutes } from './modules/kpi/kpi-routes.js';
 import { campaignRoutes } from './modules/campaigns/campaign-routes.js';
 import { startCampaignWorker } from './modules/campaigns/campaign-worker.js';
+import { friendshipRoutes } from './modules/friendship/friendship-routes.js';
+import { startFriendshipWorker } from './modules/friendship/friendship-worker.js';
 import { keywordRuleRoutes } from './modules/keyword-rules/keyword-rule-routes.js';
 import { conversationNoteRoutes } from './modules/conversation-notes/conversation-note-routes.js';
 import { pinConversationRoutes } from './modules/conversations/pin-routes.js';
@@ -156,6 +158,7 @@ async function bootstrap() {
   await app.register(autoReplyRoutes);
   await app.register(kpiRoutes);
   await app.register(campaignRoutes);
+  await app.register(friendshipRoutes);
   await app.register(keywordRuleRoutes);
   await app.register(conversationNoteRoutes);
   await app.register(pinConversationRoutes);
@@ -204,6 +207,7 @@ async function bootstrap() {
     startAppointmentReminder(io);
     startZaloHealthCheck();
     startCampaignWorker(io);
+    startFriendshipWorker(io);
   } catch (err) {
     logger.error('Failed to start server:', err);
     process.exit(1);
