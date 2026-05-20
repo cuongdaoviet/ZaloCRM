@@ -100,24 +100,30 @@ const rail = ref(false);
 // Feature 0016: theme is persisted server-side as `ui.theme` (per-user).
 // localStorage is kept as a fast-path read on initial load so we don't flash
 // the wrong theme while the API call is in flight; we write through to both.
+// Stored value is the user-facing key 'light' | 'dark'; it maps to the
+// Vuetify theme names 'smax-light' | 'legacy-dark' when applied.
 const { usePref } = useUserPreferences();
 const initialTheme: 'dark' | 'light' =
-  localStorage.getItem('theme') === 'light' ? 'light' : 'dark';
+  localStorage.getItem('theme') === 'dark' ? 'dark' : 'light';
 const themePref = usePref<'dark' | 'light'>('ui.theme', initialTheme);
 const isDark = computed(() => themePref.value === 'dark');
+
+function applyTheme(val: 'dark' | 'light') {
+  theme.global.name.value = val === 'dark' ? 'legacy-dark' : 'smax-light';
+}
 
 // Apply theme + mirror to localStorage on every change.
 watch(
   themePref,
   (val) => {
-    theme.global.name.value = val === 'dark' ? 'dark' : 'light';
+    applyTheme(val);
     localStorage.setItem('theme', val);
   },
   { immediate: false },
 );
 
 onMounted(() => {
-  theme.global.name.value = isDark.value ? 'dark' : 'light';
+  applyTheme(themePref.value);
 });
 
 interface MenuItem {
