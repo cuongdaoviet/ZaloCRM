@@ -453,7 +453,12 @@ describe('GET /api/v1/conversations/counts (feature 0022)', () => {
     const res = await app.inject({ method: 'GET', url: '/api/v1/conversations/counts' });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.payload);
-    expect(body).toEqual({ unread: 2, unreplied: 2, total: 4 });
+    // Feature 0023 added `mainUnread` / `otherUnread` to the counts shape.
+    // All four seeded conversations default to tab='main', so mainUnread = unread.
+    expect(body).toEqual({
+      unread: 2, unreplied: 2, total: 4,
+      mainUnread: 2, otherUnread: 0,
+    });
     await app.close();
   });
 
@@ -496,7 +501,10 @@ describe('GET /api/v1/conversations/counts (feature 0022)', () => {
       url: `/api/v1/conversations/counts?accountId=${account2.id}`,
     });
     expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.payload)).toEqual({ unread: 1, unreplied: 1, total: 1 });
+    expect(JSON.parse(res.payload)).toEqual({
+      unread: 1, unreplied: 1, total: 1,
+      mainUnread: 1, otherUnread: 0,
+    });
     await app.close();
   });
 
@@ -516,7 +524,10 @@ describe('GET /api/v1/conversations/counts (feature 0022)', () => {
 
     const res = await app.inject({ method: 'GET', url: '/api/v1/conversations/counts' });
     expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.payload)).toEqual({ unread: 0, unreplied: 0, total: 0 });
+    expect(JSON.parse(res.payload)).toEqual({
+      unread: 0, unreplied: 0, total: 0,
+      mainUnread: 0, otherUnread: 0,
+    });
     await app.close();
   });
 
@@ -536,7 +547,10 @@ describe('GET /api/v1/conversations/counts (feature 0022)', () => {
 
     const res = await app.inject({ method: 'GET', url: '/api/v1/conversations/counts' });
     expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.payload)).toEqual({ unread: 0, unreplied: 0, total: 0 });
+    expect(JSON.parse(res.payload)).toEqual({
+      unread: 0, unreplied: 0, total: 0,
+      mainUnread: 0, otherUnread: 0,
+    });
     await app.close();
   });
 });

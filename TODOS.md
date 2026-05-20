@@ -38,14 +38,21 @@ key `chat.conversation_filters`. Wire-format params match ZaloCRM-3.0
 contract. Tag filter uses UUIDs via the `ContactTag` junction (deviation
 from 3.0 which used names — required post-Phase 0019-C).
 
-### 0023 — Hide / archive conversations (Tab "Khác")
-**Status:** ❌
-**Source:** v2.1 release notes — "Tab 'Khác': ẩn hội thoại không quan
-trọng, chuyển tab bằng chuột phải".
-**Why now:** Inbox bloat is a real productivity problem. Right-click to
-move into a Hidden tab keeps the main list focused.
-**Rough scope:** Add `Conversation.archivedAt` field, add tab UI, context-
-menu in ConversationList. ~250 LOC + small schema migration.
+### 0023 — Hide / archive conversations (Tab "Khác") ✅ SHIPPED
+**Status:** ✅ Shipped — see [SPEC](docs/features/0023-hide-archive-conversations/SPEC.md).
+**Scope shipped:** `Conversation.tab` string field (`'main' | 'other'`,
+default `'main'`) + new index `[orgId, tab, lastMessageAt(Desc)]`. New
+endpoint `PATCH /api/v1/conversations/:id/tab` (Vietnamese errors, `chat`
+ACL). `GET /conversations` accepts `tab` query param (composes AND with
+the Feature 0022 chip filters; omitted → both tabs returned for back-
+compat). `GET /conversations/counts` extended with `mainUnread` +
+`otherUnread`. Auto-promote (BR-0005): inbound contact messages on a
+`tab='other'` conversation flip it back to `'main'` and emit Socket.IO
+`chat:tab`. Frontend: tab bar (Chính / Khác) at the top of
+ConversationList with per-tab unread badges; right-click row →
+"Ẩn vào tab Khác" / "Đưa về tab Chính" with optimistic UI + rollback.
+Field name matches ZaloCRM-3.0 — `archivedAt` was rejected in favor of
+toggle-state `tab`.
 
 ### 0024 — Dual name display (CRM Name + Zalo Name)
 **Status:** ❌

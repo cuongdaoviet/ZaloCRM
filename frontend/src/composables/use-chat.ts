@@ -28,8 +28,13 @@ export interface Conversation {
   lastMessageAt: string | null;
   unreadCount: number;
   isReplied: boolean;
+  // Feature 0023 — 'main' (Chính) or 'other' (Khác). Default 'main'.
+  tab?: 'main' | 'other';
   messages?: ConversationMessage[];
 }
+
+// Feature 0023 — Conversation tab union type used across the chat UI.
+export type ConversationTab = 'main' | 'other';
 
 export interface Message {
   id: string;
@@ -57,6 +62,9 @@ export interface ConversationFilters {
   dateFrom: string;
   dateTo: string;
   tagIds: string[];
+  // Feature 0023 — active inbox tab. Persists alongside the other filter
+  // chips via the same `chat.conversation_filters` user-pref key.
+  tab: ConversationTab;
 }
 
 const DEFAULT_FILTERS: ConversationFilters = {
@@ -65,6 +73,8 @@ const DEFAULT_FILTERS: ConversationFilters = {
   dateFrom: '',
   dateTo: '',
   tagIds: [],
+  // Default to the main inbox so existing users land where they expect.
+  tab: 'main',
 };
 
 export function useChat() {
@@ -89,6 +99,9 @@ export function useChat() {
   );
   const unreadTotal = ref(0);
   const unrepliedTotal = ref(0);
+  // Feature 0023 — per-tab unread counts power the badge on each tab header.
+  const mainUnread = ref(0);
+  const otherUnread = ref(0);
 
   /** True if any filter chip is active. Used to show "Xóa bộ lọc" link. */
   const hasActiveFilters = computed<boolean>(
@@ -101,7 +114,11 @@ export function useChat() {
   );
 
   function resetFilters(): void {
-    filters.value = { ...DEFAULT_FILTERS };
+    // Feature 0023 — `tab` is its own UI surface (a tab bar, not a chip),
+    // so "Xóa bộ lọc" must preserve the currently-active tab. Only the chip
+    // filters (unread / unreplied / dates / tags) are cleared here.
+    const keepTab = filters.value.tab;
+    filters.value = { ...DEFAULT_FILTERS, tab: keepTab };
   }
 
   /**
@@ -116,6 +133,11 @@ export function useChat() {
     if (filters.value.dateFrom) out.dateFrom = filters.value.dateFrom;
     if (filters.value.dateTo) out.dateTo = filters.value.dateTo;
     if (filters.value.tagIds.length > 0) out.tags = filters.value.tagIds.join(',');
+    // Feature 0023 — always scope list fetches to the active tab so the row
+    // count + sort match what's rendered. Persisted filter from before 0023
+    // shipped won't have `tab`, so default to 'main' (preserves the Chính
+    // inbox as the landing view).
+    out.tab = filters.value.tab ?? 'main';
     return out;
   }
 
@@ -131,6 +153,9 @@ export function useChat() {
       const res = await api.get('/conversations/counts', { params });
       unreadTotal.value = res.data?.unread ?? 0;
       unrepliedTotal.value = res.data?.unreplied ?? 0;
+      // Feature 0023 — per-tab badges. Fall back to 0 if the BE is older.
+      mainUnread.value = res.data?.mainUnread ?? 0;
+      otherUnread.value = res.data?.otherUnread ?? 0;
     } catch (err) {
       console.warn('[use-chat] failed to fetch conversation counts:', err);
     }
@@ -270,6 +295,31 @@ export function useChat() {
       }
     });
 
+    // Feature 0023 — auto-promote / manual moves emit `chat:tab`. Move the
+    // local row between tabs (or drop it if it now belongs in the other tab)
+    // and refresh the badge counts so the tab header stays in sync.
+    socket.on(
+      'chat:tab',
+      (data: { conversationId: string; tab: ConversationTab; reason?: string }) => {
+        const conv = conversations.value.find((c) => c.id === data.conversationId);
+        if (conv) {
+          conv.tab = data.tab;
+          // If we're viewing a tab and the conv moved out of it, drop the row
+          // so the user doesn't see a stale entry in the wrong tab.
+          if (filters.value.tab && conv.tab !== filters.value.tab) {
+            conversations.value = conversations.value.filter(
+              (c) => c.id !== data.conversationId,
+            );
+          }
+        } else if (filters.value.tab === data.tab) {
+          // Row wasn't in our local list (we were viewing the other tab)
+          // but it now belongs in our tab → refetch to pick it up.
+          void fetchConversations();
+        }
+        void fetchConversationCounts();
+      },
+    );
+
     // Feature 0021 — reactions live-merge from BE listener / other clients
     reactions.subscribe(socket);
   }
@@ -284,6 +334,52 @@ export function useChat() {
    * dialog. Pushes the conversation to the head of the list and auto-selects
    * it. Returns the conversation id so callers can react.
    */
+  /**
+   * Feature 0023 — move a conversation between the "Chính" (main) and
+   * "Khác" (other) tabs. Optimistic UI: the row's tab flips locally first
+   * then we call the API. On failure, rollback and surface the row again.
+   *
+   * If the moved conversation was the currently-selected one and it leaves
+   * the active tab, the caller (ChatView) decides whether to clear the
+   * selection (per EC-0001).
+   */
+  async function setConversationTab(
+    convId: string,
+    tab: ConversationTab,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const conv = conversations.value.find((c) => c.id === convId);
+    const previousTab: ConversationTab | undefined = conv?.tab;
+    // Optimistic local flip
+    if (conv) conv.tab = tab;
+    // If we're viewing a tab and the row no longer belongs, hide it now.
+    let removedConv: Conversation | null = null;
+    let removedIdx = -1;
+    if (conv && filters.value.tab && conv.tab !== filters.value.tab) {
+      removedIdx = conversations.value.findIndex((c) => c.id === convId);
+      if (removedIdx >= 0) {
+        removedConv = conversations.value[removedIdx];
+        conversations.value.splice(removedIdx, 1);
+      }
+    }
+    try {
+      await api.patch(`/conversations/${convId}/tab`, { tab });
+      // Refresh badge counts to reflect the new distribution.
+      void fetchConversationCounts();
+      return { ok: true };
+    } catch (err: any) {
+      // Rollback the optimistic mutation so the row reappears with its
+      // original tab. Re-insert at the original index to preserve order.
+      if (conv) conv.tab = previousTab;
+      if (removedConv && removedIdx >= 0) {
+        conversations.value.splice(removedIdx, 0, removedConv);
+      }
+      const error =
+        err?.response?.data?.error || err?.message || 'Không thể đổi tab cuộc trò chuyện';
+      console.error('[use-chat] setConversationTab failed:', error);
+      return { ok: false, error };
+    }
+  }
+
   async function createConversation(accountId: string, contactId: string): Promise<string | null> {
     try {
       const res = await api.post('/conversations', { accountId, contactId });
@@ -335,6 +431,10 @@ export function useChat() {
     hasActiveFilters,
     unreadTotal,
     unrepliedTotal,
+    // Feature 0023 — per-tab unread badges and tab-mutator
+    mainUnread,
+    otherUnread,
+    setConversationTab,
     resetFilters,
     fetchConversationCounts,
     fetchConversations,

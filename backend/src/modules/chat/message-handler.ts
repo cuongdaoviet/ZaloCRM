@@ -42,6 +42,10 @@ export interface HandleMessageResult {
   conversationId: string;
   orgId: string;
   contactId: string | null;
+  // Feature 0023 — true when this inbound message flipped the conversation
+  // from tab='other' back to tab='main'. Caller (listener-factory) emits the
+  // `chat:tab` socket event so the FE can move the row between tabs.
+  tabPromoted: boolean;
 }
 
 export async function handleIncomingMessage(
@@ -86,6 +90,19 @@ export async function handleIncomingMessage(
 
     await updateConversationAfterMessage(conversation.id, sentAt, msg.isSelf);
 
+    // Feature 0023 — auto-promote: a contact-sent inbound message on a
+    // conversation currently in the "Khác" tab flips it back to the main
+    // inbox. Self-sent messages do NOT trigger this — the rep replying
+    // inside the Khác tab shouldn't yank the row back to Chính (BR-0005).
+    let tabPromoted = false;
+    if (!msg.isSelf && conversation.tab === 'other') {
+      await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { tab: 'main' },
+      });
+      tabPromoted = true;
+    }
+
     // Track first outbound contact date — set once when agent sends first message
     if (msg.isSelf && contactId) {
       prisma.contact.updateMany({
@@ -109,6 +126,7 @@ export async function handleIncomingMessage(
       conversationId: conversation.id,
       orgId: account.orgId,
       contactId,
+      tabPromoted,
     };
   } catch (err) {
     logger.error('[message-handler] handleIncomingMessage error:', err);
@@ -188,12 +206,14 @@ async function findOrCreateConversation(
 
   const existing = await prisma.conversation.findFirst({
     where: { zaloAccountId: msg.accountId, externalThreadId },
-    select: { id: true },
+    // `tab` is needed so the caller can decide whether to auto-promote
+    // an existing Khác-tab conversation back to Chính (Feature 0023).
+    select: { id: true, tab: true },
   });
 
   if (existing) return existing;
 
-  // Create with schema defaults (unreadCount=0, isReplied=true).
+  // Create with schema defaults (unreadCount=0, isReplied=true, tab='main').
   // updateConversationAfterMessage runs immediately after and applies the
   // correct delta for this specific message — keeping the math in one place.
   return prisma.conversation.create({
@@ -206,7 +226,7 @@ async function findOrCreateConversation(
       externalThreadId,
       lastMessageAt: new Date(msg.timestamp),
     },
-    select: { id: true },
+    select: { id: true, tab: true },
   });
 }
 

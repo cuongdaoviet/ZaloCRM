@@ -182,6 +182,11 @@ model Conversation {
   lastMessageAt    DateTime? @map("last_message_at")
   unreadCount      Int       @default(0) @map("unread_count")
   isReplied        Boolean   @default(true) @map("is_replied")
+  // Feature 0023 — Hide / archive into a separate tab.
+  // "main" = visible in the default Inbox tab.
+  // "other" = hidden inside the "Khác" tab.
+  // Existing rows default to "main"; matches ZaloCRM-3.0 wire format.
+  tab              String    @default("main") @map("tab")
   createdAt        DateTime  @default(now()) @map("created_at")
 
   org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
@@ -193,6 +198,9 @@ model Conversation {
   pin         PinnedConversation?
 
   @@unique([zaloAccountId, externalThreadId])
+  // Feature 0023 — speeds up `WHERE orgId+tab ORDER BY lastMessageAt DESC` queries
+  // used by the conversation list when filtering by tab.
+  @@index([orgId, tab, lastMessageAt(sort: Desc)])
   @@map("conversations")
 }
 

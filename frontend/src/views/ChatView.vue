@@ -12,6 +12,8 @@
         :has-active-filters="hasActiveFilters"
         :unread-total="unreadTotal"
         :unreplied-total="unrepliedTotal"
+        :main-unread="mainUnread"
+        :other-unread="otherUnread"
         v-model:search="searchQuery"
         @select="selectConversation"
         @filter-account="onFilterAccount"
@@ -19,6 +21,8 @@
         @toggle-pin="togglePin"
         @update:filters="filters = $event"
         @reset-filters="resetFilters"
+        @update:tab="onTabChange"
+        @set-conv-tab="onSetConvTab"
       />
       <!-- Resize handle -->
       <div class="resize-handle" @mousedown="startResize('left', $event)" />
@@ -86,6 +90,8 @@ const {
   selfUserId, selfFullName,
   // Feature 0022 — filter state, badge counts, helpers
   filters, hasActiveFilters, unreadTotal, unrepliedTotal,
+  // Feature 0023 — per-tab badges + tab mutator
+  mainUnread, otherUnread, setConversationTab,
   resetFilters, fetchConversationCounts,
   fetchConversations, selectConversation, sendMessage, sendAttachment, createConversation,
   initSocket, destroySocket, addOrToggleReaction,
@@ -117,6 +123,34 @@ async function onSendAttachment(file: File) {
 function onFilterAccount(id: string | null) {
   accountFilter.value = id;
   fetchConversations();
+}
+
+// Feature 0023 — switch between the Chính / Khác inbox tabs.
+function onTabChange(tab: 'main' | 'other') {
+  filters.value = { ...filters.value, tab };
+  // The filters watcher in use-chat refetches conversations; counts stay
+  // stable when only the tab toggles so no extra fetch is needed here.
+}
+
+// Feature 0023 — context-menu archive / restore on a single conversation.
+async function onSetConvTab(convId: string, tab: 'main' | 'other') {
+  // EC-0001 — if the row leaves the active tab and was selected, clear the
+  // selection so the user lands on the empty thread state.
+  const isSelected = selectedConvId.value === convId;
+  const isLeavingActiveTab = tab !== (filters.value.tab ?? 'main');
+  const result = await setConversationTab(convId, tab);
+  if (!result.ok) {
+    attachmentToast.value = { show: true, text: result.error, color: 'error' };
+    return;
+  }
+  if (isSelected && isLeavingActiveTab) {
+    selectedConvId.value = null;
+  }
+  attachmentToast.value = {
+    show: true,
+    text: tab === 'other' ? 'Đã ẩn vào tab Khác' : 'Đã đưa về tab Chính',
+    color: 'success',
+  };
 }
 
 const showContactPanel = ref(false);
