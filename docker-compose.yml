@@ -14,8 +14,19 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://${DB_USER:-crmuser}:${DB_PASSWORD}@db:5432/${DB_NAME:-zalocrm}
+      # Feature 0027 — MinIO/S3 attachment mirror. `S3_ENDPOINT` uses the
+      # internal docker DNS name so the backend reaches MinIO over the
+      # private bridge; `S3_PUBLIC_URL` is what we hand back to the FE.
+      - S3_ENDPOINT=${S3_ENDPOINT:-http://minio:9000}
+      - S3_PUBLIC_URL=${S3_PUBLIC_URL:-http://localhost:9000}
+      - S3_BUCKET=${S3_BUCKET:-zalocrm-attachments}
+      - S3_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - S3_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - S3_REGION=${S3_REGION:-us-east-1}
     depends_on:
       db:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     volumes:
       - file_storage:/var/lib/zalo-crm/files
@@ -47,6 +58,49 @@ services:
       -c effective_cache_size=256MB
       -c max_connections=50
 
+  # Feature 0027 — Object storage for chat attachments.
+  # Console exposed on 127.0.0.1:9001 only (admin UI). S3 API on :9000 is
+  # reachable from anywhere because the FE renders <img src> directly
+  # against it — bucket is configured as anonymous-read by minio-init.
+  minio:
+    image: minio/minio:latest
+    container_name: zalo-crm-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "127.0.0.1:9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Creates the bucket and sets anonymous-download policy. Idempotent —
+  # safe to re-run on every `docker compose up`.
+  minio-init:
+    image: minio/mc:latest
+    container_name: zalo-crm-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $${MINIO_ROOT_USER:-minioadmin} $${MINIO_ROOT_PASSWORD:-minioadmin};
+      mc mb --ignore-existing local/${S3_BUCKET:-zalocrm-attachments};
+      mc anonymous set download local/${S3_BUCKET:-zalocrm-attachments};
+      exit 0;
+      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-zalocrm-attachments}
+
   backup:
     image: prodrigestivill/postgres-backup-local
     container_name: zalo-crm-backup
@@ -68,3 +122,4 @@ services:
 volumes:
   pg_data:
   file_storage:
+  minio_data:

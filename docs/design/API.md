@@ -1457,3 +1457,81 @@ Same field name, same values, same wire format. The only extension is
 the auto-promote behavior — 3.0's reference implementation has the tab
 field + PATCH + filter param but no auto-promote on inbound. Documented
 in the feature SPEC's Deviations section.
+
+---
+
+## Feature 0027 — MinIO/S3 attachment mirror
+
+Attachments uploaded via `POST /api/v1/conversations/:id/attachments`
+are now mirrored to a MinIO bucket before being forwarded to Zalo. The
+endpoint's request shape, validation, and response status codes are
+**unchanged** — only the URL pattern stored in `Message.content` has
+moved from Zalo CDN to our bucket.
+
+### Response shape — `POST /api/v1/conversations/:id/attachments`
+
+The returned `Message` row is the same Prisma shape as `GET .../messages`.
+What changed is the value of `content`:
+
+| Field | Before (feature 0003) | After (feature 0027) |
+| --- | --- | --- |
+| `content` | Original filename, e.g. `"photo.png"`. | Public MinIO URL: `http(s)://<S3_PUBLIC_URL>/<S3_BUCKET>/YYYY-MM-DD/<uuid>.<ext>`. |
+| `attachments[0]` | `{ filename, size, mimeType }`. | `{ filename, size, mimeType, url }` — `url` is the same MinIO URL. |
+| `contentType` | `image` for image MIMEs, `file` for everything else. | Same. |
+
+The frontend's `getImageUrl()` helper (in `MessageThread.vue`) detects
+the new shape via `msg.content.startsWith('http')` and renders the URL
+directly inside an `<img>` tag — no parsing required. The legacy JSON-envelope
+shape (`{ href, thumb, ... }`) used by inbound messages continues to work.
+
+### URL pattern (BR-0001 / BR-0002)
+
+```
+http(s)://<S3_PUBLIC_URL>/<S3_BUCKET>/YYYY-MM-DD/<uuid><.ext>
+```
+
+- Date prefix is the UTC date the object was created. Helps with
+  manual bucket navigation (`mc ls`) and future lifecycle rules.
+- Bucket is configured with anonymous-read so `<img src>` and
+  `<video src>` tags work without auth headers.
+- File extension is derived from the original filename when present,
+  otherwise from MIME (`image/jpeg → .jpg`, etc.).
+
+### Error responses (new failure modes)
+
+| Status | `code` | When |
+| --- | --- | --- |
+| 502 | `storage_failed` | MinIO upload threw. Zalo was NOT called and no Message row was created — safe to retry. |
+| 502 | `zalo_send_failed` | MinIO upload succeeded but zca-js threw. The MinIO object is left as an orphan (acceptable per EC-0006). No Message row. |
+
+Both errors return `{ error: "<vietnamese message>", code: "<code>" }`.
+
+### Inbound mirror
+
+Inbound messages with `contentType in ['image', 'video', 'file']` and a
+parseable Zalo CDN URL inside `content` are mirrored asynchronously
+during `handleIncomingMessage`. The mirror is **best-effort** (BR-0008):
+
+- On success → the JSON envelope's `href`, `hdUrl`, and `thumb` fields
+  are rewritten to MinIO URLs (other fields preserved).
+- On failure → the message persists with the original Zalo URL and a
+  warn-level log line. No retry queue in Phase 1.
+
+### Configuration
+
+Backend reads six env vars (`backend/src/config/index.ts`):
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `S3_ENDPOINT` | `http://minio:9000` | Backend → MinIO (docker-internal). |
+| `S3_PUBLIC_URL` | `http://localhost:9000` | What browsers see in `<img src>`. |
+| `S3_BUCKET` | `zalocrm-attachments` | Bucket name. |
+| `S3_ACCESS_KEY` | `minioadmin` | MinIO access key. |
+| `S3_SECRET_KEY` | `minioadmin` | MinIO secret key. |
+| `S3_REGION` | `us-east-1` | Required by the SDK but unused by MinIO. |
+
+`docker-compose.yml` ships a `minio` service plus a one-shot
+`minio-init` container that creates the bucket and sets the
+anonymous-download policy. Backend calls `ensureBucket()` at startup
+and refuses to start if it fails — failing loud is better than
+silently accepting uploads that vanish (EC-0001).

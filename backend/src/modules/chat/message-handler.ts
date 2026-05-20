@@ -6,6 +6,7 @@ import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
 import { randomUUID } from 'node:crypto';
 import { emitWebhook } from '../api/webhook-service.js';
+import { mirrorAttachment } from '../../shared/storage/download-mirror.js';
 
 export interface IncomingMessage {
   accountId: string;
@@ -103,6 +104,31 @@ export async function handleIncomingMessage(
       tabPromoted = true;
     }
 
+    // Feature 0027 — inbound attachment mirror.
+    // For image/video/file messages we have an extractable Zalo CDN URL in
+    // the content envelope. Download it, re-upload to MinIO, and rewrite
+    // the URL fields inside the same JSON envelope (preserving Zalo's
+    // metadata like params/fileExt — see MessageThread.vue's getFileInfo).
+    // BR-0008: this is BEST-EFFORT. Any failure → keep the original Zalo
+    // URL, log a warn, return the message anyway. The message has already
+    // been persisted at this point so an exception here would orphan
+    // a successful insert — wrap broadly.
+    let finalContent = message.content;
+    if (['image', 'video', 'file'].includes(message.contentType) && message.content) {
+      try {
+        const mirrored = await tryMirrorInboundContent(message.content, message.contentType);
+        if (mirrored && mirrored !== message.content) {
+          const updated = await prisma.message.update({
+            where: { id: message.id },
+            data: { content: mirrored },
+          });
+          finalContent = updated.content;
+        }
+      } catch (err) {
+        logger.warn('[message-handler] inbound mirror failed:', err);
+      }
+    }
+
     // Track first outbound contact date — set once when agent sends first message
     if (msg.isSelf && contactId) {
       prisma.contact.updateMany({
@@ -122,7 +148,7 @@ export async function handleIncomingMessage(
     });
 
     return {
-      message,
+      message: { ...message, content: finalContent },
       conversationId: conversation.id,
       orgId: account.orgId,
       contactId,
@@ -245,6 +271,102 @@ async function updateConversationAfterMessage(
     updateData.isReplied = false;
   }
   await prisma.conversation.update({ where: { id: conversationId }, data: updateData });
+}
+
+/**
+ * Feature 0027 — Inbound mirror helper.
+ *
+ * Zalo pushes attachment messages as a JSON envelope serialized into
+ * `Message.content` (see zalo-message-helpers.ts → processZaloMessage).
+ * The envelope contains the Zalo CDN URL under one or more of:
+ * `href`, `hdUrl`, `thumb`. We download whichever URL is most useful,
+ * re-upload to MinIO, and rewrite those fields inside the same envelope
+ * so the FE still sees the rich shape it expects (params, title, etc.)
+ * with the URL now pointing at our bucket.
+ *
+ * For plain-string URLs (rare — `content` literally starts with `http`)
+ * we return a plain MinIO URL string.
+ *
+ * Returns the rewritten content string, or `null` when there's nothing
+ * to mirror (no URL extractable, mirror failed, etc.) — caller keeps the
+ * original content unchanged.
+ */
+async function tryMirrorInboundContent(
+  rawContent: string,
+  contentType: string,
+): Promise<string | null> {
+  // Plain URL form — e.g. content === 'https://zdn.vn/...'.
+  if (rawContent.startsWith('http')) {
+    const result = await mirrorAttachment({ url: rawContent });
+    return result ? result.url : null;
+  }
+
+  if (!rawContent.startsWith('{')) return null;
+
+  let envelope: Record<string, unknown>;
+  try {
+    envelope = JSON.parse(rawContent);
+  } catch {
+    return null;
+  }
+
+  // Prefer hdUrl (full-quality video/image) over href, thumb is the poster.
+  const sourceUrl =
+    pickUrl(envelope.hdUrl) || pickUrl(envelope.href) || pickUrl(envelope.thumb);
+  if (!sourceUrl) return null;
+
+  // Best filename hint we have for extension inference.
+  const filename =
+    (typeof envelope.title === 'string' && envelope.title) ||
+    extractFilenameFromParams(envelope.params) ||
+    undefined;
+
+  // MIME hint: only `image/video` known from contentType, file MIME lives
+  // inside params.fileExt — we'd need a full mapping, so let download-mirror
+  // fall back to the response Content-Type header.
+  const mimeHint =
+    contentType === 'image'
+      ? 'image/jpeg'
+      : contentType === 'video'
+        ? 'video/mp4'
+        : undefined;
+
+  const main = await mirrorAttachment({ url: sourceUrl, mimeType: mimeHint, filename });
+  if (!main) return null;
+
+  const next: Record<string, unknown> = { ...envelope };
+  if (typeof envelope.href === 'string') next.href = main.url;
+  if (typeof envelope.hdUrl === 'string') next.hdUrl = main.url;
+
+  // Mirror the thumbnail separately when it's a distinct URL — videos often
+  // have a poster image we want to retain locally too. Best-effort: if it
+  // fails, leave the Zalo thumb URL in place.
+  if (typeof envelope.thumb === 'string' && envelope.thumb && envelope.thumb !== sourceUrl) {
+    const thumb = await mirrorAttachment({ url: envelope.thumb, mimeType: 'image/jpeg' });
+    if (thumb) next.thumb = thumb.url;
+  } else if (typeof envelope.thumb === 'string' && envelope.thumb === sourceUrl) {
+    next.thumb = main.url;
+  }
+
+  return JSON.stringify(next);
+}
+
+function pickUrl(value: unknown): string | null {
+  return typeof value === 'string' && /^https?:\/\//.test(value) ? value : null;
+}
+
+function extractFilenameFromParams(params: unknown): string | null {
+  if (!params) return null;
+  try {
+    const parsed = typeof params === 'string' ? JSON.parse(params) : params;
+    if (parsed && typeof parsed === 'object' && 'fileName' in parsed) {
+      const name = (parsed as { fileName?: unknown }).fileName;
+      if (typeof name === 'string') return name;
+    }
+  } catch {
+    // Ignore — params is sometimes a free-form string.
+  }
+  return null;
 }
 
 // Soft-delete a message by its Zalo message ID

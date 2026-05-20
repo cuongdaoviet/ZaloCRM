@@ -26,6 +26,14 @@ vi.mock('../../src/modules/api/webhook-service.js', () => ({
   emitWebhook: vi.fn(),
 }));
 
+// Feature 0027 — mock the inbound mirror. By default the mirror does
+// nothing (returns null) so existing tests keep their original content.
+// Per-test we override this to assert mirror behaviour explicitly.
+const mirrorAttachmentMock = vi.fn();
+vi.mock('../../src/shared/storage/download-mirror.js', () => ({
+  mirrorAttachment: mirrorAttachmentMock,
+}));
+
 beforeAll(async () => {
   prisma = await setupDb();
 }, 90_000);
@@ -55,6 +63,10 @@ async function seedOrgAndAccount() {
 describe('handleIncomingMessage — integration (real Postgres)', () => {
   beforeEach(async () => {
     await resetDb(prisma);
+    // Default: mirror does nothing — keep the original Zalo URL so the
+    // existing dedupe/conversation tests are unaffected by feature 0027.
+    mirrorAttachmentMock.mockReset();
+    mirrorAttachmentMock.mockResolvedValue(null);
   });
 
   it('inserts a message exactly once for a unique zaloMsgId', async () => {
@@ -238,5 +250,165 @@ describe('handleIncomingMessage — integration (real Postgres)', () => {
     conv = await prisma.conversation.findFirst();
     expect(conv?.unreadCount).toBe(1);
     expect(conv?.isReplied).toBe(false);
+  });
+
+  // ── Feature 0027 — inbound attachment mirror ───────────────────────────
+  // AC-0007 / AC-0008. The mirror is best-effort: success swaps the Zalo
+  // URL inside the JSON envelope for a MinIO URL; failure keeps the
+  // original. Either way the message persists (BR-0008).
+
+  it('AC-0007: image inbound — mirror success swaps href to MinIO URL', async () => {
+    const { handleIncomingMessage } = await import('../../src/modules/chat/message-handler.js');
+    const { account } = await seedOrgAndAccount();
+
+    mirrorAttachmentMock.mockResolvedValueOnce({
+      key: '2026-05-21/abc.jpg',
+      url: 'http://minio.test/zalocrm-attachments/2026-05-21/abc.jpg',
+      size: 100,
+      mimeType: 'image/jpeg',
+    });
+
+    const result = await handleIncomingMessage({
+      accountId: account.id,
+      senderUid: 'uid-img',
+      senderName: 'Img',
+      content: JSON.stringify({
+        href: 'https://zdn.vn/orig.jpg',
+        thumb: 'https://zdn.vn/orig.jpg',
+        params: '{"fileExt":"jpg"}',
+        title: 'photo.jpg',
+      }),
+      contentType: 'image',
+      msgId: 'zalo-img-1',
+      timestamp: Date.now(),
+      isSelf: false,
+      threadId: 'uid-img',
+      threadType: 'user' as const,
+      attachments: [],
+    });
+
+    expect(result).not.toBeNull();
+    expect(mirrorAttachmentMock).toHaveBeenCalledOnce();
+    expect(mirrorAttachmentMock.mock.calls[0][0]).toMatchObject({
+      url: 'https://zdn.vn/orig.jpg',
+    });
+
+    const persisted = await prisma.message.findFirst({ where: { zaloMsgId: 'zalo-img-1' } });
+    const envelope = JSON.parse(persisted!.content!);
+    expect(envelope.href).toBe('http://minio.test/zalocrm-attachments/2026-05-21/abc.jpg');
+    // Other envelope fields preserved.
+    expect(envelope.params).toBe('{"fileExt":"jpg"}');
+    expect(envelope.title).toBe('photo.jpg');
+
+    // Returned message reflects the rewritten URL too — so the listener
+    // emits the MinIO-URL row over Socket.IO.
+    const returnedEnvelope = JSON.parse(result!.message.content!);
+    expect(returnedEnvelope.href).toBe(
+      'http://minio.test/zalocrm-attachments/2026-05-21/abc.jpg',
+    );
+  });
+
+  it('AC-0008: mirror failure keeps the original Zalo URL (best-effort)', async () => {
+    const { handleIncomingMessage } = await import('../../src/modules/chat/message-handler.js');
+    const { account } = await seedOrgAndAccount();
+
+    // Simulate download/upload failure.
+    mirrorAttachmentMock.mockResolvedValueOnce(null);
+
+    const original = JSON.stringify({
+      href: 'https://zdn.vn/orig.jpg',
+      thumb: 'https://zdn.vn/orig-thumb.jpg',
+    });
+
+    const result = await handleIncomingMessage({
+      accountId: account.id,
+      senderUid: 'uid-fail',
+      senderName: 'Fail',
+      content: original,
+      contentType: 'image',
+      msgId: 'zalo-img-fail',
+      timestamp: Date.now(),
+      isSelf: false,
+      threadId: 'uid-fail',
+      threadType: 'user' as const,
+      attachments: [],
+    });
+
+    expect(result).not.toBeNull();
+    expect(mirrorAttachmentMock).toHaveBeenCalled();
+
+    const persisted = await prisma.message.findFirst({ where: { zaloMsgId: 'zalo-img-fail' } });
+    // Message persists; content unchanged.
+    expect(persisted?.content).toBe(original);
+  });
+
+  it('text messages do not invoke the mirror at all', async () => {
+    const { handleIncomingMessage } = await import('../../src/modules/chat/message-handler.js');
+    const { account } = await seedOrgAndAccount();
+
+    await handleIncomingMessage({
+      accountId: account.id,
+      senderUid: 'uid-text',
+      senderName: 'Text',
+      content: 'just text',
+      contentType: 'text',
+      msgId: 'zalo-text',
+      timestamp: Date.now(),
+      isSelf: false,
+      threadId: 'uid-text',
+      threadType: 'user' as const,
+      attachments: [],
+    });
+
+    expect(mirrorAttachmentMock).not.toHaveBeenCalled();
+  });
+
+  it('video inbound — mirrors hdUrl and thumb separately, preserves params', async () => {
+    const { handleIncomingMessage } = await import('../../src/modules/chat/message-handler.js');
+    const { account } = await seedOrgAndAccount();
+
+    // First call mirrors the video, second mirrors the thumbnail.
+    mirrorAttachmentMock
+      .mockResolvedValueOnce({
+        key: 'k1',
+        url: 'http://minio.test/v.mp4',
+        size: 1,
+        mimeType: 'video/mp4',
+      })
+      .mockResolvedValueOnce({
+        key: 'k2',
+        url: 'http://minio.test/poster.jpg',
+        size: 1,
+        mimeType: 'image/jpeg',
+      });
+
+    const result = await handleIncomingMessage({
+      accountId: account.id,
+      senderUid: 'uid-vid',
+      senderName: 'Vid',
+      content: JSON.stringify({
+        hdUrl: 'https://zdn.vn/v.mp4',
+        href: 'https://zdn.vn/v.mp4',
+        thumb: 'https://zdn.vn/poster.jpg',
+        params: { duration: 5 },
+      }),
+      contentType: 'video',
+      msgId: 'zalo-vid',
+      timestamp: Date.now(),
+      isSelf: false,
+      threadId: 'uid-vid',
+      threadType: 'user' as const,
+      attachments: [],
+    });
+
+    expect(result).not.toBeNull();
+    expect(mirrorAttachmentMock).toHaveBeenCalledTimes(2);
+
+    const persisted = await prisma.message.findFirst({ where: { zaloMsgId: 'zalo-vid' } });
+    const envelope = JSON.parse(persisted!.content!);
+    expect(envelope.hdUrl).toBe('http://minio.test/v.mp4');
+    expect(envelope.href).toBe('http://minio.test/v.mp4');
+    expect(envelope.thumb).toBe('http://minio.test/poster.jpg');
+    expect(envelope.params).toEqual({ duration: 5 });
   });
 });
