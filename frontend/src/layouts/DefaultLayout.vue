@@ -140,6 +140,7 @@ const menuItems: MenuItem[] = [
   { title: 'Chiến dịch', icon: 'mdi-bullhorn-outline', path: '/campaigns', adminOnly: true },
   { title: 'Auto-tag keyword', icon: 'mdi-tag-text-outline', path: '/keyword-rules' },
   { title: 'Hoạt động', icon: 'mdi-history', path: '/activity', adminOnly: true },
+  { title: 'Khách trùng', icon: 'mdi-account-multiple-remove-outline', path: '/duplicate-groups', adminOnly: true },
   { title: 'Nhân viên', icon: 'mdi-account-cog-outline', path: '/settings' },
   { title: 'Tin nhắn mẫu', icon: 'mdi-message-flash-outline', path: '/quick-replies' },
   { title: 'API & Webhook', icon: 'mdi-api', path: '/api-settings' },

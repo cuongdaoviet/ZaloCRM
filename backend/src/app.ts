@@ -23,6 +23,7 @@ import { chatRoutes } from './modules/chat/chat-routes.js';
 import { contactRoutes } from './modules/contacts/contact-routes.js';
 import { contactSubResourceRoutes } from './modules/contacts/contact-sub-resource-routes.js';
 import { contactOverviewRoutes } from './modules/contacts/contact-overview-routes.js';
+import { duplicateRoutes } from './modules/contacts/duplicate-routes.js';
 import { appointmentRoutes } from './modules/contacts/appointment-routes.js';
 import { appointmentParseRoutes } from './modules/contacts/appointment-parse-routes.js';
 import { startAppointmentReminder } from './modules/contacts/appointment-reminder.js';
@@ -134,6 +135,7 @@ async function bootstrap() {
   await app.register(contactRoutes);
   await app.register(contactSubResourceRoutes);
   await app.register(contactOverviewRoutes);
+  await app.register(duplicateRoutes);
   await app.register(appointmentRoutes);
   await app.register(appointmentParseRoutes);
   await app.register(dashboardRoutes);

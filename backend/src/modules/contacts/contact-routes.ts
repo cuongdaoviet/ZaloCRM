@@ -27,7 +27,10 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
         assignedUserId = '',
       } = request.query as QueryParams;
 
-      const where: any = { orgId: user.orgId };
+      // Feature 0018: exclude contacts that have been merged into a primary.
+      // List default omits them so the merged-secondary tombstones don't show
+      // up in CRM tables / autocomplete.
+      const where: any = { orgId: user.orgId, mergedIntoId: null };
       if (source) where.source = source;
       if (status) where.status = status;
       if (assignedUserId) where.assignedUserId = assignedUserId;
@@ -71,7 +74,7 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
 
       const pipeline = await prisma.contact.groupBy({
         by: ['status'],
-        where: { orgId, status: { not: null } },
+        where: { orgId, status: { not: null }, mergedIntoId: null },
         _count: true,
       });
 
@@ -81,7 +84,8 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
 
       await Promise.all(
         statuses.map(async (st) => {
-          const where: any = { orgId, status: st ?? null };
+          // Feature 0018: hide merged secondaries from pipeline columns.
+          const where: any = { orgId, status: st ?? null, mergedIntoId: null };
           const contacts = await prisma.contact.findMany({
             where,
             select: {

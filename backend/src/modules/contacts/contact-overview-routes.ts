@@ -33,8 +33,24 @@ export async function contactOverviewRoutes(app: FastifyInstance): Promise<void>
       const user = request.user!;
       const { id } = request.params;
 
-      const contact = await prisma.contact.findFirst({
+      // Feature 0018: if the contact has been merged into a primary, return
+      // the PRIMARY's overview with `mergedFrom` set so the FE can redirect.
+      // We resolve up to one hop — merge is one-way so chains shouldn't exist,
+      // but be defensive.
+      let targetId = id;
+      let mergedFrom: string | null = null;
+      const lookupContact = await prisma.contact.findFirst({
         where: { id, orgId: user.orgId },
+        select: { id: true, mergedIntoId: true },
+      });
+      if (!lookupContact) return reply.status(404).send({ error: 'Không tồn tại' });
+      if (lookupContact.mergedIntoId) {
+        targetId = lookupContact.mergedIntoId;
+        mergedFrom = lookupContact.id;
+      }
+
+      const contact = await prisma.contact.findFirst({
+        where: { id: targetId, orgId: user.orgId },
         include: {
           assignedUser: { select: { id: true, fullName: true } },
         },
@@ -137,6 +153,11 @@ export async function contactOverviewRoutes(app: FastifyInstance): Promise<void>
       const totalAppointmentCount = appointmentStats.reduce((sum, a) => sum + a._count._all, 0);
 
       return {
+        // Feature 0018: when present, FE should `router.replace` to the
+        // primary contact's URL. `mergedFrom` is the original id the caller
+        // asked for; `contact.id` is the primary that owns the payload.
+        mergedInto: mergedFrom ? contact.id : null,
+        mergedFrom,
         contact: {
           id: contact.id,
           fullName: contact.fullName,
