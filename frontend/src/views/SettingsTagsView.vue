@@ -117,20 +117,63 @@
           </v-list>
         </v-window-item>
 
-        <!-- ── Tab: Zalo sync (placeholder) ─────────────────────────────── -->
+        <!-- ── Tab: Zalo sync ───────────────────────────────────────────── -->
         <v-window-item value="zalo">
           <div class="pa-4">
-            <v-alert type="info" variant="tonal" density="comfortable">
-              <strong>Sắp ra mắt — Phase A.1.</strong>
-              <div class="mt-1">
-                Tính năng kéo label gốc của Zalo về CRM (managed-by-Zalo,
-                read-only) sẽ được triển khai ở giai đoạn tiếp theo.
-              </div>
+            <v-alert type="info" variant="tonal" density="comfortable" class="mb-3">
+              Kéo label gốc của Zalo về CRM. Mỗi tài khoản Zalo sinh ra một
+              <strong>nhóm nhãn riêng</strong>; label biến mất khỏi Zalo sẽ
+              được <strong>tự động lưu trữ</strong> (link với contact cũ vẫn
+              giữ). Chỉ admin/owner mới chạy được đồng bộ.
             </v-alert>
 
-            <v-btn class="mt-3" disabled prepend-icon="mdi-sync">
-              Đồng bộ label từ tài khoản Zalo
-            </v-btn>
+            <div v-if="zaloAccounts.length === 0" class="text-grey">
+              Chưa có tài khoản Zalo nào trong tổ chức.
+            </div>
+
+            <v-list v-else density="comfortable" lines="two">
+              <v-list-item
+                v-for="acc in zaloAccounts"
+                :key="acc.id"
+              >
+                <template #prepend>
+                  <v-icon :color="acc.status === 'connected' ? 'success' : 'grey'">
+                    mdi-cellphone-link
+                  </v-icon>
+                </template>
+                <v-list-item-title>
+                  {{ acc.displayName || 'Zalo account' }}
+                  <v-chip
+                    size="x-small" variant="tonal" class="ml-2"
+                    :color="acc.status === 'connected' ? 'success' : 'grey'"
+                  >{{ acc.status }}</v-chip>
+                </v-list-item-title>
+                <v-list-item-subtitle v-if="syncResultByAccount.get(acc.id)">
+                  <span class="text-success">
+                    {{ formatSyncResult(syncResultByAccount.get(acc.id)!) }}
+                  </span>
+                </v-list-item-subtitle>
+                <template #append>
+                  <v-btn
+                    color="primary" variant="outlined"
+                    prepend-icon="mdi-sync"
+                    :loading="syncingAccountId === acc.id"
+                    :disabled="acc.status !== 'connected' || !!syncingAccountId"
+                    @click="onSyncLabels(acc.id)"
+                  >
+                    Đồng bộ
+                  </v-btn>
+                </template>
+              </v-list-item>
+            </v-list>
+
+            <v-alert
+              v-if="syncError" type="error" variant="tonal" closable
+              density="comfortable" class="mt-3"
+              @click:close="syncError = ''"
+            >
+              {{ syncError }}
+            </v-alert>
           </div>
         </v-window-item>
       </v-window>
@@ -189,6 +232,8 @@ import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useCrmTags, type CrmTag } from '@/composables/use-crm-tags';
 import { useCrmTagGroups } from '@/composables/use-crm-tag-groups';
+import { useZaloAccounts } from '@/composables/use-zalo-accounts';
+import { api } from '@/api/index';
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -328,9 +373,62 @@ async function onCreateGroup() {
   }
 }
 
+// ── Phase A.1: Zalo label sync ─────────────────────────────────────────────
+const { accounts: zaloAccounts, fetchAccounts } = useZaloAccounts();
+const syncingAccountId = ref<string | null>(null);
+const syncError = ref('');
+
+interface SyncResult {
+  groupId: string;
+  labelsCreated: number;
+  labelsUpdated: number;
+  labelsArchived: number;
+  adopted: number;
+}
+const syncResultByAccount = ref(new Map<string, SyncResult>());
+
+async function onSyncLabels(accountId: string) {
+  syncingAccountId.value = accountId;
+  syncError.value = '';
+  try {
+    const res = await api.post<{ synced: SyncResult }>(
+      `/zalo-accounts/${accountId}/sync-labels`,
+    );
+    syncResultByAccount.value = new Map(syncResultByAccount.value).set(
+      accountId,
+      res.data.synced,
+    );
+    // Reload tags + groups so the new Zalo-managed entries show up in the
+    // other tabs immediately.
+    await loadTags(true);
+    await loadGroups(true);
+  } catch (err: any) {
+    const code = err?.response?.data?.code;
+    const message = err?.response?.data?.error || 'Đồng bộ thất bại';
+    syncError.value =
+      code === 'ZALO_NOT_LOGGED_IN'
+        ? 'Tài khoản chưa kết nối Zalo — vui lòng đăng nhập lại.'
+        : code === 'ZALO_BRIDGE_ERROR'
+          ? 'Không lấy được dữ liệu từ Zalo. Thử lại sau.'
+          : message;
+  } finally {
+    syncingAccountId.value = null;
+  }
+}
+
+function formatSyncResult(r: SyncResult): string {
+  const bits: string[] = [];
+  if (r.labelsCreated > 0) bits.push(`tạo mới ${r.labelsCreated}`);
+  if (r.labelsUpdated > 0) bits.push(`cập nhật ${r.labelsUpdated}`);
+  if (r.labelsArchived > 0) bits.push(`lưu trữ ${r.labelsArchived}`);
+  if (r.adopted > 0) bits.push(`adopt ${r.adopted}`);
+  return bits.length === 0 ? 'Đồng bộ thành công' : `Đã ${bits.join(' · ')}`;
+}
+
 onMounted(() => {
   loadTags(true);
   loadGroups(true);
+  fetchAccounts();
 });
 </script>
 
