@@ -57,6 +57,7 @@ import { keywordRuleRoutes } from './modules/keyword-rules/keyword-rule-routes.j
 import { conversationNoteRoutes } from './modules/conversation-notes/conversation-note-routes.js';
 import { pinConversationRoutes } from './modules/conversations/pin-routes.js';
 import { activityRoutes } from './modules/activity/activity-routes.js';
+import { reactionRoutes } from './modules/reactions/reaction-routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -167,6 +168,7 @@ async function bootstrap() {
   await app.register(conversationNoteRoutes);
   await app.register(pinConversationRoutes);
   await app.register(activityRoutes);
+  await app.register(reactionRoutes);
 
   // Liveness/readiness probe — also checks DB connectivity
   app.get('/health', async () => {

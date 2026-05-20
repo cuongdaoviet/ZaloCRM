@@ -877,6 +877,141 @@ Every transition emits an `ActivityLog` row via `logActivityAsync`:
 
 ---
 
+## Feature 0021 — Message reactions
+
+Sales reps thả 6 emoji reaction (❤️ 👍 😆 😮 😭 😡) lên từng message trong chat —
+gửi luôn ra Zalo qua `api.addReaction` của zca-js, lưu lịch sử trong CRM, và push
+live qua Socket.IO. Một `(messageId, reactorId)` chỉ tồn tại **một** reaction tại
+một thời điểm: cùng emoji = toggle off, khác emoji = override (BR-0004/0005).
+
+Inbound reactions từ phía khách hàng được listener `'reaction'` của zca-js bắt
+và upsert tự động. Phase 1 **không** subscribe `'old_reactions'` (reconcile burst
+khi reconnect) và **không** ghi `ActivityLog` cho reactions (BR-0011).
+
+### Permissions
+
+Mọi endpoint scope theo org của caller + Zalo account access:
+
+- **POST / DELETE** yêu cầu `requireZaloAccess('chat')` (owner/admin bypass).
+- **GET** yêu cầu `read` trở lên trên Zalo account.
+- Cross-org → `404` (không leak existence).
+
+### POST `/api/v1/messages/:id/reactions`
+
+Thả hoặc đổi reaction. Logic:
+
+1. Nếu chưa có row → tạo mới + gọi `api.addReaction(<enum>, dest)` → **201**.
+2. Có row với emoji **khác** → update emoji + `api.addReaction(<enum-new>, dest)` → **201**.
+3. Có row với emoji **trùng** → xóa row + `api.addReaction(NONE, dest)` → **200 toggledOff**.
+
+Cuộc gọi zca-js nằm trong cùng transaction với DB write — partner fail → rollback (AC-0013).
+
+**Request body:**
+
+```json
+{ "emoji": "❤️" }
+```
+
+`emoji` phải thuộc set 6 standard: `"❤️" | "👍" | "😆" | "😮" | "😭" | "😡"`.
+
+**Response 201:**
+
+```json
+{
+  "id": "uuid",
+  "messageId": "uuid",
+  "reactorId": "user-uuid",
+  "reactorSource": "crm",
+  "reactorName": "Nguyễn Văn A",
+  "emoji": "❤️",
+  "createdAt": "2026-05-20T10:00:00.000Z"
+}
+```
+
+**Response 200 (toggle off):**
+
+```json
+{ "toggledOff": true, "messageId": "uuid", "emoji": "❤️" }
+```
+
+**Errors:**
+
+- `400 invalid_emoji` — emoji không thuộc 6 standard.
+- `400 message_deleted` — message đã `isDeleted=true` (đã thu hồi).
+- `400 message_missing_zalo_msg_id` — outbound message chưa kịp ack từ Zalo (FE retry sau ~500ms).
+- `403 forbidden` — không có ACL `chat` trên Zalo account.
+- `404 message_not_found` — message không tồn tại hoặc cross-org.
+- `502 zalo_reaction_failed` — `api.addReaction` ném ra (account disconnected, network fail…). DB rollback đã chạy → state nhất quán.
+
+### DELETE `/api/v1/messages/:id/reactions`
+
+Idempotent — xóa reaction của caller cho message này, gọi `api.addReaction(NONE, dest)` nếu account còn connected. Không có body. Trả `204` ngay cả khi không có row.
+
+**Errors:** `403`, `404` (giống POST).
+
+### GET `/api/v1/messages/:id/reactions`
+
+Liệt kê tất cả reactions trên message. Trong main chat flow FE **không** dùng endpoint này — reactions được trả về inline trên mỗi `Message` của `GET /api/v1/conversations/:id/messages`. Endpoint riêng để debug / future reaction-detail modal.
+
+**Response 200:**
+
+```json
+{
+  "reactions": [
+    {
+      "id": "uuid",
+      "reactorId": "...",
+      "reactorSource": "crm" | "zalo",
+      "reactorName": "..." | null,
+      "emoji": "❤️" | "👍" | "😆" | "😮" | "😭" | "😡" | "custom:<rType>",
+      "createdAt": "2026-05-20T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+### Socket.IO event
+
+Mỗi thay đổi (inbound listener hoặc outbound POST/DELETE) emit:
+
+```json
+// chat:reaction
+{
+  "accountId": "uuid",
+  "conversationId": "uuid",
+  "messageId": "uuid",
+  "reaction": { /* row giống GET shape */ } | null,
+  "removed": { "reactorSource": "crm|zalo", "reactorId": "..." } | undefined
+}
+```
+
+`reaction = null` + `removed` set → row đã bị xóa. FE merge theo
+`(reactorSource, reactorId)` để dedupe self-listen race (EC-0004).
+
+### Inline trên list-messages
+
+`GET /api/v1/conversations/:id/messages` từ feature 0021 trả về:
+
+```json
+{
+  "messages": [
+    {
+      "id": "...",
+      // …các field cũ…
+      "reactions": [ /* MessageReaction[] giống GET shape */ ]
+    }
+  ],
+  "total": 50,
+  "page": 1,
+  "limit": 50
+}
+```
+
+Reactions luôn được sort theo `createdAt asc`. Backward-compatible: clients
+cũ bỏ qua field này không bị ảnh hưởng.
+
+---
+
 ## Feature 0019 — CRM tags (Phase A)
 
 Promotes `Contact.tags` from a free-text JSON array to a proper relational
