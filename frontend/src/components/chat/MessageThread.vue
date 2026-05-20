@@ -34,6 +34,13 @@
           <div class="text-caption text-grey">{{ conversation.zaloAccount?.displayName || 'Zalo' }}</div>
         </div>
         <v-btn
+          :icon="isPinned ? 'mdi-pin' : 'mdi-pin-outline'"
+          size="small" variant="text"
+          :color="isPinned ? 'primary' : undefined"
+          :title="isPinned ? 'Bỏ ghim cuộc trò chuyện' : 'Ghim cuộc trò chuyện'"
+          @click="$emit('toggle-pin')"
+        />
+        <v-btn
           :icon="showContactPanel ? 'mdi-account-details' : 'mdi-account-details-outline'"
           size="small" variant="text"
           :color="showContactPanel ? 'primary' : undefined"
@@ -186,12 +193,14 @@ const props = defineProps<{
   loading: boolean;
   sending: boolean;
   showContactPanel?: boolean;
+  isPinned?: boolean;
 }>();
 
 const emit = defineEmits<{
   send: [content: string];
   'send-attachment': [file: File];
   'toggle-contact-panel': [];
+  'toggle-pin': [];
 }>();
 
 const inputText = ref('');

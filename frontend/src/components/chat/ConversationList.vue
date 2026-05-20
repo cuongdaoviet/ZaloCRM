@@ -39,12 +39,70 @@
     <v-list class="flex-grow-1 overflow-y-auto pa-0" density="compact">
       <v-progress-linear v-if="loading" indeterminate color="primary" />
 
+      <!-- Pinned section (feature 0015) -->
+      <template v-if="pinnedConvs.length > 0">
+        <v-list-subheader class="text-caption font-weight-medium text-primary px-3 py-1">
+          <v-icon size="14" class="mr-1">mdi-pin</v-icon>
+          Đã ghim
+        </v-list-subheader>
+        <v-list-item
+          v-for="conv in pinnedConvs"
+          :key="`pin-${conv.id}`"
+          :active="conv.id === selectedId"
+          @click="$emit('select', conv.id)"
+          class="py-2"
+          :class="{ 'conversation-active': conv.id === selectedId, 'bg-blue-lighten-5': conv.unreadCount > 0 && conv.id !== selectedId }"
+        >
+          <template #prepend>
+            <v-avatar size="40" color="grey-lighten-2">
+              <v-icon v-if="conv.threadType === 'group'" icon="mdi-account-group" />
+              <v-img v-else-if="conv.contact?.avatarUrl" :src="conv.contact.avatarUrl" />
+              <v-icon v-else icon="mdi-account" />
+            </v-avatar>
+          </template>
+
+          <v-list-item-title class="d-flex align-center">
+            <span class="text-truncate" :class="{ 'font-weight-bold': conv.unreadCount > 0 }">
+              {{ conv.threadType === 'group' ? (conv.contact?.fullName || 'Nhóm') : (conv.contact?.fullName || 'Unknown') }}
+            </span>
+            <v-chip v-if="conv.threadType === 'group'" size="x-small" color="info" variant="tonal" class="ml-1">Nhóm</v-chip>
+            <v-spacer />
+            <span class="text-caption text-grey ml-1">{{ formatTime(conv.lastMessageAt) }}</span>
+          </v-list-item-title>
+
+          <v-list-item-subtitle class="d-flex align-center">
+            <span class="text-truncate" style="max-width: 200px;" :class="{ 'font-weight-medium': conv.unreadCount > 0 }">
+              {{ lastMessagePreview(conv) }}
+            </span>
+            <v-spacer />
+            <v-badge
+              v-if="conv.unreadCount > 0"
+              :content="conv.unreadCount"
+              color="error"
+              inline
+            />
+          </v-list-item-subtitle>
+
+          <template #append>
+            <v-btn
+              icon size="x-small" variant="text"
+              color="primary"
+              :title="'Bỏ ghim'"
+              @click.stop="$emit('toggle-pin', conv.id)"
+            >
+              <v-icon size="16">mdi-pin</v-icon>
+            </v-btn>
+          </template>
+        </v-list-item>
+        <v-divider class="my-1" />
+      </template>
+
       <v-list-item
-        v-for="conv in conversations"
+        v-for="conv in unpinnedConvs"
         :key="conv.id"
         :active="conv.id === selectedId"
         @click="$emit('select', conv.id)"
-        class="py-2"
+        class="py-2 conversation-row"
         :class="{ 'conversation-active': conv.id === selectedId, 'bg-blue-lighten-5': conv.unreadCount > 0 && conv.id !== selectedId }"
       >
         <template #prepend>
@@ -77,8 +135,16 @@
           />
         </v-list-item-subtitle>
 
-        <!-- Zalo account indicator -->
+        <!-- Zalo account indicator + pin button on hover -->
         <template #append>
+          <v-btn
+            icon size="x-small" variant="text"
+            class="conv-pin-btn"
+            :title="'Ghim cuộc trò chuyện'"
+            @click.stop="$emit('toggle-pin', conv.id)"
+          >
+            <v-icon size="16">mdi-pin-outline</v-icon>
+          </v-btn>
           <span v-if="conv.zaloAccount?.displayName" class="text-caption text-grey-darken-1 ml-1" style="font-size: 0.65rem; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
             {{ conv.zaloAccount.displayName }}
           </span>
@@ -93,15 +159,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import type { Conversation } from '@/composables/use-chat';
 import { api } from '@/api/index';
 
-defineProps<{
+const props = defineProps<{
   conversations: Conversation[];
   selectedId: string | null;
   loading: boolean;
   search: string;
+  pinnedIds?: Set<string>;
 }>();
 
 defineEmits<{
@@ -109,7 +176,22 @@ defineEmits<{
   'update:search': [value: string];
   'filter-account': [accountId: string | null];
   'new-chat': [];
+  'toggle-pin': [id: string];
 }>();
+
+// Split the incoming list into pinned vs. unpinned. We DON'T re-sort the
+// pinned slice — the order respects whatever the parent passes (the pinned-
+// dedicated fetch returns by pinnedAt DESC; if the parent is only passing
+// the regular list, pinned items appear in lastMessageAt order which is OK).
+const pinnedConvs = computed(() => {
+  if (!props.pinnedIds || props.pinnedIds.size === 0) return [];
+  return props.conversations.filter((c) => props.pinnedIds!.has(c.id));
+});
+
+const unpinnedConvs = computed(() => {
+  if (!props.pinnedIds || props.pinnedIds.size === 0) return props.conversations;
+  return props.conversations.filter((c) => !props.pinnedIds!.has(c.id));
+});
 
 const accountOptions = ref<{ text: string; value: string }[]>([]);
 const selectedAccountId = ref<string | null>(null);
@@ -177,3 +259,15 @@ function formatTime(dateStr: string | null): string {
   return date.toLocaleDateString('vi-VN');
 }
 </script>
+
+<style scoped>
+/* Pin button only visible on row hover / focus — keeps the list calm */
+.conversation-row .conv-pin-btn {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.conversation-row:hover .conv-pin-btn,
+.conversation-row:focus-within .conv-pin-btn {
+  opacity: 1;
+}
+</style>

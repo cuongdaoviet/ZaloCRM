@@ -27,6 +27,7 @@ model Organization {
   campaigns     Campaign[]
   keywordRules  KeywordRule[]
   webhookDeliveries WebhookDelivery[]
+  pinnedConversations PinnedConversation[]
 
   @@map("organizations")
 }
@@ -95,6 +96,7 @@ model ZaloAccount {
   dailyStats    DailyMessageStat[]
   autoReplyRule AutoReplyRule?
   campaigns     Campaign[]
+  pinnedConversations PinnedConversation[]
 
   @@map("zalo_accounts")
 }
@@ -164,6 +166,7 @@ model Conversation {
   messages    Message[]
   orders      Order[]
   notes       ConversationNote[]
+  pin         PinnedConversation?
 
   @@unique([zaloAccountId, externalThreadId])
   @@map("conversations")
@@ -478,4 +481,24 @@ model WebhookDelivery {
 
   @@index([orgId, createdAt(sort: Desc)])
   @@map("webhook_deliveries")
+}
+
+// ─── Feature 0015 — Pinned conversations ─────────────────────────────────────
+// Org-shared "pinned to top" flag for a conversation. One row per conversation
+// (uniqueness enforced via @unique on conversationId). Anyone in the org who
+// has access to the underlying Zalo account sees the same pinned ordering.
+
+model PinnedConversation {
+  id             String   @id @default(uuid())
+  orgId          String   @map("org_id")
+  zaloAccountId  String   @map("zalo_account_id")
+  conversationId String   @unique @map("conversation_id")
+  pinnedAt       DateTime @default(now()) @map("pinned_at")
+
+  org          Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  zaloAccount  ZaloAccount  @relation(fields: [zaloAccountId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, pinnedAt(sort: Desc)])
+  @@map("pinned_conversations")
 }
