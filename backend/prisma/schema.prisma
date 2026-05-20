@@ -28,6 +28,7 @@ model Organization {
   keywordRules  KeywordRule[]
   webhookDeliveries WebhookDelivery[]
   pinnedConversations PinnedConversation[]
+  duplicateGroups   DuplicateGroup[]
 
   @@map("organizations")
 }
@@ -135,6 +136,11 @@ model Contact {
   notes            String?
   tags             Json      @default("[]")
   metadata         Json      @default("{}")
+  // ── Feature 0018 — duplicate merge bookkeeping ─────────────────────────────
+  // Set when this contact has been merged INTO another (the primary). Once
+  // set, list/pipeline endpoints filter it out by default.
+  mergedIntoId     String?   @map("merged_into_id")
+  mergedAt         DateTime? @map("merged_at")
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
@@ -144,7 +150,10 @@ model Contact {
   appointments    Appointment[]
   orders          Order[]
   campaignTargets CampaignTarget[]
+  mergedInto      Contact?         @relation("ContactMerges", fields: [mergedIntoId], references: [id])
+  mergedChildren  Contact[]        @relation("ContactMerges")
 
+  @@index([orgId, mergedIntoId])
   @@map("contacts")
 }
 
@@ -522,4 +531,35 @@ model UserPreference {
 
   @@unique([userId, key])
   @@map("user_preferences")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Feature 0018 — Duplicate contact detection + merge
+// A DuplicateGroup is a set of contact IDs (≥ 2) that the scanner believes are
+// the same person. Admins resolve each group by either MERGING (one contact
+// becomes primary, the rest get `mergedIntoId` set + FK-rewrite to primary) or
+// DISMISSING (false positive — skip this exact set on future scans).
+//
+// `contactIdsHash` (sha1 of sorted ids) acts as the idempotency key so a rescan
+// of the same population doesn't create a duplicate group row. Hash of the
+// dismissed set is also kept so future rescans can skip known-false-positives.
+// ─────────────────────────────────────────────────────────────────────────────
+model DuplicateGroup {
+  id               String    @id @default(uuid())
+  orgId            String    @map("org_id")
+  level            String    // 'phone_exact' | 'zaloUid_exact' | 'name_fuzzy'
+  confidence       Float
+  contactIds       Json      // string[] — sorted ascending, length >= 2
+  contactIdsHash   String    @map("contact_ids_hash") // sha1 of sorted ids
+  status           String    @default("pending") // pending | merged | dismissed
+  primaryContactId String?   @map("primary_contact_id")
+  resolvedByUserId String?   @map("resolved_by_user_id")
+  resolvedAt       DateTime? @map("resolved_at")
+  detectedAt       DateTime  @default(now()) @map("detected_at")
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, contactIdsHash])
+  @@index([orgId, status, detectedAt(sort: Desc)])
+  @@map("duplicate_groups")
 }

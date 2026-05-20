@@ -111,6 +111,18 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/duplicate-groups',
+    name: 'DuplicateGroups',
+    component: () => import('@/views/DuplicateGroupsView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/duplicate-groups/:id',
+    name: 'DuplicateGroupDetail',
+    component: () => import('@/views/DuplicateGroupDetailView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('@/views/NotFoundView.vue'),

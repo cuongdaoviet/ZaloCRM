@@ -489,3 +489,241 @@ list with examples lives in
 - Times: `HH:MM`, `Xh`, `Xh sáng\|chiều\|tối`, `Xpm`, `Xam`, period-only
   (`sáng` → 09:00, `trưa` → 12:00, `chiều` → 14:00, `tối` → 19:00).
 - Type hints: `gọi` → call, `nhắn` → message, `gặp`/`cafe`/`hẹn` → meeting.
+
+---
+
+## Feature 0018 — Duplicate detection + merge
+
+On-demand scan that detects contact duplicates by phone, Zalo UID, and
+fuzzy-name match, then exposes admin endpoints to merge or dismiss each
+detected group. Merge is one-way (no undo); FK rewrite (conversations,
+orders, appointments, campaign targets) happens inside a single Prisma
+transaction. See [`docs/features/0018-duplicate-detection/SPEC.md`](../features/0018-duplicate-detection/SPEC.md)
+for business rules.
+
+### POST `/api/v1/contacts/scan-duplicates`
+
+Trigger a duplicate scan for the caller's org.
+
+**Permission:** owner/admin only (member → 403).
+
+**Request body** (all fields optional):
+
+```json
+{ "levels": ["phone_exact", "zaloUid_exact", "name_fuzzy"] }
+```
+
+- `levels` — subset of detection levels to run. Default: all three.
+
+**Sync response 200** (org ≤ 5000 live contacts):
+
+```json
+{
+  "status": "completed",
+  "groupsCreated": 12,
+  "groupsExisting": 3,
+  "contactsScanned": 487,
+  "durationMs": 1240,
+  "nameSkipped": false
+}
+```
+
+`nameSkipped` is `true` when the org exceeds 20k contacts (the O(n²) name
+fuzzy step is skipped; phone + uid still run).
+
+**Async response 202** (org > 5000 live contacts):
+
+```json
+{ "status": "queued", "jobId": "uuid", "estimatedSeconds": 20 }
+```
+
+**Errors:**
+
+- `400` — `levels` provided but every entry is invalid.
+- `403` — member.
+- `429` — another scan for this org started within the last 60s (in-memory
+  debounce per org).
+
+### GET `/api/v1/duplicate-groups`
+
+List duplicate groups for the caller's org, newest first.
+
+**Permission:** owner/admin.
+
+**Query parameters:**
+
+| Name | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `status` | string | no | `pending` (default) / `merged` / `dismissed` / `all`. |
+| `level` | string | no | `phone_exact` / `zaloUid_exact` / `name_fuzzy`. |
+| `page` | integer | no | Default 1. |
+| `limit` | integer | no | Default 50, max 200. |
+
+**Response 200:**
+
+```json
+{
+  "groups": [
+    {
+      "id": "uuid",
+      "level": "phone_exact",
+      "confidence": 1.0,
+      "status": "pending",
+      "contactCount": 2,
+      "contactsPreview": [
+        { "id": "uuid", "fullName": "Nguyễn Văn A", "phone": "84901234567" },
+        { "id": "uuid", "fullName": "Nguyen Van A", "phone": "+84 901 234 567" }
+      ],
+      "detectedAt": "2026-05-20T03:00:00.000Z",
+      "resolvedAt": null,
+      "primaryContactId": null
+    }
+  ],
+  "total": 12,
+  "page": 1,
+  "limit": 50
+}
+```
+
+`contactsPreview` filters out contacts already merged in a different group
+(EC-0001) so the preview never lists tombstones.
+
+### GET `/api/v1/duplicate-groups/:id`
+
+**Permission:** owner/admin. Cross-org → 404.
+
+**Response 200:**
+
+```json
+{
+  "id": "uuid",
+  "level": "name_fuzzy",
+  "confidence": 0.75,
+  "status": "pending",
+  "contacts": [
+    {
+      "id": "uuid",
+      "fullName": "Nguyễn Văn A",
+      "phone": "84901234567",
+      "email": "a@example.com",
+      "source": "FB",
+      "status": "interested",
+      "tags": ["vip"],
+      "createdAt": "...",
+      "assignedUser": { "id": "uuid", "fullName": "..." },
+      "stats": { "conversations": 2, "orders": 5, "appointments": 1, "notes": 7 }
+    }
+  ],
+  "detectedAt": "...",
+  "resolvedAt": null,
+  "resolvedBy": null,
+  "primaryContactId": null
+}
+```
+
+EC-0001 — if the underlying contacts of a `pending` group have all been
+resolved in other groups (≤ 1 live contact remains), this endpoint also
+auto-flips the group to `dismissed` and returns the new status.
+
+### POST `/api/v1/duplicate-groups/:id/merge`
+
+Merge every secondary contact in the group into the chosen primary.
+
+**Permission:** owner/admin.
+
+**Body:**
+
+```json
+{
+  "primaryContactId": "uuid",
+  "fieldsToKeep": {
+    "fullName": "uuid-of-source-contact",
+    "phone": "uuid-of-source-contact",
+    "email": "uuid-of-source-contact",
+    "source": "uuid-of-source-contact",
+    "assignedUserId": "uuid-of-source-contact"
+  }
+}
+```
+
+- `primaryContactId` (required) — must be one of the group's contact ids.
+- `fieldsToKeep` (optional) — each value is a contact id in the group; the
+  named field on the primary is overwritten with that contact's value.
+  Default behaviour (no override) is to keep the primary's fields unchanged
+  except for `tags` (union), `notes` (concat with separator), and `metadata`
+  (shallow merge, primary wins).
+
+**Response 200:**
+
+```json
+{
+  "status": "merged",
+  "primaryContactId": "uuid",
+  "mergedContactIds": ["uuid", ...],
+  "moved": {
+    "conversations": 3,
+    "orders": 8,
+    "appointments": 2,
+    "notes": 7,
+    "campaignTargets": 1,
+    "skippedDuplicateTargets": 0,
+    "mergedConversations": 0
+  }
+}
+```
+
+`skippedDuplicateTargets` counts secondary `CampaignTarget` rows that were
+deleted because the primary was already a target of the same campaign
+(EC-0005). `mergedConversations` counts secondary conversations that were
+collapsed into a primary conversation sharing the same
+`(zaloAccountId, externalThreadId)` (EC-0006).
+
+**Errors:**
+
+- `400` — `primaryContactId` missing/invalid, `fieldsToKeep` value not in
+  the group, primary already merged, or the group has no remaining
+  secondaries to merge.
+- `403` — member.
+- `404` — group not in caller's org.
+- `409` — another admin merged or dismissed the group between read and
+  write (concurrency guard).
+
+One `contact.merged` activity log row is written per secondary AFTER the
+transaction commits (`entityType=contact`, `entityId=secondary.id`,
+`details={ mergedInto, groupId, level }`).
+
+### POST `/api/v1/duplicate-groups/:id/dismiss`
+
+Mark the group as a false positive so the next scan does not re-create it.
+
+**Permission:** owner/admin.
+
+**Body:**
+
+```json
+{ "reason": "Hai khách thật khác nhau dùng chung SĐT" }
+```
+
+- `reason` (optional, ≤ 500 chars).
+
+**Response 200:**
+
+```json
+{ "status": "dismissed", "resolvedAt": "..." }
+```
+
+**Errors:**
+
+- `400` — group already resolved (merged or dismissed) / reason too long.
+- `403` — member.
+- `404` — group not in caller's org.
+
+### Side effects on existing endpoints
+
+- `GET /api/v1/contacts` and `GET /api/v1/contacts/pipeline` filter out
+  contacts with `mergedIntoId` set by default. The merged-secondary rows
+  remain in the DB for audit (`mergedIntoId`, `mergedAt`, `status='merged'`).
+- `GET /api/v1/contacts/:id/overview` (feature 0013) — if the requested
+  contact has been merged, the response is the **primary's** overview with
+  `mergedInto = primary.id` and `mergedFrom = original.id` so the FE can
+  redirect the URL.

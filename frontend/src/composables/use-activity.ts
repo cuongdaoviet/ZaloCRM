@@ -76,6 +76,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'contact.created': 'Tạo khách hàng',
   'contact.status_changed': 'Đổi trạng thái KH',
   'contact.assigned': 'Gán KH cho nhân viên',
+  'contact.merged': 'Gộp khách trùng',
   'note.created': 'Tạo ghi chú',
   'note.updated': 'Sửa ghi chú',
   'note.deleted': 'Xoá ghi chú',
