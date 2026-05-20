@@ -12,9 +12,9 @@
  * Tag creation is intentionally NOT admin-gated (BR-0004) — sales staff need
  * to create tags inline while chatting. Edit/delete/archive ARE admin-only.
  *
- * TODO (Phase A.1): POST /api/v1/zalo-accounts/:id/sync-labels — pulls Zalo
- * label catalog into ZaloLabel + CrmTagGroup + CrmTag(managedBy='zalo_sync').
- * Deferred from Phase A to keep this PR focused; see docs/features/0019-crm-tags/SPEC.md §4.
+ * Phase A.1 (shipped): POST /api/v1/zalo-accounts/:id/sync-labels lives in
+ * zalo-label-sync-routes.ts. Pulls the Zalo label catalog into
+ * ZaloLabel + CrmTagGroup + CrmTag(managedBy='zalo_sync').
  */
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { authMiddleware } from '../auth/auth-middleware.js';

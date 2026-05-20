@@ -995,11 +995,49 @@ comma-separated string or repeated `?tagIds=A&tagIds=B` form. Filter is
 **OR** across the supplied IDs (any contact carrying at least one of the
 tags matches).
 
-### Out of scope for Phase A
+### POST `/api/v1/zalo-accounts/:id/sync-labels` *(Phase A.1)*
 
-- **`POST /api/v1/zalo-accounts/:id/sync-labels`** — deferred to Phase A.1.
-  The schema (`ZaloLabel`, `CrmTagGroup.zaloAccountId`, `CrmTag.sourceZaloLabelId`)
-  is in place; only the sync endpoint and Zalo SDK glue are pending.
+Pull the Zalo native label catalog for the given account, upsert it into
+`ZaloLabel` + a per-account `CrmTagGroup` + `CrmTag(managedBy='zalo_sync')`
+rows. Returns counters for what changed.
+
+**Permission:** owner / admin only. Member → 403. Cross-org → 404.
+
+**Body:** empty.
+
+**Response 200:**
+
+```json
+{
+  "synced": {
+    "groupId": "uuid",
+    "labelsCreated": 2,
+    "labelsUpdated": 5,
+    "labelsArchived": 1,
+    "adopted": 0
+  }
+}
+```
+
+- `adopted` counts CRM-only tags whose name collides with an incoming Zalo
+  label — they get `managedBy='zalo_sync'` + `sourceZaloLabelId` set. A
+  warning is logged per adoption.
+- `labelsArchived` counts Zalo-managed tags whose `sourceZaloLabelId` is no
+  longer in the upstream catalog. They get `archivedAt` set + `isActive=false`;
+  **existing `ContactTag` links are preserved** (archive ≠ delete).
+- The `ZaloLabel` mirror table is hard-deleted for rows no longer in Zalo's
+  catalog (the mirror tracks current truth).
+
+**Errors:**
+
+- `400 ZALO_NOT_LOGGED_IN` — account exists but isn't connected.
+- `502 ZALO_BRIDGE_ERROR` — zca-js `getLabels()` threw.
+- `404` — account not in caller's org.
+
+### Out of scope for Phase A / A.1
+
 - **Backfill of existing string tags** — Phase B (separate PR).
-- **Dropping `contacts.tags` Json column** — Phase C (separate PR after
-  ≥ 1 sprint of observing the dual-write).
+- **Dropping `contacts.tags` Json column** — Phase C (after ≥ 1 sprint
+  observing the dual-write).
+- **Push CRM-only tags back to Zalo** — out of Phase 1 scope entirely.
+  Sync is one-way (Zalo → CRM).

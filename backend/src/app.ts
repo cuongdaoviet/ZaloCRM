@@ -22,6 +22,7 @@ import { zaloRoutes } from './modules/zalo/zalo-routes.js';
 import { chatRoutes } from './modules/chat/chat-routes.js';
 import { contactRoutes } from './modules/contacts/contact-routes.js';
 import { crmTagRoutes } from './modules/crm-tags/crm-tag-routes.js';
+import { zaloLabelSyncRoutes } from './modules/crm-tags/zalo-label-sync-routes.js';
 import { contactSubResourceRoutes } from './modules/contacts/contact-sub-resource-routes.js';
 import { contactOverviewRoutes } from './modules/contacts/contact-overview-routes.js';
 import { duplicateRoutes } from './modules/contacts/duplicate-routes.js';
@@ -137,6 +138,7 @@ async function bootstrap() {
   await app.register(chatRoutes);
   await app.register(contactRoutes);
   await app.register(crmTagRoutes);
+  await app.register(zaloLabelSyncRoutes);
   await app.register(contactSubResourceRoutes);
   await app.register(contactOverviewRoutes);
   await app.register(duplicateRoutes);
