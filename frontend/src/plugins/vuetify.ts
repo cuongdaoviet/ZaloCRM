@@ -4,13 +4,41 @@ import { createVuetify } from 'vuetify';
 import * as components from 'vuetify/components';
 import * as directives from 'vuetify/directives';
 
+/**
+ * Vuetify theme — Smax-light là default (ported từ ZaloCRM-3.0 với palette
+ * design tokens Smax). `legacy-dark` giữ lại để toggle "ban đêm" qua nút
+ * sun/moon. Người dùng mới mặc định nhìn thấy Smax-light.
+ */
 export const vuetify = createVuetify({
   components,
   directives,
   theme: {
-    defaultTheme: localStorage.getItem('theme') || 'dark',
+    // localStorage stores 'light' | 'dark' (user-facing key, set by
+    // DefaultLayout). Map to actual Vuetify theme names. Default for
+    // first-time users is the new Smax-light.
+    defaultTheme: localStorage.getItem('theme') === 'dark' ? 'legacy-dark' : 'smax-light',
     themes: {
-      dark: {
+      'smax-light': {
+        dark: false,
+        colors: {
+          background: '#f5f6fa',
+          surface: '#ffffff',
+          'surface-variant': '#fafbfc',
+          'surface-light': '#ffffff',
+          primary: '#2962ff',
+          secondary: '#1f2330',
+          accent: '#2962ff',
+          error: '#ff3d00',
+          warning: '#ff9100',
+          success: '#00c853',
+          info: '#2196f3',
+          'on-background': '#212121',
+          'on-surface': '#212121',
+          'on-primary': '#ffffff',
+          'on-secondary': '#ffffff',
+        },
+      },
+      'legacy-dark': {
         dark: true,
         colors: {
           background: '#0A192F',
@@ -29,30 +57,15 @@ export const vuetify = createVuetify({
           'on-primary': '#0A192F',
         },
       },
-      light: {
-        dark: false,
-        colors: {
-          background: '#F0F4F8',
-          surface: '#FFFFFF',
-          'surface-variant': '#E8EDF2',
-          primary: '#0A192F',
-          secondary: '#112240',
-          accent: '#00B4D8',
-          error: '#D32F2F',
-          warning: '#F57F17',
-          success: '#2E7D32',
-          info: '#0277BD',
-        },
-      },
     },
   },
   defaults: {
-    VBtn: { variant: 'flat', rounded: 'xl' },
-    VTextField: { variant: 'outlined', density: 'compact', rounded: 'xl' },
-    VSelect: { variant: 'outlined', density: 'compact', rounded: 'xl' },
-    VAutocomplete: { variant: 'outlined', density: 'compact', rounded: 'xl' },
-    VTextarea: { variant: 'outlined', density: 'compact', rounded: 'xl' },
-    VCard: { rounded: 'xl', variant: 'flat' },
+    VBtn: { variant: 'flat', rounded: 'lg' },
+    VTextField: { variant: 'outlined', density: 'compact', rounded: 'lg' },
+    VSelect: { variant: 'outlined', density: 'compact', rounded: 'lg' },
+    VAutocomplete: { variant: 'outlined', density: 'compact', rounded: 'lg' },
+    VTextarea: { variant: 'outlined', density: 'compact', rounded: 'lg' },
+    VCard: { rounded: 'md', variant: 'flat' },
     VChip: { rounded: 'lg', size: 'small' },
     VDialog: { maxWidth: 600 },
   },
