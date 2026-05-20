@@ -171,7 +171,56 @@ Thường là vue-tsc error hoặc Vite template parsing fail (vd: `{{ ... }}` l
 | Hàng tháng | Verify restore: chạy thử restore vào DB tạm (vd: `zalocrm_test`) để chắc backup không corrupt |
 | Khi update Node/Postgres major version | Test trên `docker-compose.dev.yml` trước, plan downtime cho prod |
 
-## 9. Tham khảo nhanh
+## 9. App crash-loop sau khi deploy schema destructive
+
+**Triệu chứng:** `docker logs zalo-crm-app` lặp lại
+```
+Error: Use the --accept-data-loss flag to ignore the data loss warnings
+like prisma db push --accept-data-loss
+```
+mỗi ~30 giây.
+
+**Nguyên nhân:** schema mới drop một column mà DB hiện tại có dữ liệu
+non-null (kể cả `[]` cũng tính là non-null). Prisma `db push` từ chối
+silent data loss trong production (NODE_ENV=production trong
+docker-compose.yml). Đây là hành vi cố ý — không phải bug — nhưng cần
+operator can thiệp.
+
+**Xử lý:**
+
+1. **Backup trước:**
+   ```bash
+   docker exec zalo-crm-db pg_dump -U crmuser zalocrm > /tmp/before-migration-$(date +%F).sql
+   ```
+
+2. **Đọc schema mới + xác định column nào bị drop** (so với DB hiện tại):
+   ```bash
+   docker exec zalo-crm-db psql -U crmuser -d zalocrm -c "\d contacts" | grep -i tags
+   ```
+   So sánh với `backend/prisma/schema.prisma`.
+
+3. **Drop column thủ công nếu xác nhận an toàn:**
+   ```bash
+   docker exec zalo-crm-db psql -U crmuser -d zalocrm \
+     -c "ALTER TABLE contacts DROP COLUMN IF EXISTS tags;"
+   ```
+
+4. **Restart app — sẽ tự heal:**
+   ```bash
+   docker restart zalo-crm-app
+   docker logs --tail 20 zalo-crm-app
+   ```
+   Phải thấy `The database is already in sync with the Prisma schema.`
+
+**Phòng ngừa cho lần sau:**
+
+- Trước khi deploy một schema có column drop, chạy migration thủ công
+  trên DB **trước** khi `docker compose up` image mới.
+- `docker-compose.dev.yml` có `NODE_ENV=development`, tức là Dockerfile
+  tự thêm `--accept-data-loss` → môi trường dev/staging tự heal. Chỉ
+  prod (mặc định `docker-compose.yml`) cần can thiệp thủ công.
+
+## 10. Tham khảo nhanh
 
 - Settings: `.env` (KHÔNG commit)
 - Schema: `backend/prisma/schema.prisma`

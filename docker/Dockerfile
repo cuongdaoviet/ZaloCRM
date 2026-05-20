@@ -31,5 +31,13 @@ RUN mkdir -p /var/lib/zalo-crm/files
 
 EXPOSE 3000
 ENTRYPOINT ["/sbin/tini", "--"]
-# Push schema to DB then start server
-CMD ["sh", "-c", "npx prisma db push --url \"$DATABASE_URL\" && node dist/app.js"]
+# Push schema to DB then start server.
+#
+# `--accept-data-loss` is added in NON-production only. Lets dev/staging
+# self-heal across destructive migrations (e.g. column drops where the
+# DB still has rows). Production must NOT auto-accept data loss — a real
+# operator needs to run `npx prisma db push --accept-data-loss` manually
+# after backup + review, or use `prisma migrate deploy` with reviewed
+# migration files. NODE_ENV is set by docker-compose; defaults to
+# production if missing for safety.
+CMD ["sh", "-c", "PUSH_FLAGS=''; if [ \"$NODE_ENV\" != 'production' ]; then PUSH_FLAGS='--accept-data-loss'; fi; npx prisma db push $PUSH_FLAGS --url \"$DATABASE_URL\" && node dist/app.js"]
