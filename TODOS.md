@@ -27,15 +27,16 @@ These are subjective. Reorder freely.
 
 ## P0 — fast unlocks
 
-### 0022 — Conversation filters (unread / no-reply / time / tags)
-**Status:** ❌
-**Source:** v2.1 release notes — "Bộ lọc hội thoại: chưa đọc, chưa trả lời,
-thời gian, tags".
-**Why now:** ConversationList today has only search + account filter.
-Sales spend daily time scrolling looking for "what hasn't been answered".
-**Rough scope:** ~150 LOC frontend (filter chip row above the list) +
-small backend query enrichment if not already supported by GET
-`/conversations`.
+### 0022 — Conversation filters (unread / no-reply / time / tags) ✅ SHIPPED
+**Status:** ✅ Shipped — see [SPEC](docs/features/0022-conversation-filters/SPEC.md).
+**Scope shipped:** 4 chip-row filters above the conversation list
+(`unread`, `unreplied`, `dateFrom/dateTo`, `tags`) + new
+`GET /api/v1/conversations/counts` aggregate endpoint for badge numbers.
+State persisted via the user-preferences KV store (Feature 0016) under
+key `chat.conversation_filters`. Wire-format params match ZaloCRM-3.0
+`FilterRail` so a future Phase 2 sidebar swap doesn't change the API
+contract. Tag filter uses UUIDs via the `ContactTag` junction (deviation
+from 3.0 which used names — required post-Phase 0019-C).
 
 ### 0023 — Hide / archive conversations (Tab "Khác")
 **Status:** ❌

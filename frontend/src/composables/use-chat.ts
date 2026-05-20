@@ -1,8 +1,9 @@
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { api } from '@/api/index';
 import { io, Socket } from 'socket.io-client';
 import type { Contact } from '@/composables/use-contacts';
 import { useReactions, type MessageReaction } from '@/composables/use-reactions';
+import { useUserPreferences } from '@/composables/use-user-preferences';
 
 interface ZaloAccount {
   id: string;
@@ -43,6 +44,29 @@ export interface Message {
   reactions?: MessageReaction[];
 }
 
+/**
+ * Feature 0022 — chip-row filter state for the conversation list.
+ *
+ * Param names mirror ZaloCRM-3.0's `FilterRail` emit payload so a future
+ * Phase 2 (full sidebar) can drop in without changing the wire format.
+ * Tag filter uses our UUIDs (not 3.0's names) — see SPEC deviations.
+ */
+export interface ConversationFilters {
+  unread: boolean;
+  unreplied: boolean;
+  dateFrom: string;
+  dateTo: string;
+  tagIds: string[];
+}
+
+const DEFAULT_FILTERS: ConversationFilters = {
+  unread: false,
+  unreplied: false,
+  dateFrom: '',
+  dateTo: '',
+  tagIds: [],
+};
+
 export function useChat() {
   const conversations = ref<Conversation[]>([]);
   const selectedConvId = ref<string | null>(null);
@@ -56,6 +80,61 @@ export function useChat() {
   const selfUserId = ref<string | null>(null);
   const selfFullName = ref<string | null>(null);
   let socket: Socket | null = null;
+
+  // ── Feature 0022 — filter state + badge counts ─────────────────────────
+  const { usePref } = useUserPreferences();
+  const filters = usePref<ConversationFilters>(
+    'chat.conversation_filters',
+    { ...DEFAULT_FILTERS },
+  );
+  const unreadTotal = ref(0);
+  const unrepliedTotal = ref(0);
+
+  /** True if any filter chip is active. Used to show "Xóa bộ lọc" link. */
+  const hasActiveFilters = computed<boolean>(
+    () =>
+      filters.value.unread ||
+      filters.value.unreplied ||
+      filters.value.dateFrom !== '' ||
+      filters.value.dateTo !== '' ||
+      filters.value.tagIds.length > 0,
+  );
+
+  function resetFilters(): void {
+    filters.value = { ...DEFAULT_FILTERS };
+  }
+
+  /**
+   * Convert the reactive filter state into the query-param shape that the
+   * backend expects. Booleans → "1" / omit; arrays → CSV / omit. Empty
+   * strings are dropped so the URL stays clean.
+   */
+  function buildFilterParams(): Record<string, string> {
+    const out: Record<string, string> = {};
+    if (filters.value.unread) out.unread = '1';
+    if (filters.value.unreplied) out.unreplied = '1';
+    if (filters.value.dateFrom) out.dateFrom = filters.value.dateFrom;
+    if (filters.value.dateTo) out.dateTo = filters.value.dateTo;
+    if (filters.value.tagIds.length > 0) out.tags = filters.value.tagIds.join(',');
+    return out;
+  }
+
+  /**
+   * Fetch the unread / unreplied / total counts from the /counts aggregate
+   * endpoint. These power badge numbers on the chip row. Failure is
+   * non-fatal — UI just hides the badge.
+   */
+  async function fetchConversationCounts(): Promise<void> {
+    try {
+      const params: Record<string, string> = {};
+      if (accountFilter.value) params.accountId = accountFilter.value;
+      const res = await api.get('/conversations/counts', { params });
+      unreadTotal.value = res.data?.unread ?? 0;
+      unrepliedTotal.value = res.data?.unreplied ?? 0;
+    } catch (err) {
+      console.warn('[use-chat] failed to fetch conversation counts:', err);
+    }
+  }
 
   // Reactions composable — operates on the same `messages` ref so optimistic
   // changes and socket events both update the visible thread.
@@ -72,9 +151,13 @@ export function useChat() {
   async function fetchConversations() {
     loadingConvs.value = true;
     try {
-      const res = await api.get('/conversations', {
-        params: { limit: 100, search: searchQuery.value, accountId: accountFilter.value || undefined },
-      });
+      const params: Record<string, string | number | undefined> = {
+        limit: 100,
+        search: searchQuery.value,
+        accountId: accountFilter.value || undefined,
+        ...buildFilterParams(),
+      };
+      const res = await api.get('/conversations', { params });
       conversations.value = res.data.conversations;
     } catch (err) {
       console.error('Failed to fetch conversations:', err);
@@ -221,6 +304,20 @@ export function useChat() {
     }
   }
 
+  // Feature 0022 — when filter state changes (either from chip toggles or
+  // when the persisted prefs hydrate after first load), re-fetch the list.
+  // Counts only depend on accountFilter, so they refresh independently.
+  watch(
+    filters,
+    () => {
+      void fetchConversations();
+    },
+    { deep: true },
+  );
+  watch(accountFilter, () => {
+    void fetchConversationCounts();
+  });
+
   return {
     conversations,
     selectedConvId,
@@ -233,6 +330,13 @@ export function useChat() {
     accountFilter,
     selfUserId,
     selfFullName,
+    // Feature 0022 — filter state + count badges exposed to the view layer
+    filters,
+    hasActiveFilters,
+    unreadTotal,
+    unrepliedTotal,
+    resetFilters,
+    fetchConversationCounts,
     fetchConversations,
     selectConversation,
     sendMessage,

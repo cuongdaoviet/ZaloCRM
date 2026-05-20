@@ -8,11 +8,17 @@
         :loading="loadingConvs"
         :pinned-ids="pinnedIds"
         :pinned-order="pinnedOrder"
+        :filters="filters"
+        :has-active-filters="hasActiveFilters"
+        :unread-total="unreadTotal"
+        :unreplied-total="unrepliedTotal"
         v-model:search="searchQuery"
         @select="selectConversation"
         @filter-account="onFilterAccount"
         @new-chat="showNewChatDialog = true"
         @toggle-pin="togglePin"
+        @update:filters="filters = $event"
+        @reset-filters="resetFilters"
       />
       <!-- Resize handle -->
       <div class="resize-handle" @mousedown="startResize('left', $event)" />
@@ -78,6 +84,9 @@ const {
   conversations, selectedConvId, selectedConv, messages,
   loadingConvs, loadingMsgs, sendingMsg, searchQuery, accountFilter,
   selfUserId, selfFullName,
+  // Feature 0022 — filter state, badge counts, helpers
+  filters, hasActiveFilters, unreadTotal, unrepliedTotal,
+  resetFilters, fetchConversationCounts,
   fetchConversations, selectConversation, sendMessage, sendAttachment, createConversation,
   initSocket, destroySocket, addOrToggleReaction,
 } = useChat();
@@ -174,6 +183,7 @@ onMounted(() => {
   selfUserId.value = auth.user?.id ?? null;
   selfFullName.value = auth.user?.fullName ?? null;
   fetchConversations();
+  fetchConversationCounts();
   fetchPinned();
   initSocket();
 });
