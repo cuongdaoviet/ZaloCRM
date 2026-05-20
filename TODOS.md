@@ -57,15 +57,8 @@ Zalo display name that helps disambiguate cold-leads.
 incoming-message-handler write). UI shows `crmName` primary, `zaloName`
 muted secondary. ~120 LOC.
 
-### 0025 — Inline video player
-**Status:** ❌
-**Source:** v3.0 release notes — "Tin nhắn video render trực tiếp với
-controls trong bubble".
-**Why now:** Today video messages render as the text `🎥 Video` and
-require the rep to open Zalo on their phone to actually watch. Trivial
-fix: `<video controls :src="msg.attachments[0].url" />`.
-**Rough scope:** ~30 LOC in MessageThread.vue. CSS for max-width. Lazy-
-load via `preload="metadata"`. Done in an afternoon.
+### 0025 — Inline video player ✅ SHIPPED
+**Status:** ✅ Shipped — see [SPEC](docs/features/0025-video-player/SPEC.md).
 
 ### 0026 — Mention rendering + auto-complete
 **Status:** ❌
