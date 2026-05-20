@@ -54,6 +54,18 @@ export function attachZaloListener(ctx: ListenerContext): void {
           conversationId: result.conversationId,
         });
 
+        // Feature 0023 — auto-promote: when handleIncomingMessage flipped a
+        // tab='other' conversation back to 'main' on inbound (BR-0005), tell
+        // the FE so it can move the row between tabs and bump the badge.
+        if (result.tabPromoted) {
+          io?.emit('chat:tab', {
+            accountId,
+            conversationId: result.conversationId,
+            tab: 'main',
+            reason: 'inbound_message',
+          });
+        }
+
         // Feature 0005: fire-and-forget auto-reply evaluation. Errors are
         // swallowed inside maybeAutoReply so they never break the listener.
         void maybeAutoReply({
@@ -101,6 +113,14 @@ export function attachZaloListener(ctx: ListenerContext): void {
             message: result.message,
             conversationId: result.conversationId,
           });
+          if (result.tabPromoted) {
+            io?.emit('chat:tab', {
+              accountId,
+              conversationId: result.conversationId,
+              tab: 'main',
+              reason: 'inbound_message',
+            });
+          }
         }
       } catch (err) {
         logger.warn(`[zalo:${accountId}] old_messages item error:`, err);

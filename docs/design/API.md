@@ -1318,3 +1318,142 @@ interface ConversationFilters {
   tagIds: string[];
 }
 ```
+
+## Feature 0023 — Hide / archive conversations (Tab "Khác")
+
+Splits the conversation list into two tabs: **Chính** (`main`) and **Khác**
+(`other`). Right-click a row → "Ẩn vào tab Khác" / "Đưa về tab Chính".
+Inbound contact messages on a hidden conversation auto-promote it back to
+`main` (BR-0005). Wire format mirrors ZaloCRM-3.0's `tab` field. See
+[features/0023-hide-archive-conversations/SPEC.md](../features/0023-hide-archive-conversations/SPEC.md).
+
+### PATCH `/api/v1/conversations/:id/tab`
+
+Move a single conversation between the `main` and `other` tabs.
+
+**Permission:** `requireZaloAccess('chat')` — owner/admin bypass; members
+need `chat` or `admin` on the underlying Zalo account.
+
+**Body:**
+
+```json
+{ "tab": "main" }
+```
+
+`tab` must be `"main"` or `"other"`. Anything else → **400**.
+
+**Response 200:**
+
+```json
+{ "success": true, "tab": "other" }
+```
+
+**Errors:**
+
+| Status | When |
+|---|---|
+| 400 | `tab` missing or not in `["main","other"]` — `{ "error": "tab phải là \"main\" hoặc \"other\"" }` |
+| 403 | Caller lacks `chat` ACL on the Zalo account |
+| 404 | Cross-org or unknown conversation id — `{ "error": "Không tìm thấy cuộc trò chuyện" }` |
+
+**Side effects:** emits Socket.IO `chat:tab` with payload
+`{ conversationId, tab, reason: 'manual' }` so other open tabs / clients
+can move the row in their local list.
+
+#### Route ordering
+
+`/api/v1/conversations/:id/tab` is registered **before**
+`/api/v1/conversations/:id` so Fastify doesn't swallow the literal `/tab`
+segment as part of `:id` (same pattern as Feature 0015 `/pinned` and
+Feature 0022 `/counts`).
+
+### GET `/api/v1/conversations` — added `tab` query param
+
+| Param | Type | Description |
+|---|---|---|
+| `tab` | `'main' \| 'other' \| ''` | Filter by tab. Omitted → returns conversations from **both** tabs (back-compat for callers like campaigns, dashboard, search). |
+
+Composes AND with existing filters (`unread`, `unreplied`, `dateFrom`,
+`dateTo`, `tags`, `search`, `accountId`).
+
+### GET `/api/v1/conversations/counts` — extended response
+
+Two new integer fields are added; existing fields are unchanged.
+
+**Response 200:**
+
+```json
+{
+  "unread": 12,
+  "unreplied": 7,
+  "total": 84,
+  "mainUnread": 9,
+  "otherUnread": 3
+}
+```
+
+- `mainUnread` = count of conversations with `tab='main' AND unreadCount > 0`.
+- `otherUnread` = count of conversations with `tab='other' AND unreadCount > 0`.
+- Existing `unread` is the sum across both tabs (preserves Feature 0022
+  back-compat).
+
+### Auto-promote (BR-0005)
+
+When `handleIncomingMessage` persists an inbound message
+(`senderType='contact'`, i.e. customer-sent) on a conversation whose
+`tab='other'`, the conversation is flipped back to `tab='main'` in the
+same transaction-pair as the unread-count bump. The Zalo listener then
+broadcasts:
+
+```json
+{
+  "accountId": "uuid",
+  "conversationId": "uuid",
+  "tab": "main",
+  "reason": "inbound_message"
+}
+```
+
+over Socket.IO event `chat:tab`. Self-sent (`isSelf=true`) messages do
+**not** trigger auto-promote — a rep replying inside the Khác tab should
+not yank the row back to Chính.
+
+### Schema change
+
+```prisma
+model Conversation {
+  // ...
+  tab String @default("main") @map("tab")  // "main" | "other"
+
+  @@index([orgId, tab, lastMessageAt(sort: Desc)])
+}
+```
+
+Migration is additive with a safe default — existing rows automatically
+get `tab='main'`. No data backfill script needed.
+
+### User preference
+
+The `chat.conversation_filters` user-pref key (introduced in Feature
+0022) gains an optional `tab` field:
+
+```ts
+interface ConversationFilters {
+  unread: boolean;
+  unreplied: boolean;
+  dateFrom: string;
+  dateTo: string;
+  tagIds: string[];
+  tab: 'main' | 'other'; // Feature 0023 — defaults to 'main'
+}
+```
+
+Legacy persisted prefs without `tab` are upgraded transparently — the
+frontend treats missing `tab` as `'main'`.
+
+### Deviation from ZaloCRM-3.0
+
+Same field name, same values, same wire format. The only extension is
+the auto-promote behavior — 3.0's reference implementation has the tab
+field + PATCH + filter param but no auto-promote on inbound. Documented
+in the feature SPEC's Deviations section.

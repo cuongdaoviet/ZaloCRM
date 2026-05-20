@@ -42,10 +42,15 @@ export async function chatRoutes(app: FastifyInstance) {
       from = '',
       to = '',
       tags = '',
+      // Feature 0023 — split inbox into "main" (Chính) / "other" (Khác).
+      // Omitted → no filter (returns both tabs) for back-compat with
+      // existing callers (campaigns, dashboard, search).
+      tab = '',
     } = request.query as QueryParams;
 
     const where: any = { orgId: user.orgId };
     if (accountId) where.zaloAccountId = accountId;
+    if (tab) where.tab = tab;
 
     // Build a single `contact` sub-filter that composes search + tag filter.
     const contactWhere: any = {};
@@ -156,14 +161,63 @@ export async function chatRoutes(app: FastifyInstance) {
       }
     }
 
-    const [unread, unreplied, total] = await Promise.all([
+    // Feature 0023 — `mainUnread` / `otherUnread` break down the unread total
+    // by tab so the FE can render per-tab badges. Existing `unread` is the
+    // sum across both tabs (back-compat with Feature 0022).
+    const [unread, unreplied, total, mainUnread, otherUnread] = await Promise.all([
       prisma.conversation.count({ where: { ...baseWhere, unreadCount: { gt: 0 } } }),
       prisma.conversation.count({ where: { ...baseWhere, isReplied: false } }),
       prisma.conversation.count({ where: baseWhere }),
+      prisma.conversation.count({
+        where: { ...baseWhere, unreadCount: { gt: 0 }, tab: 'main' },
+      }),
+      prisma.conversation.count({
+        where: { ...baseWhere, unreadCount: { gt: 0 }, tab: 'other' },
+      }),
     ]);
 
-    return reply.send({ unread, unreplied, total });
+    return reply.send({ unread, unreplied, total, mainUnread, otherUnread });
   });
+
+  // ── Move conversation between tabs (feature 0023) ────────────────────────
+  // PATCH /api/v1/conversations/:id/tab — body: { tab: 'main' | 'other' }.
+  // Permission: requireZaloAccess('chat'). Owner/admin bypass; members need
+  // 'chat' or 'admin' on the underlying Zalo account.
+  // Cross-org → 404 (updateMany returns 0 because orgId filter doesn't match).
+  app.patch(
+    '/api/v1/conversations/:id/tab',
+    { preHandler: requireZaloAccess('chat') },
+    async (request, reply) => {
+      const user = request.user!;
+      const { id } = request.params as { id: string };
+      const { tab } = (request.body ?? {}) as { tab?: string };
+
+      if (!tab || !['main', 'other'].includes(tab)) {
+        return reply.status(400).send({ error: 'tab phải là "main" hoặc "other"' });
+      }
+
+      const updated = await prisma.conversation.updateMany({
+        where: { id, orgId: user.orgId },
+        data: { tab },
+      });
+
+      if (updated.count === 0) {
+        return reply.status(404).send({ error: 'Không tìm thấy cuộc trò chuyện' });
+      }
+
+      // Broadcast so other tabs / clients can move the row between tabs.
+      // `reason: 'manual'` lets the FE distinguish user actions from
+      // auto-promote (BR-0005) and decide whether to show a toast.
+      const io = (app as any).io as Server | undefined;
+      io?.emit('chat:tab', {
+        conversationId: id,
+        tab,
+        reason: 'manual',
+      });
+
+      return { success: true, tab };
+    },
+  );
 
   // ── Get single conversation ──────────────────────────────────────────────
   app.get('/api/v1/conversations/:id', async (request: FastifyRequest, reply: FastifyReply) => {

@@ -37,6 +37,9 @@ describe('processZaloMessage', () => {
       conversationId: 'c',
       orgId: 'o',
       contactId: null,
+      // Feature 0023 — required field on HandleMessageResult; default false
+      // because none of these unit tests exercise the auto-promote path.
+      tabPromoted: false,
     });
   });
 

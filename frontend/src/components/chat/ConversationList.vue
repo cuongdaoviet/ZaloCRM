@@ -35,6 +35,37 @@
       />
     </div>
 
+    <!-- Tab bar (feature 0023): Chính / Khác — each tab has its own unread badge -->
+    <v-tabs
+      :model-value="activeTab"
+      density="compact"
+      color="primary"
+      grow
+      class="conv-tabs"
+      @update:model-value="onTabChange"
+    >
+      <v-tab value="main">
+        <span>Chính</span>
+        <v-badge
+          v-if="(mainUnread ?? 0) > 0"
+          :content="mainUnread"
+          color="error"
+          inline
+          class="ml-1"
+        />
+      </v-tab>
+      <v-tab value="other">
+        <span>Khác</span>
+        <v-badge
+          v-if="(otherUnread ?? 0) > 0"
+          :content="otherUnread"
+          color="error"
+          inline
+          class="ml-1"
+        />
+      </v-tab>
+    </v-tabs>
+
     <!-- Filter chip row (feature 0022) -->
     <ConversationFilters
       v-if="filters"
@@ -113,6 +144,7 @@
         :key="conv.id"
         :active="conv.id === selectedId"
         @click="$emit('select', conv.id)"
+        @contextmenu.prevent="openContextMenu($event, conv)"
         class="py-2 conversation-row"
         :class="{ 'conversation-active': conv.id === selectedId, 'bg-blue-lighten-5': conv.unreadCount > 0 && conv.id !== selectedId }"
       >
@@ -166,12 +198,38 @@
         Chưa có cuộc trò chuyện nào
       </div>
     </v-list>
+
+    <!-- Context menu (feature 0023): right-click a row to hide/restore it -->
+    <v-menu
+      v-model="contextMenu.show"
+      :target="[contextMenu.x, contextMenu.y]"
+      :close-on-content-click="true"
+    >
+      <v-list density="compact">
+        <v-list-item
+          v-if="contextMenu.conv && (contextMenu.conv.tab ?? 'main') === 'main'"
+          prepend-icon="mdi-archive-arrow-down-outline"
+          title="Ẩn vào tab Khác"
+          @click="onContextMenuArchive('other')"
+        />
+        <v-list-item
+          v-else-if="contextMenu.conv && contextMenu.conv.tab === 'other'"
+          prepend-icon="mdi-archive-arrow-up-outline"
+          title="Đưa về tab Chính"
+          @click="onContextMenuArchive('main')"
+        />
+      </v-list>
+    </v-menu>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import type { Conversation, ConversationFilters as ConvFilters } from '@/composables/use-chat';
+import type {
+  Conversation,
+  ConversationFilters as ConvFilters,
+  ConversationTab,
+} from '@/composables/use-chat';
 import ConversationFilters from '@/components/chat/ConversationFilters.vue';
 import { api } from '@/api/index';
 
@@ -193,9 +251,12 @@ const props = defineProps<{
   hasActiveFilters?: boolean;
   unreadTotal?: number;
   unrepliedTotal?: number;
+  // Feature 0023 — per-tab badge counts (sourced from /conversations/counts)
+  mainUnread?: number;
+  otherUnread?: number;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   select: [id: string];
   'update:search': [value: string];
   'filter-account': [accountId: string | null];
@@ -207,7 +268,52 @@ defineEmits<{
   // ConversationFilters.vue if it needs it.
   'update:filters': [filters: ConvFilters];
   'reset-filters': [];
+  // Feature 0023 — Chính / Khác tab switch.
+  'update:tab': [tab: ConversationTab];
+  // Feature 0023 — context-menu action: move a single row between tabs.
+  'set-conv-tab': [convId: string, tab: ConversationTab];
 }>();
+
+// ── Feature 0023 — Tab bar + context menu ───────────────────────────────
+const activeTab = computed<ConversationTab>(() => props.filters?.tab ?? 'main');
+
+function onTabChange(value: unknown): void {
+  const tab = value === 'other' ? 'other' : 'main';
+  emit('update:tab', tab);
+}
+
+interface ContextMenuState {
+  show: boolean;
+  x: number;
+  y: number;
+  conv: Conversation | null;
+}
+
+const contextMenu = ref<ContextMenuState>({
+  show: false,
+  x: 0,
+  y: 0,
+  conv: null,
+});
+
+function openContextMenu(event: MouseEvent, conv: Conversation): void {
+  // Force a fresh menu open so coords update even on consecutive right-clicks.
+  contextMenu.value.show = false;
+  contextMenu.value.x = event.clientX;
+  contextMenu.value.y = event.clientY;
+  contextMenu.value.conv = conv;
+  // Re-open on the next microtask so v-menu picks up the new target coords.
+  void Promise.resolve().then(() => {
+    contextMenu.value.show = true;
+  });
+}
+
+function onContextMenuArchive(tab: ConversationTab): void {
+  const conv = contextMenu.value.conv;
+  contextMenu.value.show = false;
+  if (!conv) return;
+  emit('set-conv-tab', conv.id, tab);
+}
 
 // Split the incoming list into pinned vs. unpinned. When `pinnedOrder` is
 // supplied we sort the pinned slice by it so the section matches the
@@ -305,5 +411,13 @@ function formatTime(dateStr: string | null): string {
 .conversation-row:hover .conv-pin-btn,
 .conversation-row:focus-within .conv-pin-btn {
   opacity: 1;
+}
+
+/* Feature 0023 — tighten the tab bar so it fits the slim Smax-light header. */
+.conv-tabs :deep(.v-tab) {
+  min-width: 0;
+  font-size: 0.85rem;
+  letter-spacing: 0;
+  text-transform: none;
 }
 </style>
