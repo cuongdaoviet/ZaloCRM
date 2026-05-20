@@ -80,6 +80,17 @@
                 </div>
                 <!-- Sticker/Video/Voice/GIF -->
                 <div v-else-if="msg.contentType === 'sticker'">🏷️ Sticker</div>
+                <!-- Video (feature 0025) — inline HTML5 player with native
+                     controls. User-uploaded Zalo videos don't ship captions,
+                     so no <track> elements (Web:S4084 acceptable). -->
+                <!-- NOSONAR -->
+                <video
+                  v-else-if="getVideoInfo(msg)"
+                  controls preload="metadata"
+                  class="chat-video"
+                  :src="getVideoInfo(msg)!.href"
+                  :poster="getVideoInfo(msg)!.poster || undefined"
+                />
                 <div v-else-if="msg.contentType === 'video'">🎥 Video</div>
                 <div v-else-if="msg.contentType === 'voice'">🎤 Tin nhắn thoại</div>
                 <div v-else-if="msg.contentType === 'gif'">GIF</div>
@@ -514,6 +525,34 @@ function getFileInfo(msg: Message): { name: string; size: string; href: string }
   return null;
 }
 
+/**
+ * Extract video URL from a video message (feature 0025).
+ * Zalo video messages come in as JSON content with `href` for the playable
+ * mp4 and an optional `thumb` for the poster image. Returns null if we
+ * can't find a usable URL — caller falls through to the "🎥 Video" text
+ * placeholder.
+ */
+function getVideoInfo(
+  msg: Message,
+): { href: string; poster: string | null } | null {
+  if (msg.contentType !== 'video') return null;
+  if (!msg.content) return null;
+  // Plain URL form (rare but possible)
+  if (msg.content.startsWith('http')) {
+    return { href: msg.content, poster: null };
+  }
+  if (!msg.content.startsWith('{')) return null;
+  try {
+    const p = JSON.parse(msg.content);
+    const href = p.hdUrl || p.href || '';
+    if (!href || !href.startsWith('http')) return null;
+    const poster = typeof p.thumb === 'string' && p.thumb.startsWith('http') ? p.thumb : null;
+    return { href, poster };
+  } catch {
+    return null;
+  }
+}
+
 function parseDisplayContent(content: string | null): string {
   if (!content) return '';
   if (!content.startsWith('{')) return content;
@@ -622,6 +661,7 @@ function emitAppointmentSuggest() {
 .file-card { display: flex; align-items: center; padding: 8px 12px; border-radius: 8px; background: rgba(0, 242, 255, 0.05); border: 1px solid rgba(0, 242, 255, 0.1); }
 .chat-image { max-width: 100%; max-height: 300px; border-radius: 12px; cursor: pointer; transition: transform 0.2s; }
 .chat-image:hover { transform: scale(1.02); }
+.chat-video { max-width: 100%; max-height: 360px; border-radius: 12px; background: #000; display: block; }
 .attachment-thumb {
   width: 56px;
   height: 56px;
