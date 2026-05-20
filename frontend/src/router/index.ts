@@ -129,6 +129,12 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/settings/tags',
+    name: 'SettingsTags',
+    component: () => import('@/views/SettingsTagsView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('@/views/NotFoundView.vue'),

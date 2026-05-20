@@ -8,6 +8,10 @@ import { prisma } from '../../shared/database/prisma-client.js';
 import { authMiddleware } from '../auth/auth-middleware.js';
 import { logger } from '../../shared/utils/logger.js';
 import { logActivityAsync } from '../activity/activity-service.js';
+import {
+  setContactTags,
+  legacyTagsByName,
+} from '../crm-tags/crm-tag-service.js';
 
 type QueryParams = Record<string, string>;
 
@@ -18,6 +22,7 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/v1/contacts', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const user = request.user!;
+      const queryRaw = request.query as Record<string, string | string[] | undefined>;
       const {
         page = '1',
         limit = '50',
@@ -25,7 +30,7 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
         source = '',
         status = '',
         assignedUserId = '',
-      } = request.query as QueryParams;
+      } = queryRaw as QueryParams;
 
       // Feature 0018: exclude contacts that have been merged into a primary.
       // List default omits them so the merged-secondary tombstones don't show
@@ -40,6 +45,20 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
           { phone: { contains: search } },
           { email: { contains: search, mode: 'insensitive' } },
         ];
+      }
+
+      // Feature 0019 — filter by tagIds (OR semantics: any one of the tag ids matches).
+      // Accepts a single string or an array; Fastify parses repeated `?tagIds=...`
+      // params as an array, `?tagIds=A,B` as a string we split on comma.
+      const tagIdsRaw = queryRaw.tagIds;
+      let tagIds: string[] = [];
+      if (Array.isArray(tagIdsRaw)) {
+        tagIds = tagIdsRaw.filter((v): v is string => typeof v === 'string');
+      } else if (typeof tagIdsRaw === 'string' && tagIdsRaw.length > 0) {
+        tagIds = tagIdsRaw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+      }
+      if (tagIds.length > 0) {
+        where.contactTags = { some: { tagId: { in: tagIds } } };
       }
 
       const pageNum = parseInt(page);
@@ -246,18 +265,51 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── PUT /api/v1/contacts/:id/tags — update tags only ─────────────────────
+  // Feature 0019 Phase A — accepts BOTH body shapes:
+  //   NEW:    { tagIds: string[] }  → setContactTags directly
+  //   LEGACY: { tags:   string[] }  → upsert by name (case-folded) → setContactTags
+  //
+  // Both paths converge on setContactTags which writes ContactTag rows AND
+  // mirrors the resulting tag NAMES into contact.tags (Json) so existing
+  // readers (campaigns / KPI / Customer 360) keep working.
   app.put('/api/v1/contacts/:id/tags', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const user = request.user!;
       const { id } = request.params as { id: string };
-      const { tags } = request.body as { tags: string[] };
+      const body = (request.body ?? {}) as { tagIds?: unknown; tags?: unknown };
 
-      if (!Array.isArray(tags)) return reply.status(400).send({ error: 'tags must be an array' });
-
-      const existing = await prisma.contact.findFirst({ where: { id, orgId: user.orgId }, select: { id: true } });
+      const existing = await prisma.contact.findFirst({
+        where: { id, orgId: user.orgId },
+        select: { id: true, tags: true },
+      });
       if (!existing) return reply.status(404).send({ error: 'Contact not found' });
 
-      const updated = await prisma.contact.update({ where: { id }, data: { tags } });
+      let tagIds: string[];
+      if (Array.isArray(body.tagIds)) {
+        tagIds = body.tagIds.filter((s): s is string => typeof s === 'string');
+      } else if (Array.isArray(body.tags)) {
+        // Legacy path — log a single deprecation warning and convert.
+        logger.warn(
+          '[crm-tags] legacy {tags} body received on PUT /contacts/:id/tags — ' +
+            'caller should migrate to {tagIds}',
+        );
+        tagIds = await legacyTagsByName(user.orgId, body.tags as unknown[], user.id);
+      } else {
+        return reply
+          .status(400)
+          .send({ error: 'Phải truyền tagIds (string[]) hoặc tags (string[])' });
+      }
+
+      const result = await setContactTags(user.orgId, id, tagIds, user.id);
+      if (!result.ok) {
+        const code = result.error.code;
+        const status =
+          code === 'NOT_FOUND' ? 404 : code === 'INVALID_TAG_ID' || code === 'TAG_ARCHIVED' ? 400 : 400;
+        return reply.status(status).send({ error: result.error.message, code });
+      }
+
+      // Return the updated contact so the FE can refresh chips immediately.
+      const updated = await prisma.contact.findUnique({ where: { id } });
       return updated;
     } catch (err) {
       logger.error('[contacts] Update tags error:', err);

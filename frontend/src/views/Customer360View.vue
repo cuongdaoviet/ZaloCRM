@@ -30,10 +30,18 @@
               <span v-if="overview.contact.source" class="ml-4"><v-icon size="14">mdi-source-branch</v-icon> {{ overview.contact.source }}</span>
             </div>
             <div v-if="(overview.contact.tags || []).length" class="mt-2">
-              <v-chip
-                v-for="t in overview.contact.tags" :key="t"
-                size="x-small" variant="outlined" class="mr-1"
-              >{{ t }}</v-chip>
+              <span
+                v-for="t in overview.contact.tags"
+                :key="t"
+                class="mr-1 mb-1 d-inline-block tag-clickable"
+                @click="navigateToTag(t)"
+              >
+                <TagChip
+                  :name="t"
+                  :color="resolveColor(t)"
+                  :emoji="resolveEmoji(t)"
+                />
+              </span>
             </div>
           </div>
 
@@ -226,16 +234,40 @@
 
 <script setup lang="ts">
 import { onMounted } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import {
   useCustomerOverview,
   STATUS_LABELS,
   ORDER_STATUS_LABELS,
   APPOINTMENT_STATUS_LABELS,
 } from '@/composables/use-customer-overview';
+import TagChip from '@/components/tags/TagChip.vue';
+import { useCrmTags } from '@/composables/use-crm-tags';
 
 const route = useRoute();
+const router = useRouter();
 const { overview, loading, error, fetchOverview } = useCustomerOverview();
+
+// Feature 0019: enrich chips with color/emoji from the CRM tag cache.
+const { loadTags, resolveByName } = useCrmTags();
+loadTags();
+
+function resolveColor(name: string): string {
+  return resolveByName(name)?.color ?? '#9E9E9E';
+}
+function resolveEmoji(name: string): string | null {
+  return resolveByName(name)?.emoji ?? null;
+}
+
+function navigateToTag(name: string) {
+  const tag = resolveByName(name);
+  if (tag) {
+    router.push({ path: '/contacts', query: { tagIds: tag.id } });
+  } else {
+    // Fall back to name-based query for tags not yet in cache (Phase A).
+    router.push({ path: '/contacts', query: { tags: name } });
+  }
+}
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
@@ -251,3 +283,12 @@ onMounted(() => {
   if (id) fetchOverview(id);
 });
 </script>
+
+<style scoped>
+.tag-clickable {
+  cursor: pointer;
+}
+.tag-clickable:hover {
+  filter: brightness(0.95);
+}
+</style>

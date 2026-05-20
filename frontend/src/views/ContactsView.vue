@@ -164,12 +164,15 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue';
+import { useRoute } from 'vue-router';
 import ContactFilters from '@/components/contacts/ContactFilters.vue';
 import ContactDetailDialog from '@/components/contacts/ContactDetailDialog.vue';
 import { useContacts, SOURCE_OPTIONS, STATUS_OPTIONS } from '@/composables/use-contacts';
 import type { Contact } from '@/composables/use-contacts';
 import { useFriendship, type BulkResult } from '@/composables/use-friendship';
 import { useZaloAccounts } from '@/composables/use-zalo-accounts';
+
+const route = useRoute();
 
 const { contacts, total, loading, filters, pagination, fetchContacts } = useContacts();
 const { bulkEnqueue } = useFriendship();
@@ -285,7 +288,20 @@ async function submitBulkFriendship() {
   }
 }
 
+// Feature 0019: pre-seed tag filter from ?tagIds=A,B query (Customer 360 click).
+function applyQueryFilters() {
+  const raw = route.query.tagIds;
+  let ids: string[] = [];
+  if (Array.isArray(raw)) {
+    ids = raw.filter((v): v is string => typeof v === 'string');
+  } else if (typeof raw === 'string' && raw.length > 0) {
+    ids = raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+  }
+  if (ids.length > 0) filters.tagIds = ids;
+}
+
 onMounted(() => {
+  applyQueryFilters();
   fetchContacts();
   fetchAccounts();
 });
