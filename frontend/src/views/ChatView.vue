@@ -7,6 +7,7 @@
         :selected-id="selectedConvId"
         :loading="loadingConvs"
         :pinned-ids="pinnedIds"
+        :pinned-order="pinnedOrder"
         v-model:search="searchQuery"
         @select="selectConversation"
         @filter-account="onFilterAccount"
@@ -77,7 +78,7 @@ const {
   initSocket, destroySocket,
 } = useChat();
 
-const { pinnedIds, fetchPinned, togglePin } = usePinnedConversations();
+const { pinnedIds, pinnedOrder, fetchPinned, togglePin } = usePinnedConversations();
 
 async function onTogglePinHeader() {
   if (!selectedConv.value) return;
