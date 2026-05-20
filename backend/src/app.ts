@@ -48,6 +48,7 @@ import { campaignRoutes } from './modules/campaigns/campaign-routes.js';
 import { startCampaignWorker } from './modules/campaigns/campaign-worker.js';
 import { keywordRuleRoutes } from './modules/keyword-rules/keyword-rule-routes.js';
 import { conversationNoteRoutes } from './modules/conversation-notes/conversation-note-routes.js';
+import { pinConversationRoutes } from './modules/conversations/pin-routes.js';
 import { activityRoutes } from './modules/activity/activity-routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -151,6 +152,7 @@ async function bootstrap() {
   await app.register(campaignRoutes);
   await app.register(keywordRuleRoutes);
   await app.register(conversationNoteRoutes);
+  await app.register(pinConversationRoutes);
   await app.register(activityRoutes);
 
   // Liveness/readiness probe — also checks DB connectivity

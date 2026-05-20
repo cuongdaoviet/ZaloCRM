@@ -245,3 +245,103 @@ are swallowed so a prune problem can't break delivery.
 Timeout per attempt is **10 seconds** (`AbortSignal.timeout`). On timeout or
 network error, `responseStatus` is `null` and `errorMessage` carries the JS
 error like `AbortError: This operation was aborted`.
+
+---
+
+## Feature 0015 — Pinned conversations
+
+Per-org "pinned to top" flag for conversations. Pins are **org-shared** (one
+row per conversation, every user in the org with access to the underlying
+Zalo account sees the same pinned state), not per-user. Backed by the
+`pinned_conversations` table; see
+[features/0015-pinned-conversations/SPEC.md](../features/0015-pinned-conversations/SPEC.md).
+
+### POST `/api/v1/conversations/:id/pin`
+
+Pin a conversation. **Idempotent** — calling twice never errors.
+
+**Permission:** `requireZaloAccess('chat')` (owner/admin bypass).
+
+**Body:** none.
+
+**Responses:**
+
+| Status | Meaning |
+| --- | --- |
+| `201` | New pin created. |
+| `200` | Already pinned — existing row is returned unchanged. |
+| `403` | Caller has no Zalo account access or only `read`. |
+| `404` | Conversation does not exist in caller's org (cross-org-safe). |
+
+**Response 201 / 200 body:**
+
+```json
+{
+  "id": "uuid",
+  "orgId": "uuid",
+  "zaloAccountId": "uuid",
+  "conversationId": "uuid",
+  "pinnedAt": "2026-05-20T08:00:00.000Z"
+}
+```
+
+### DELETE `/api/v1/conversations/:id/pin`
+
+Unpin a conversation. **Idempotent** — returns `204` whether or not a pin
+existed previously.
+
+**Permission:** `requireZaloAccess('chat')` (owner/admin bypass).
+
+**Responses:**
+
+| Status | Meaning |
+| --- | --- |
+| `204` | No content — pin is gone (or was never present). |
+| `403` | Insufficient Zalo account access. |
+| `404` | Cross-org. |
+
+### GET `/api/v1/conversations/pinned`
+
+List pinned conversations for the caller's org, sorted by `pinnedAt DESC`.
+
+**Permission:** auth-only.
+- **Owner / admin** → every pin in the org.
+- **Member** → only pins on Zalo accounts the member has any ACL on (i.e.
+  filtered to `zaloAccountId IN (...accessible)`).
+
+**Response 200:**
+
+```json
+{
+  "conversations": [
+    {
+      "id": "uuid",
+      "orgId": "uuid",
+      "zaloAccountId": "uuid",
+      "contactId": "uuid | null",
+      "threadType": "user | group",
+      "externalThreadId": "string | null",
+      "lastMessageAt": "ISO8601 | null",
+      "unreadCount": 0,
+      "isReplied": true,
+      "createdAt": "ISO8601",
+      "contact": { "id": "uuid", "fullName": "string", "phone": "string", "avatarUrl": "string | null", "zaloUid": "string | null" },
+      "zaloAccount": { "id": "uuid", "displayName": "string | null", "zaloUid": "string | null" },
+      "messages": [ { "content": "...", "contentType": "text", "senderType": "self", "sentAt": "ISO8601", "isDeleted": false } ],
+      "pinnedAt": "ISO8601"
+    }
+  ]
+}
+```
+
+Items are flattened — the `pinnedAt` field is hoisted onto the conversation
+object so the frontend can render Pinned and regular conversation cards with
+the same component.
+
+### Route ordering note
+
+`/api/v1/conversations/pinned` is registered as a literal static path while
+`/api/v1/conversations/:id` (in `chat-routes.ts`) uses a parameterized
+segment. Fastify's radix-tree router matches static segments before
+parameters, so the literal `pinned` route always wins — even though both are
+3-segment GETs.

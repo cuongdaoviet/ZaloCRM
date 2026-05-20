@@ -6,10 +6,12 @@
         :conversations="conversations"
         :selected-id="selectedConvId"
         :loading="loadingConvs"
+        :pinned-ids="pinnedIds"
         v-model:search="searchQuery"
         @select="selectConversation"
         @filter-account="onFilterAccount"
         @new-chat="showNewChatDialog = true"
+        @toggle-pin="togglePin"
       />
       <!-- Resize handle -->
       <div class="resize-handle" @mousedown="startResize('left', $event)" />
@@ -21,9 +23,11 @@
       :messages="messages"
       :loading="loadingMsgs"
       :sending="sendingMsg"
+      :is-pinned="selectedConv ? pinnedIds.has(selectedConv.id) : false"
       @send="sendMessage"
       @send-attachment="onSendAttachment"
       @toggle-contact-panel="showContactPanel = !showContactPanel"
+      @toggle-pin="onTogglePinHeader"
       :show-contact-panel="showContactPanel"
       style="flex: 1; min-width: 300px;"
     />
@@ -60,6 +64,7 @@ import MessageThread from '@/components/chat/MessageThread.vue';
 import ChatContactPanel from '@/components/chat/ChatContactPanel.vue';
 import NewChatDialog from '@/components/chat/NewChatDialog.vue';
 import { useChat } from '@/composables/use-chat';
+import { usePinnedConversations } from '@/composables/use-pinned-conversations';
 
 const {
   conversations, selectedConvId, selectedConv, messages,
@@ -67,6 +72,13 @@ const {
   fetchConversations, selectConversation, sendMessage, sendAttachment, createConversation,
   initSocket, destroySocket,
 } = useChat();
+
+const { pinnedIds, fetchPinned, togglePin } = usePinnedConversations();
+
+async function onTogglePinHeader() {
+  if (!selectedConv.value) return;
+  await togglePin(selectedConv.value.id);
+}
 
 const attachmentToast = ref<{ show: boolean; text: string; color: string }>({
   show: false, text: '', color: 'success',
@@ -131,7 +143,7 @@ function stopResize() {
   document.body.style.userSelect = '';
 }
 
-onMounted(() => { fetchConversations(); initSocket(); });
+onMounted(() => { fetchConversations(); fetchPinned(); initSocket(); });
 onUnmounted(() => { destroySocket(); });
 
 let searchTimeout: ReturnType<typeof setTimeout>;
