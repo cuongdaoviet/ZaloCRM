@@ -1,13 +1,11 @@
 /**
- * CRM tags service — feature 0019, Phase A.
+ * CRM tags service — feature 0019.
  *
  * Owns the business logic for the `CrmTag` / `CrmTagGroup` / `ContactTag`
  * tables. The route layer is a thin wrapper around these functions.
  *
- * Phase A note: every write to `ContactTag` also mirrors the resulting tag
- * NAME array to `contact.tags` (Json) so existing readers — campaigns,
- * keyword-rule service, KPI dashboards, Customer 360 — keep working without
- * a join. Phase C drops this dual-write.
+ * Phase C: the legacy `contact.tags` Json column has been dropped. The
+ * `ContactTag` junction is the single source of truth for tag membership.
  */
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
@@ -302,8 +300,7 @@ export async function createTagGroup(
 
 /**
  * Replace a contact's tag set. Computes the diff so we only insert/delete
- * what changed, then mirrors the resulting tag NAMES to `contact.tags` Json
- * so legacy readers stay correct (Phase A dual-write).
+ * what changed.
  *
  * Validations:
  * - Every `tagId` must belong to `orgId`.
@@ -317,7 +314,7 @@ export async function setContactTags(
   contactId: string,
   tagIds: string[],
   userId: string | null,
-): Promise<ServiceResult<{ tagIds: string[]; tagNames: string[] }>> {
+): Promise<ServiceResult<{ tagIds: string[] }>> {
   const contact = await prisma.contact.findFirst({
     where: { id: contactId, orgId },
     select: { id: true },
@@ -365,11 +362,10 @@ export async function setContactTags(
   const toAdd = desiredIds.filter((id) => !currentIds.has(id));
   const toRemove = [...currentIds].filter((id) => !desiredSet.has(id));
 
-  // Stable name list mirroring the desired set in the order the caller sent.
-  // We re-derive from desiredTags (which is the validated lookup result) so
-  // we never trust un-validated client input.
-  const nameById = new Map(desiredTags.map((t) => [t.id, t.name]));
-  const tagNames = desiredIds.map((id) => nameById.get(id) ?? '').filter((n) => n.length > 0);
+  // Suppress unused-var warning — desiredTags is the validated lookup result
+  // (kept for any future per-name side effects); not used directly after the
+  // legacy JSON mirror was removed in Phase C.
+  void desiredTags;
 
   await prisma.$transaction(async (tx) => {
     if (toRemove.length > 0) {
@@ -395,14 +391,9 @@ export async function setContactTags(
         data: { usageCount: { increment: 1 } },
       });
     }
-    // Phase A dual-write: mirror names into the legacy Json column.
-    await tx.contact.update({
-      where: { id: contactId },
-      data: { tags: tagNames },
-    });
   });
 
-  return { ok: true, value: { tagIds: desiredIds, tagNames } };
+  return { ok: true, value: { tagIds: desiredIds } };
 }
 
 /**

@@ -7,7 +7,7 @@ import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
 import { matchKeywords, shouldUpgradeStatus } from './keyword-rule-helpers.js';
 import { logActivityAsync } from '../activity/activity-service.js';
-import { normalizeName, validateTagName } from '../crm-tags/crm-tag-helpers.js';
+import { validateTagName } from '../crm-tags/crm-tag-helpers.js';
 
 export interface ProcessInput {
   orgId: string;
@@ -108,38 +108,22 @@ async function applyRuleToContact(
 ): Promise<void> {
   const contact = await prisma.contact.findUnique({
     where: { id: contactId },
-    select: { tags: true, status: true, assignedUserId: true, orgId: true },
+    select: { status: true, assignedUserId: true, orgId: true },
   });
   if (!contact) return;
 
   const updates: {
-    tags?: string[];
     status?: string;
     assignedUserId?: string;
   } = {};
 
-  // Feature 0019 Phase A: dual-write tags. The legacy `contact.tags` Json
-  // column still gets the name appended so campaigns / KPI / Customer 360
-  // continue to read tag names without a join. We ALSO upsert a CrmTag row
-  // and link via ContactTag so the relational store is the new source-of-
-  // truth from Phase B onward.
+  // Feature 0019 Phase C: junction table is the only home for tag membership.
+  // We upsert a CrmTag row by case-folded name and link via ContactTag —
+  // there is no longer a legacy `contact.tags` Json column to mirror.
   let crmTagToAdd: { id: string; name: string } | null = null;
-  let tagAlreadyOnContact = false;
   if (rule.addTag) {
     const validation = validateTagName(rule.addTag);
     if (validation.ok) {
-      const tags = Array.isArray(contact.tags) ? (contact.tags as string[]) : [];
-      tagAlreadyOnContact = tags.some(
-        (t) => typeof t === 'string' && normalizeName(t) === validation.normalized,
-      );
-      if (!tagAlreadyOnContact) {
-        updates.tags = [...tags, validation.display];
-      }
-
-      // Upsert CrmTag regardless of whether the legacy JSON already had it —
-      // backfill is racing this code path in Phase B and we want the relational
-      // row to exist. Errors are swallowed: the legacy path is the source of
-      // truth in Phase A so we never block on this.
       try {
         const tag = await prisma.crmTag.upsert({
           where: {
@@ -175,12 +159,12 @@ async function applyRuleToContact(
   if (Object.keys(updates).length > 0) {
     await prisma.contact.update({
       where: { id: contactId },
-      data: updates as any, // tags JSON cast
+      data: updates,
     });
   }
 
   // Link CrmTag → Contact and bump usageCount (only if the link is new).
-  if (crmTagToAdd && !tagAlreadyOnContact) {
+  if (crmTagToAdd) {
     try {
       await prisma.$transaction(async (tx) => {
         const link = await tx.contactTag.findUnique({

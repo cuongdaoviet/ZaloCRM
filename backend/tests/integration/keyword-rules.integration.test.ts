@@ -176,6 +176,7 @@ describe('processInboundForKeywordRules service', () => {
     assignToUserId?: string | null;
     contactStatus?: string;
     contactAssignedUserId?: string | null;
+    /** Tag names to seed via the ContactTag junction (Phase C). */
     contactTags?: string[];
   } = {}) {
     const { org, owner, account } = await seed();
@@ -186,9 +187,22 @@ describe('processInboundForKeywordRules service', () => {
         fullName: 'Khách A',
         status: opts.contactStatus ?? 'new',
         assignedUserId: opts.contactAssignedUserId ?? null,
-        tags: opts.contactTags ?? [],
       },
     });
+    if (opts.contactTags && opts.contactTags.length > 0) {
+      for (const name of opts.contactTags) {
+        const normalized = name.trim().toLowerCase();
+        const tag = await prisma.crmTag.upsert({
+          where: { orgId_normalizedName: { orgId: org.id, normalizedName: normalized } },
+          create: { orgId: org.id, name, normalizedName: normalized },
+          update: {},
+          select: { id: true },
+        });
+        await prisma.contactTag.create({
+          data: { contactId: contact.id, tagId: tag.id },
+        });
+      }
+    }
     const conv = await prisma.conversation.create({
       data: {
         orgId: org.id,
@@ -225,8 +239,13 @@ describe('processInboundForKeywordRules service', () => {
       isSelf: false,
       content: 'Cho em xin bảng giá ạ',
     });
-    const after = await prisma.contact.findUnique({ where: { id: contact.id } });
-    expect(after?.tags).toEqual(['hỏi-giá']);
+    // Phase C: tags live on the ContactTag junction now.
+    const links = await prisma.contactTag.findMany({
+      where: { contactId: contact.id },
+      include: { tag: { select: { name: true, normalizedName: true } } },
+    });
+    expect(links.map((l) => l.tag.normalizedName)).toEqual(['hỏi-giá']);
+    expect(links[0].tag.name).toBe('hỏi-giá');
   });
 
   it('AC-0002: setStatus upgrades pipeline', async () => {
@@ -337,7 +356,7 @@ describe('processInboundForKeywordRules service', () => {
     const contact = await prisma.contact.create({
       data: {
         orgId: org.id, zaloUid: 'uid-1', fullName: 'K',
-        status: 'new', assignedUserId: owner.id, tags: [],
+        status: 'new', assignedUserId: owner.id,
       },
     });
     const conv = await prisma.conversation.create({

@@ -12,8 +12,6 @@
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
-    "db:preflight-tags": "tsx prisma/scripts/0019-preflight-tags.ts",
-    "db:backfill-tags": "tsx prisma/scripts/0019-backfill-tags.ts",
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",

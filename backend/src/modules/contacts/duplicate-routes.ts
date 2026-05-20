@@ -199,10 +199,20 @@ export async function duplicateRoutes(app: FastifyInstance): Promise<void> {
       if (!group) return reply.status(404).send({ error: 'Không tồn tại' });
 
       const contactIds = (group.contactIds as string[]) ?? [];
+      // Feature 0019 Phase C: enriched tag objects sourced from the junction.
+      // Archived tags are hidden from the list payload so the merge UI shows
+      // the same chips the user sees in Customer 360.
       const contacts = await prisma.contact.findMany({
         where: { id: { in: contactIds }, orgId: user.orgId },
         include: {
           assignedUser: { select: { id: true, fullName: true } },
+          contactTags: {
+            where: { tag: { archivedAt: null } },
+            include: {
+              tag: { select: { id: true, name: true, color: true, emoji: true } },
+            },
+            orderBy: { tag: { order: 'asc' } },
+          },
         },
       });
 
@@ -273,7 +283,14 @@ export async function duplicateRoutes(app: FastifyInstance): Promise<void> {
           email: c.email,
           source: c.source,
           status: c.status,
-          tags: c.tags,
+          // Feature 0019 Phase C: enriched `{id, name, color, emoji}` shape
+          // from the ContactTag junction. Archived tags are excluded above.
+          tags: c.contactTags.map((ct) => ({
+            id: ct.tag.id,
+            name: ct.tag.name,
+            color: ct.tag.color,
+            emoji: ct.tag.emoji,
+          })),
           createdAt: c.createdAt,
           assignedUser: c.assignedUser,
           stats: {

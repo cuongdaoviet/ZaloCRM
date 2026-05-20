@@ -1,8 +1,9 @@
 /**
- * Integration tests for feature 0019 Phase A — CRM tags as relational model.
+ * Integration tests for feature 0019 — CRM tags as relational model.
  *
  * Covers AC-0001..AC-0011 from docs/features/0019-crm-tags/SPEC.md.
- * Phase B/C ACs (backfill, drop column) are NOT in scope here.
+ * Phase C: the legacy `contact.tags` Json column has been dropped — the
+ * ContactTag junction is the only source of truth.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
@@ -241,7 +242,7 @@ describe('PUT /contacts/:id/tags — new tagIds body', () => {
     await resetDb(prisma);
   });
 
-  it('AC-0007: tagIds=[A,B] creates 2 links, increments usageCount, mirrors JSON names', async () => {
+  it('AC-0007: tagIds=[A,B] creates 2 junction links, increments usageCount', async () => {
     const { org, owner } = await seedOrgAndUsers();
     const contact = await seedContact(org.id);
     const tagA = await prisma.crmTag.create({
@@ -258,13 +259,13 @@ describe('PUT /contacts/:id/tags — new tagIds body', () => {
       payload: { tagIds: [tagA.id, tagB.id] },
     });
     expect(res.statusCode).toBe(200);
+    // Phase C: response carries enriched `tags` only; `tagNames` is gone.
+    const body = JSON.parse(res.payload);
+    expect(body.tagNames).toBeUndefined();
+    expect(body.tags).toHaveLength(2);
 
     const links = await prisma.contactTag.findMany({ where: { contactId: contact.id } });
     expect(links).toHaveLength(2);
-
-    const after = await prisma.contact.findUnique({ where: { id: contact.id } });
-    const names = (after?.tags as string[]).slice().sort();
-    expect(names).toEqual(['A', 'B']);
 
     const refreshedA = await prisma.crmTag.findUnique({ where: { id: tagA.id } });
     const refreshedB = await prisma.crmTag.findUnique({ where: { id: tagB.id } });
@@ -273,7 +274,7 @@ describe('PUT /contacts/:id/tags — new tagIds body', () => {
     await app.close();
   });
 
-  it('AC-0008: replacing {A,B} with {A} removes B link, decrements usageCount(B), shrinks JSON', async () => {
+  it('AC-0008: replacing {A,B} with {A} removes B link and decrements usageCount(B)', async () => {
     const { org, owner } = await seedOrgAndUsers();
     const contact = await seedContact(org.id);
     const tagA = await prisma.crmTag.create({
@@ -302,9 +303,6 @@ describe('PUT /contacts/:id/tags — new tagIds body', () => {
     const links = await prisma.contactTag.findMany({ where: { contactId: contact.id } });
     expect(links).toHaveLength(1);
     expect(links[0].tagId).toBe(tagA.id);
-
-    const after = await prisma.contact.findUnique({ where: { id: contact.id } });
-    expect(after?.tags).toEqual(['A']);
 
     const refreshedB = await prisma.crmTag.findUnique({ where: { id: tagB.id } });
     expect(refreshedB?.usageCount).toBe(0);
@@ -360,7 +358,7 @@ describe('PUT /contacts/:id/tags — legacy {tags} body', () => {
     await resetDb(prisma);
   });
 
-  it('AC-0011: legacy body {tags:["VIP"]} upserts CrmTag + creates link + writes JSON', async () => {
+  it('AC-0011: legacy body {tags:["VIP"]} upserts CrmTag + creates junction link', async () => {
     const { org, owner } = await seedOrgAndUsers();
     const contact = await seedContact(org.id);
     const app = await buildContactApp({ id: owner.id, orgId: org.id, role: 'owner' });
@@ -385,9 +383,10 @@ describe('PUT /contacts/:id/tags — legacy {tags} body', () => {
     });
     expect(link).not.toBeNull();
 
-    // Legacy JSON column mirrors name
+    // Phase C: the legacy `tags` Json column on Contact has been dropped.
+    // The Prisma model no longer exposes it.
     const after = await prisma.contact.findUnique({ where: { id: contact.id } });
-    expect(after?.tags).toEqual(['VIP']);
+    expect((after as Record<string, unknown> | null)?.tags).toBeUndefined();
     await app.close();
   });
 
@@ -409,5 +408,20 @@ describe('PUT /contacts/:id/tags — legacy {tags} body', () => {
     const links = await prisma.contactTag.findMany({ where: { contactId: contact.id } });
     expect(links).toHaveLength(1);
     await app.close();
+  });
+});
+
+// Phase C — belt-and-braces: the legacy Json column on Contact must be gone.
+describe('Phase C: Contact.tags Json column is gone', () => {
+  beforeEach(async () => {
+    await resetDb(prisma);
+  });
+
+  it('Prisma-returned Contact row carries no `tags` property', async () => {
+    const { org } = await seedOrgAndUsers();
+    const contact = await seedContact(org.id);
+    const fetched = await prisma.contact.findUnique({ where: { id: contact.id } });
+    expect(fetched).not.toBeNull();
+    expect((fetched as Record<string, unknown> | null)?.tags).toBeUndefined();
   });
 });

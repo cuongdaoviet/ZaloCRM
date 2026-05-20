@@ -144,7 +144,8 @@ model Contact {
   nextAppointment  DateTime? @map("next_appointment")
   assignedUserId   String?   @map("assigned_user_id")
   notes            String?
-  tags             Json      @default("[]")
+  // Feature 0019 Phase C — legacy `tags Json` column dropped. Tags now live
+  // exclusively in the `ContactTag` junction → `CrmTag` rows.
   metadata         Json      @default("{}")
   // ── Feature 0018 — duplicate merge bookkeeping ─────────────────────────────
   // Set when this contact has been merged INTO another (the primary). Once
@@ -640,10 +641,9 @@ model Friend {
 }
 
 // ─── Feature 0019 — CRM tags ──────────────────────────────────────────────────
-// Replaces the legacy Contact.tags Json column with a proper relational model.
-// Phase A keeps the Json column as a denormalized read-cache (dual-write) so
-// campaigns / KPI / keyword-rules continue to read tag names without joining.
-// Phase B will backfill existing string tags; Phase C drops the Json column.
+// Relational tag model. The ContactTag junction is the single source of truth
+// for tag membership; the legacy Contact.tags Json column was dropped in
+// Phase C.
 //
 // `managedBy='zalo_sync'` tags are read-only and pulled from Zalo. Users cannot
 // rename, archive, or delete them through the regular CRUD endpoints.

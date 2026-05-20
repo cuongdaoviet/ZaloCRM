@@ -255,48 +255,33 @@ const route = useRoute();
 const router = useRouter();
 const { overview, loading, error, fetchOverview } = useCustomerOverview();
 
-// Feature 0019 Phase B: the overview endpoint now returns enriched tag
-// objects `{ id, name, color, emoji }` AND a `tagNames: string[]` shim.
-// Resolve from the rich shape first, fall back to the name-based cache
-// lookup for old payloads still in flight.
-const { loadTags, resolveByName } = useCrmTags();
+// Feature 0019 Phase C: the overview endpoint returns enriched tag objects
+// `{ id, name, color, emoji }` exclusively. The legacy string[] / tagNames
+// shims have been removed.
+const { loadTags } = useCrmTags();
 loadTags();
 
 const enrichedTags = computed<EnrichedTag[]>(() => {
   const c = overview.value?.contact;
   if (!c) return [];
   const rawTags = (c as { tags?: unknown }).tags;
-  if (Array.isArray(rawTags)) {
-    return rawTags.map((t) => {
-      if (typeof t === 'string') {
-        const cached = resolveByName(t);
-        return {
-          id: cached?.id ?? null,
-          name: t,
-          color: cached?.color ?? '#9E9E9E',
-          emoji: cached?.emoji ?? null,
-        };
-      }
-      // Already an enriched object from Phase B.
-      return {
-        id: t.id ?? null,
-        name: t.name,
-        color: t.color ?? '#9E9E9E',
-        emoji: t.emoji ?? null,
-      };
-    });
-  }
-  return [];
+  if (!Array.isArray(rawTags)) return [];
+  return rawTags
+    .filter((t): t is { id: string; name: string; color?: string; emoji?: string | null } =>
+      !!t && typeof t === 'object' && typeof (t as { name?: unknown }).name === 'string',
+    )
+    .map((t) => ({
+      id: t.id ?? null,
+      name: t.name,
+      color: t.color ?? '#9E9E9E',
+      emoji: t.emoji ?? null,
+    }));
 });
 
 function navigateToTag(tag: EnrichedTag) {
-  if (tag.id) {
-    router.push({ path: '/contacts', query: { tagIds: tag.id } });
-  } else {
-    // Legacy fallback for any chip that came through as a string with no
-    // matching CrmTag in cache — preserves the pre-Phase-B click target.
-    router.push({ path: '/contacts', query: { tags: tag.name } });
-  }
+  // Phase C: chips always carry a tag id, so navigation is unambiguous.
+  if (!tag.id) return;
+  router.push({ path: '/contacts', query: { tagIds: tag.id } });
 }
 
 function formatDate(iso: string | null): string {

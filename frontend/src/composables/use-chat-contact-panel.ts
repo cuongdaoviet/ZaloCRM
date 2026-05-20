@@ -16,8 +16,8 @@ export function useChatContactPanel(
   onSaved: () => void,
 ) {
   const { updateContact, fetchContact } = useContacts();
-  // Feature 0019: tag cache used to translate legacy contact.tags (names) -> ids.
-  const { loadTags, resolveByName } = useCrmTags();
+  // Feature 0019 Phase C: contact.tags is enriched objects from the junction.
+  const { loadTags } = useCrmTags();
   loadTags();
 
   const saving = ref(false);
@@ -37,13 +37,13 @@ export function useChatContactPanel(
     notes: '',
   });
 
-  function namesToIds(names: unknown): string[] {
-    if (!Array.isArray(names)) return [];
+  function tagsToIds(tags: unknown): string[] {
+    if (!Array.isArray(tags)) return [];
     const out: string[] = [];
-    for (const n of names) {
-      if (typeof n !== 'string') continue;
-      const tag = resolveByName(n);
-      if (tag) out.push(tag.id);
+    for (const t of tags) {
+      if (t && typeof t === 'object' && typeof (t as { id?: unknown }).id === 'string') {
+        out.push((t as { id: string }).id);
+      }
     }
     return out;
   }
@@ -60,7 +60,7 @@ export function useChatContactPanel(
     form.firstContactDate = c.firstContactDate
       ? new Date(c.firstContactDate).toISOString().split('T')[0]
       : '';
-    form.tagIds = namesToIds(c.tags);
+    form.tagIds = tagsToIds(c.tags);
     form.notes = c.notes ?? '';
   }
 

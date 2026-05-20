@@ -138,10 +138,9 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── GET /api/v1/contacts/:id — detail with appointments + conversation count
-  // Feature 0019 Phase B: junction table is now the source of truth for tags.
-  // We return a rich `tags: [{id, name, color, emoji}]` shape AND a legacy
-  // `tagNames: string[]` so clients still expecting bare strings keep working
-  // through the deprecation cycle (removed in Phase C).
+  // Feature 0019 Phase C: junction table is the only source of truth for tags.
+  // Returns a rich `tags: [{id, name, color, emoji}]` shape; the legacy
+  // `tagNames` shim has been removed.
   // Archived tags are filtered out by default.
   app.get('/api/v1/contacts/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
@@ -175,15 +174,12 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
         emoji: ct.tag.emoji,
       }));
       // Strip the heavy join out of the wire payload and replace `tags` with
-      // the enriched shape. `tagNames` is the back-compat shim for any
-      // client still reading bare strings.
-      const { contactTags, tags: legacyTagsJson, ...rest } = contact;
+      // the enriched shape.
+      const { contactTags, ...rest } = contact;
       void contactTags;
-      void legacyTagsJson;
       return {
         ...rest,
         tags: enrichedTags,
-        tagNames: enrichedTags.map((t) => t.name),
       };
     } catch (err) {
       logger.error('[contacts] Detail error:', err);
@@ -192,6 +188,9 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── POST /api/v1/contacts — create new contact ────────────────────────────
+  // Feature 0019 Phase C: `tags` is no longer a column on Contact. Callers
+  // that supply a legacy `tags: string[]` field get them upserted onto the
+  // ContactTag junction; new clients should use `tagIds` instead.
   app.post('/api/v1/contacts', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const user = request.user!;
@@ -211,10 +210,20 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
           nextAppointment: body.nextAppointment ? new Date(body.nextAppointment) : undefined,
           assignedUserId: body.assignedUserId,
           notes: body.notes,
-          tags: body.tags ?? [],
           metadata: body.metadata ?? {},
         },
       });
+
+      // Attach tags via the junction if either body shape is supplied.
+      let tagIds: string[] = [];
+      if (Array.isArray(body.tagIds)) {
+        tagIds = (body.tagIds as unknown[]).filter((s): s is string => typeof s === 'string');
+      } else if (Array.isArray(body.tags)) {
+        tagIds = await legacyTagsByName(user.orgId, body.tags as unknown[], user.id);
+      }
+      if (tagIds.length > 0) {
+        await setContactTags(user.orgId, contact.id, tagIds, user.id);
+      }
 
       return reply.status(201).send(contact);
     } catch (err) {
@@ -236,6 +245,9 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
       });
       if (!existing) return reply.status(404).send({ error: 'Contact not found' });
 
+      // Feature 0019 Phase C: `tags` is no longer a column. Use
+      // PUT /contacts/:id/tags for tag mutations. If a legacy caller sends
+      // `tags: string[]` here we ignore it silently — they should migrate.
       const updateData: any = {
         fullName: body.fullName,
         phone: body.phone,
@@ -247,7 +259,6 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
         nextAppointment: body.nextAppointment ? new Date(body.nextAppointment) : undefined,
         assignedUserId: body.assignedUserId,
         notes: body.notes,
-        tags: body.tags,
         metadata: body.metadata,
       };
       if (body.firstContactDate !== undefined) {
@@ -296,13 +307,12 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── PUT /api/v1/contacts/:id/tags — update tags only ─────────────────────
-  // Feature 0019 Phase A — accepts BOTH body shapes:
+  // Feature 0019 Phase C — accepts BOTH body shapes:
   //   NEW:    { tagIds: string[] }  → setContactTags directly
   //   LEGACY: { tags:   string[] }  → upsert by name (case-folded) → setContactTags
   //
-  // Both paths converge on setContactTags which writes ContactTag rows AND
-  // mirrors the resulting tag NAMES into contact.tags (Json) so existing
-  // readers (campaigns / KPI / Customer 360) keep working.
+  // Both paths converge on setContactTags which writes ContactTag rows on the
+  // junction (single source of truth — the legacy Json column was dropped).
   app.put('/api/v1/contacts/:id/tags', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const user = request.user!;
@@ -311,7 +321,7 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
 
       const existing = await prisma.contact.findFirst({
         where: { id, orgId: user.orgId },
-        select: { id: true, tags: true },
+        select: { id: true },
       });
       if (!existing) return reply.status(404).send({ error: 'Contact not found' });
 
@@ -339,8 +349,8 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(status).send({ error: result.error.message, code });
       }
 
-      // Return the updated contact so the FE can refresh chips immediately.
-      // Phase B: include the enriched tag shape so chips render with color/emoji.
+      // Return the updated contact so the FE can refresh chips immediately,
+      // including the enriched tag shape so chips render with color/emoji.
       const updated = await prisma.contact.findUnique({
         where: { id },
         include: {
@@ -360,13 +370,11 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
         color: ct.tag.color,
         emoji: ct.tag.emoji,
       }));
-      const { contactTags, tags: legacyTagsJson, ...rest } = updated;
+      const { contactTags, ...rest } = updated;
       void contactTags;
-      void legacyTagsJson;
       return {
         ...rest,
         tags: enrichedTags,
-        tagNames: enrichedTags.map((t) => t.name),
       };
     } catch (err) {
       logger.error('[contacts] Update tags error:', err);

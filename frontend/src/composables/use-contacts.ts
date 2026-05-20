@@ -7,6 +7,16 @@
 import { ref, reactive } from 'vue';
 import { api } from '@/api/index';
 
+// Feature 0019 Phase C: tags are enriched objects from the ContactTag junction.
+// The legacy `string[]` shape is gone — chips read `tag.name`, navigation reads
+// `tag.id`, and ContactDetailDialog seeds `form.tagIds` from `tag.id`.
+export interface ContactTagRef {
+  id: string;
+  name: string;
+  color: string;
+  emoji: string | null;
+}
+
 export interface Contact {
   id: string;
   fullName: string | null;
@@ -17,7 +27,7 @@ export interface Contact {
   status: string | null;
   nextAppointment: string | null;
   notes: string | null;
-  tags: string[];
+  tags: ContactTagRef[];
   assignedUserId?: string | null;
   assignedUser?: { fullName: string } | null;
   createdAt?: string;

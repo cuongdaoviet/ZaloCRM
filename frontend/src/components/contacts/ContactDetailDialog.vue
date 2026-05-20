@@ -168,8 +168,9 @@ interface FormState {
 
 const form = ref<FormState>(emptyForm());
 
-// Tag cache — used to translate legacy contact.tags (names) -> tag IDs.
-const { allTags, loadTags, resolveByName } = useCrmTags();
+// Tag cache — ensures the picker has the org's tag list ready. Phase C:
+// contact.tags arrives as enriched objects so we read `.id` directly.
+const { loadTags } = useCrmTags();
 
 onMounted(() => {
   loadTags();
@@ -190,20 +191,14 @@ function emptyForm(): FormState {
 }
 
 /**
- * Resolve a `contact.tags` array into tag IDs. Phase B servers return rich
- * `{id, name, color, emoji}` objects so we can read the id directly; older
- * payloads still arrive as `string[]` and we look up the cache by name.
- * Unknown names are skipped silently — they'll be created via the legacy
- * `{tags}` body path on save.
+ * Phase C: `contact.tags` arrives as enriched `{id, name, color, emoji}`
+ * objects from the ContactTag junction, so we read the id directly.
  */
-function namesToIds(tags: unknown[] | null | undefined): string[] {
+function tagsToIds(tags: unknown[] | null | undefined): string[] {
   if (!Array.isArray(tags)) return [];
   const out: string[] = [];
   for (const t of tags) {
-    if (typeof t === 'string') {
-      const cached = resolveByName(t);
-      if (cached) out.push(cached.id);
-    } else if (t && typeof t === 'object' && typeof (t as { id?: unknown }).id === 'string') {
+    if (t && typeof t === 'object' && typeof (t as { id?: unknown }).id === 'string') {
       out.push((t as { id: string }).id);
     }
   }
@@ -225,19 +220,12 @@ watch(() => props.contact, (c) => {
         ? new Date(c.firstContactDate).toISOString().split('T')[0]
         : '',
       notes: c.notes ?? '',
-      tagIds: namesToIds(c.tags ?? []),
+      tagIds: tagsToIds(c.tags ?? []),
     };
   } else {
     form.value = emptyForm();
   }
 }, { immediate: true, deep: true });
-
-// When the tag cache loads after the dialog opens, re-resolve names → IDs.
-watch(allTags, () => {
-  if (props.contact && form.value.tagIds.length === 0 && (props.contact.tags?.length ?? 0) > 0) {
-    form.value.tagIds = namesToIds(props.contact.tags ?? []);
-  }
-}, { deep: true });
 
 function required(v: string) {
   return !!v || 'Bắt buộc';

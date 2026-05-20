@@ -93,6 +93,7 @@ async function makeContact(
     phone: string;
     zaloUid: string;
     email: string;
+    /** Tag names; upserted as CrmTag rows (Phase C). */
     tags: string[];
     notes: string;
     metadata: Record<string, unknown>;
@@ -100,20 +101,38 @@ async function makeContact(
     assignedUserId: string;
   }> = {},
 ) {
-  return prisma.contact.create({
+  const contact = await prisma.contact.create({
     data: {
       orgId,
       fullName: overrides.fullName ?? null,
       phone: overrides.phone ?? null,
       zaloUid: overrides.zaloUid ?? null,
       email: overrides.email ?? null,
-      tags: overrides.tags ?? [],
       notes: overrides.notes ?? null,
       metadata: overrides.metadata ?? {},
       source: overrides.source ?? null,
       assignedUserId: overrides.assignedUserId ?? null,
     },
   });
+  if (overrides.tags && overrides.tags.length > 0) {
+    for (const name of overrides.tags) {
+      const normalized = name.trim().toLowerCase();
+      const tag = await prisma.crmTag.upsert({
+        where: { orgId_normalizedName: { orgId, normalizedName: normalized } },
+        create: { orgId, name, normalizedName: normalized },
+        update: {},
+        select: { id: true },
+      });
+      await prisma.contactTag.create({
+        data: { contactId: contact.id, tagId: tag.id },
+      });
+      await prisma.crmTag.update({
+        where: { id: tag.id },
+        data: { usageCount: { increment: 1 } },
+      });
+    }
+  }
+  return contact;
 }
 
 describe('Feature 0018 — Duplicate detection + merge', () => {
@@ -787,8 +806,25 @@ describe('Feature 0018 — Duplicate detection + merge', () => {
     });
     expect(res.statusCode).toBe(200);
     const aAfter = await prisma.contact.findUnique({ where: { id: a.id } });
-    const tags = aAfter?.tags as string[];
-    expect([...tags].sort()).toEqual(['fb', 'tt', 'vip']);
+    // Feature 0019 Phase C: tags now live on the ContactTag junction →
+    // CrmTag. Read the primary's tags via the junction.
+    const aTagLinks = await prisma.contactTag.findMany({
+      where: { contactId: a.id },
+      include: { tag: { select: { normalizedName: true } } },
+    });
+    const tagNames = aTagLinks.map((l) => l.tag.normalizedName).sort();
+    expect(tagNames).toEqual(['fb', 'tt', 'vip']);
+    // Secondary should have its tag links removed by the merge.
+    const bTagLinks = await prisma.contactTag.findMany({
+      where: { contactId: b.id },
+    });
+    expect(bTagLinks).toHaveLength(0);
+    // usageCount stays at 1 per tag (each tag now points at the primary only).
+    const tagsAfter = await prisma.crmTag.findMany({
+      where: { orgId, normalizedName: { in: ['vip', 'fb', 'tt'] } },
+    });
+    for (const t of tagsAfter) expect(t.usageCount).toBe(1);
+
     expect(aAfter?.notes ?? '').toContain('primary note');
     expect(aAfter?.notes ?? '').toContain('--- Gộp từ B ---');
     expect(aAfter?.notes ?? '').toContain('secondary note');

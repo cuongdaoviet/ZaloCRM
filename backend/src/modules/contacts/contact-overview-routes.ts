@@ -183,10 +183,9 @@ export async function contactOverviewRoutes(app: FastifyInstance): Promise<void>
           avatarUrl: contact.avatarUrl,
           source: contact.source,
           status: contact.status,
-          // Phase B: rich tag objects with color/emoji. `tagNames` is the
-          // back-compat shim for clients still expecting string[].
+          // Phase C: rich tag objects with color/emoji. The legacy
+          // `tagNames: string[]` shim has been removed.
           tags: enrichedTags,
-          tagNames: enrichedTags.map((t) => t.name),
           nextAppointment: contact.nextAppointment,
           assignedUser: contact.assignedUser,
           createdAt: contact.createdAt,
