@@ -32,6 +32,13 @@ export interface DuplicateGroupListItem {
   primaryContactId: string | null;
 }
 
+export interface DuplicateContactTagRef {
+  id: string;
+  name: string;
+  color: string;
+  emoji: string | null;
+}
+
 export interface DuplicateContactDetail {
   id: string;
   fullName: string | null;
@@ -39,7 +46,8 @@ export interface DuplicateContactDetail {
   email: string | null;
   source: string | null;
   status: string | null;
-  tags: string[];
+  // Feature 0019 Phase C: enriched tag refs from the ContactTag junction.
+  tags: DuplicateContactTagRef[];
   createdAt: string;
   assignedUser: { id: string; fullName: string } | null;
   stats: {

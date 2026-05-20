@@ -134,11 +134,12 @@
                 <v-list-item-title>
                   <v-chip
                     v-for="tag in c.tags"
-                    :key="tag"
+                    :key="tag.id"
                     size="x-small"
                     variant="tonal"
                     class="mr-1"
-                  >{{ tag }}</v-chip>
+                    :color="tag.color"
+                  >{{ tag.emoji ? `${tag.emoji} ${tag.name}` : tag.name }}</v-chip>
                   <span v-if="!c.tags || c.tags.length === 0" class="text-grey">—</span>
                 </v-list-item-title>
               </v-list-item>

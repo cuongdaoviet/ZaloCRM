@@ -3,15 +3,22 @@
  * be unit-tested without Prisma or Fastify.
  */
 import type { Prisma } from '@prisma/client';
+import { normalizeName } from '../crm-tags/crm-tag-helpers.js';
 
 /**
  * The "filter" object the frontend posts: which contacts to target.
  * All fields optional; empty filter = no targets (rejected with 400).
+ *
+ * Feature 0019 Phase C: `tags` now references CrmTag rows via the
+ * `ContactTag` junction. The wire shape is still an array of NAMES so
+ * existing CampaignCreateDialog snapshots and external callers don't break;
+ * we resolve names → `CrmTag.normalizedName` server-side in
+ * `buildContactWhere` (case-folded match).
  */
 export interface CampaignFilter {
   status?: string[]; // contact pipeline status, e.g. ['interested', 'converted']
   source?: string[]; // contact source codes
-  tags?: string[]; // contact tags — matched as JSONB array contains
+  tags?: string[]; // CRM tag names; matched case-insensitively via the junction
 }
 
 export interface CampaignInput {
@@ -144,12 +151,18 @@ export function buildContactWhere(
     where.source = { in: filter.source };
   }
   if (filter.tags && filter.tags.length > 0) {
-    // tags is a JSONB array; Prisma's `array_contains` matches when ANY of the
-    // requested tags is present in the row's tags array.
-    // TODO(0019 Phase C): migrate to `filter.tagIds` reading from `contactTags`
-    // junction. Campaigns still save names in `filter.tags` via
-    // CampaignCreateDialog — keep the JSON path until that dialog migrates.
-    where.tags = { array_contains: filter.tags };
+    // Feature 0019 Phase C: resolve tag names via the `ContactTag` junction →
+    // `CrmTag.normalizedName` (case-folded). Matches contacts that carry ANY
+    // of the requested tags (OR semantics, same as the old JSON
+    // `array_contains`).
+    const normalized = filter.tags
+      .map((t) => normalizeName(t))
+      .filter((s) => s.length > 0);
+    if (normalized.length > 0) {
+      where.contactTags = {
+        some: { tag: { normalizedName: { in: normalized } } },
+      };
+    }
   }
   return where;
 }

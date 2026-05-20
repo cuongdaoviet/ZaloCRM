@@ -1099,9 +1099,9 @@ Create a group. **Owner/admin only** (BR-0007).
 
 **Errors:** `400 INVALID_NAME`, `403`.
 
-### PUT `/api/v1/contacts/:id/tags` *(updated in Phase A)*
+### PUT `/api/v1/contacts/:id/tags`
 
-Replace the contact's tag set. Accepts BOTH body shapes during Phase A:
+Replace the contact's tag set. Accepts BOTH body shapes:
 
 - **New:** `{ "tagIds": ["uuid", "uuid"] }`
 - **Legacy:** `{ "tags": ["VIP", "vip"] }` — backend upserts names to tags
@@ -1113,9 +1113,10 @@ Behavior:
 - Computes `add` / `remove` diff against the contact's current `ContactTag`
   links and only writes the difference.
 - Increments / decrements `CrmTag.usageCount` accordingly.
-- **Dual-write:** mirrors the resulting tag NAMES into `contact.tags` (Json)
-  so legacy readers (campaigns / KPI / Customer 360 / keyword-rules) keep
-  working without a join. Phase C will drop this mirror.
+- **Phase C (shipped):** the legacy `contact.tags` Json column has been
+  dropped. The `ContactTag` junction is the single source of truth — every
+  reader (campaigns filter, duplicate detection, keyword rules, Customer 360,
+  public API) now queries through the junction.
 
 **Errors:**
 
@@ -1169,66 +1170,63 @@ rows. Returns counters for what changed.
 - `502 ZALO_BRIDGE_ERROR` — zca-js `getLabels()` threw.
 - `404` — account not in caller's org.
 
-### Out of scope for Phase A / A.1
+### Out of scope for Phase A / A.1 / B / C
 
-- **Backfill of existing string tags** — Phase B (separate PR).
-- **Dropping `contacts.tags` Json column** — Phase C (after ≥ 1 sprint
-  observing the dual-write).
 - **Push CRM-only tags back to Zalo** — out of Phase 1 scope entirely.
   Sync is one-way (Zalo → CRM).
 
-## Feature 0019 — CRM tags (Phase B: backfill + read-path switch)
+## Feature 0019 — CRM tags (Phase C: drop legacy column)
 
-Phase B promotes the `ContactTag` junction to **source of truth** for tag
-reads on contact-shaped endpoints. Writers keep dual-writing the legacy
-`contact.tags` Json column so campaigns and KPI dashboards continue to
-work; that column is removed in Phase C.
+Phase C drops the legacy `contact.tags` Json column and migrates every
+remaining reader to the `ContactTag` junction. The relational model is now
+the single source of truth — no dual-write, no JSON cache.
 
-### One-shot backfill — `prisma/scripts/0019-backfill-tags.ts`
+### Contact tag response shape
 
-Idempotent migration that converts existing `contact.tags` strings into
-relational rows. Run via:
+Endpoints that include a contact's tags return them as an enriched array
+of objects:
 
-```bash
-npm run db:preflight-tags                                  # dry audit
-npm run db:backfill-tags -- --dry-run                      # rollback at end
-npm run db:backfill-tags                                   # apply
-npm run db:backfill-tags -- --org-id=<uuid>                # single org
+```json
+{
+  "tags": [
+    { "id": "uuid", "name": "VIP", "color": "#FFD700", "emoji": "⭐" }
+  ]
+}
 ```
 
-Per-org transaction. Case-folded (`"VIP" / "vip" / "Vip"` collapse).
-Existing `CrmTag` rows whose `normalizedName` matches a legacy string are
-adopted — no duplicate rows, original color / group preserved. Defensive
-parsing: `null` / whitespace / non-string entries are skipped with
-structured warnings; entries > 50 chars are truncated and warned.
-
-Reports land at `/tmp/0019-preflight-report.json` and
-`/tmp/0019-backfill-report.json`.
-
-### Updated response shape: contact tag fields
-
-The endpoints below now return tags as an enriched array of objects AND a
-`tagNames: string[]` shim. `tagNames` is **deprecated** and will be
-removed in Phase C — clients should migrate to the rich shape.
+The Phase B `tagNames: string[]` shim has been **removed**. Clients should
+read the enriched objects directly.
 
 Affected endpoints:
 
-- `GET /api/v1/contacts/:id` — adds `contactTags` join, response gains
-  `tags: [{id, name, color, emoji}]` + `tagNames: string[]`.
-- `PUT /api/v1/contacts/:id/tags` — response shape now matches `GET /:id`
-  (was previously the raw contact row).
-- `GET /api/v1/contacts/:id/overview` — `contact.tags` is enriched;
-  `contact.tagNames` is the shim.
+- `GET /api/v1/contacts/:id` — `tags: [{id, name, color, emoji}]`.
+- `PUT /api/v1/contacts/:id/tags` — response matches `GET /:id`.
+- `GET /api/v1/contacts/:id/overview` — `contact.tags` is the enriched array.
+- `GET /api/v1/duplicate-groups/:id` — each contact's `tags` is enriched.
 
 Archived tags are filtered out of these responses by default.
 
-**Not migrated in Phase B** (still read from `contact.tags` Json):
+### Migrated readers
 
-- `GET /api/v1/campaigns/.../preview` filter resolver — campaigns still
-  save names in `filter.tags`. Migration to `filter.tagIds` is tracked in
-  Phase C.
-- `GET /api/v1/contacts` list endpoint — already filtered through the
-  junction in Phase A (no change here).
-- Duplicate detection list — surfaces raw `contact.tags` so the merge
-  service can do array math; reading from the junction would not change
-  observable behavior in Phase B.
+- **Campaign filter (`filter.tags`)**: now resolves names → `CrmTag.normalizedName`
+  via the junction (case-folded, OR semantics). The wire shape is unchanged
+  (`filter.tags: string[]`) so existing `CampaignCreateDialog` snapshots and
+  external campaign callers keep working — the dialog still posts tag names
+  and the server matches them against `CrmTag.normalizedName`.
+- **Duplicate detection (list + merge)**: list payload returns enriched
+  tags; merge unions ContactTag rows from secondaries into the primary
+  (BR-0008), then removes secondary links so `usageCount` stays exact.
+- **Keyword rule action `addTag`**: upserts CrmTag by case-folded name and
+  links via ContactTag (no longer touches a Json column).
+- **`POST /api/public/contacts`** and **`PUT /api/public/contacts/:id`**:
+  still accept `tags: string[]` in the body for external partner
+  back-compat. The server upserts those names into `CrmTag` rows and
+  attaches via the junction. Responses return `tags: string[]` (names) so
+  the public wire shape is preserved.
+
+### Removed
+
+- `npm run db:preflight-tags` / `npm run db:backfill-tags` and the
+  corresponding scripts under `prisma/scripts/0019-*-tags.ts` — these were
+  one-shot Phase B migrations and no longer apply.
+- `tagNames: string[]` field on every response that previously carried it.

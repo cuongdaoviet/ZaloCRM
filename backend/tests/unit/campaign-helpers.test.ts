@@ -106,12 +106,19 @@ describe('buildContactWhere', () => {
   it('omits fields that are empty', () => {
     const where = buildContactWhere('org-1', { status: ['interested'] });
     expect(where.source).toBeUndefined();
-    expect(where.tags).toBeUndefined();
+    expect(where.contactTags).toBeUndefined();
   });
 
-  it('uses array_contains for tags', () => {
-    const where = buildContactWhere('org-1', { tags: ['vip', 'hot'] });
-    expect(where.tags).toEqual({ array_contains: ['vip', 'hot'] });
+  it('uses the contactTags junction with case-folded names for tags filter', () => {
+    const where = buildContactWhere('org-1', { tags: ['VIP', 'Hot'] });
+    expect(where.contactTags).toEqual({
+      some: { tag: { normalizedName: { in: ['vip', 'hot'] } } },
+    });
+  });
+
+  it('omits the tags clause when every entry normalizes to empty', () => {
+    const where = buildContactWhere('org-1', { tags: ['   ', ''] });
+    expect(where.contactTags).toBeUndefined();
   });
 });
 

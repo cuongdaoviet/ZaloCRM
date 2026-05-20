@@ -290,7 +290,6 @@ export async function mergeContacts(
           source: true,
           assignedUserId: true,
           notes: true,
-          tags: true,
           metadata: true,
           mergedIntoId: true,
         },
@@ -333,16 +332,6 @@ export async function mergeContacts(
         }
       }
 
-      // tags union
-      const tagSet = new Set<string>();
-      const primaryTags = Array.isArray(primary.tags) ? (primary.tags as string[]) : [];
-      for (const t of primaryTags) tagSet.add(String(t));
-      for (const s of secondaries) {
-        const sTags = Array.isArray(s.tags) ? (s.tags as string[]) : [];
-        for (const t of sTags) tagSet.add(String(t));
-      }
-      const mergedTags = Array.from(tagSet);
-
       // notes concat
       let mergedNotes = primary.notes ?? '';
       for (const s of secondaries) {
@@ -362,11 +351,69 @@ export async function mergeContacts(
       const primaryMeta = (primary.metadata ?? {}) as Record<string, unknown>;
       mergedMetadata = { ...mergedMetadata, ...primaryMeta };
 
-      (primaryUpdate as Record<string, unknown>).tags = mergedTags;
       (primaryUpdate as Record<string, unknown>).notes = mergedNotes || null;
       (primaryUpdate as Record<string, unknown>).metadata = mergedMetadata;
 
       const secondaryIds = secondaries.map((s) => s.id);
+
+      // Feature 0019 Phase C: union the ContactTag junction rows (BR-0008).
+      // Pull the distinct tagIds across the secondaries that aren't already on
+      // the primary, then insert ContactTag rows for the primary. usageCount
+      // doesn't change because the same tag now points at the primary instead
+      // of N secondaries; we bump it by 1 per net-new link and decrement once
+      // per secondary link removed below.
+      const secondaryLinks = await tx.contactTag.findMany({
+        where: { contactId: { in: secondaryIds } },
+        select: { tagId: true },
+      });
+      const primaryLinks = await tx.contactTag.findMany({
+        where: { contactId: primaryContactId },
+        select: { tagId: true },
+      });
+      const primaryTagIdSet = new Set(primaryLinks.map((l) => l.tagId));
+      const tagsToAddToPrimary = Array.from(
+        new Set(
+          secondaryLinks
+            .map((l) => l.tagId)
+            .filter((id) => !primaryTagIdSet.has(id)),
+        ),
+      );
+      if (tagsToAddToPrimary.length > 0) {
+        await tx.contactTag.createMany({
+          data: tagsToAddToPrimary.map((tagId) => ({
+            contactId: primaryContactId,
+            tagId,
+          })),
+          skipDuplicates: true,
+        });
+        // Newly attached to the primary — bump usageCount by 1 per tag.
+        await tx.crmTag.updateMany({
+          where: { id: { in: tagsToAddToPrimary }, orgId },
+          data: { usageCount: { increment: 1 } },
+        });
+      }
+
+      // Drop the secondaries' ContactTag rows so the primary is the only
+      // contact carrying each tag (secondaries become merged tombstones —
+      // their chips would otherwise still show in admin tooling). Decrement
+      // usageCount once per removed link.
+      const secondaryLinkRemoval = await tx.contactTag.deleteMany({
+        where: { contactId: { in: secondaryIds } },
+      });
+      if (secondaryLinkRemoval.count > 0) {
+        // Group decrements per tagId so we decrement by the actual link
+        // count, not just once.
+        const decrementByTagId = new Map<string, number>();
+        for (const l of secondaryLinks) {
+          decrementByTagId.set(l.tagId, (decrementByTagId.get(l.tagId) ?? 0) + 1);
+        }
+        for (const [tagId, count] of decrementByTagId) {
+          await tx.crmTag.update({
+            where: { id: tagId },
+            data: { usageCount: { decrement: count } },
+          });
+        }
+      }
 
       // 2d) EC-0005 — pre-resolve CampaignTarget unique conflicts.
       // For every (campaignId) that has BOTH primary + a secondary as targets,

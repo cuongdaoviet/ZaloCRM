@@ -69,7 +69,6 @@ async function seedFullScenario(label: string) {
       phone: '0900000000',
       status: 'interested',
       assignedUserId: owner.id,
-      tags: ['VIP'],
     },
   });
   const conv = await prisma.conversation.create({
@@ -475,8 +474,8 @@ describe('Customer 360 overview', () => {
       color: '#FFD700',
       emoji: '⭐',
     });
-    // tagNames shim covers legacy callers.
-    expect((body.contact.tagNames as string[]).sort()).toEqual(['Hot', 'VIP']);
+    // Phase C: legacy `tagNames` shim has been removed.
+    expect(body.contact.tagNames).toBeUndefined();
     await app.close();
   });
 
@@ -510,7 +509,7 @@ describe('Customer 360 overview', () => {
     const body = JSON.parse(res.payload);
     const names = body.contact.tags.map((t: any) => t.name);
     expect(names).toEqual(['Active']);
-    expect(body.contact.tagNames).toEqual(['Active']);
+    expect(body.contact.tagNames).toBeUndefined();
     await app.close();
   });
 });

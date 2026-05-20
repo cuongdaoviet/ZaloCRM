@@ -6,6 +6,10 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
+import {
+  legacyTagsByName,
+  setContactTags,
+} from '../crm-tags/crm-tag-service.js';
 
 // ── API key auth middleware ────────────────────────────────────────────────────
 
@@ -43,18 +47,31 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
         ];
       }
 
+      // Feature 0019 Phase C: tags come from the ContactTag junction. We
+      // return a string[] of tag NAMES so external callers keep the same
+      // wire shape they had with the legacy Json column.
       const contacts = await prisma.contact.findMany({
         where,
         select: {
           id: true, fullName: true, phone: true, email: true,
-          source: true, status: true, notes: true, tags: true,
+          source: true, status: true, notes: true,
+          contactTags: {
+            where: { tag: { archivedAt: null } },
+            include: { tag: { select: { name: true } } },
+            orderBy: { tag: { order: 'asc' } },
+          },
           createdAt: true, updatedAt: true,
         },
         orderBy: { updatedAt: 'desc' },
         take: Math.min(parseInt(limit) || 20, 100),
       });
 
-      return { contacts };
+      const shaped = contacts.map((c) => {
+        const { contactTags, ...rest } = c;
+        return { ...rest, tags: contactTags.map((ct) => ct.tag.name) };
+      });
+
+      return { contacts: shaped };
     } catch (err) {
       logger.error('[public-api] GET /contacts error:', err);
       return reply.status(500).send({ error: 'Failed to fetch contacts' });
@@ -66,16 +83,24 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
       const orgId = (request as any).orgId as string;
       const { id } = request.params as { id: string };
 
+      // Feature 0019 Phase C: include enriched tags through the junction
+      // so the response carries `tags: string[]` (back-compat).
       const contact = await prisma.contact.findFirst({
         where: { id, orgId },
         include: {
           appointments: { orderBy: { appointmentDate: 'desc' }, take: 5 },
           _count: { select: { conversations: true } },
+          contactTags: {
+            where: { tag: { archivedAt: null } },
+            include: { tag: { select: { name: true } } },
+            orderBy: { tag: { order: 'asc' } },
+          },
         },
       });
 
       if (!contact) return reply.status(404).send({ error: 'Contact not found' });
-      return contact;
+      const { contactTags, ...rest } = contact;
+      return { ...rest, tags: contactTags.map((ct) => ct.tag.name) };
     } catch (err) {
       logger.error('[public-api] GET /contacts/:id error:', err);
       return reply.status(500).send({ error: 'Failed to fetch contact' });
@@ -100,11 +125,30 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
           source: body.source,
           status: body.status ?? 'new',
           notes: body.notes,
-          tags: body.tags ?? [],
         },
       });
 
-      return reply.status(201).send(contact);
+      // Feature 0019 Phase C: `tags: string[]` on the create body is still
+      // accepted for backward compatibility (external partners depend on it).
+      // We upsert by case-folded name → CrmTag rows, then attach via the
+      // ContactTag junction.
+      let appliedTags: string[] = [];
+      if (Array.isArray(body.tags) && body.tags.length > 0) {
+        const tagIds = await legacyTagsByName(orgId, body.tags as unknown[], null);
+        if (tagIds.length > 0) {
+          const result = await setContactTags(orgId, contact.id, tagIds, null);
+          if (result.ok) {
+            // Reload tag names to confirm what was actually attached.
+            const links = await prisma.contactTag.findMany({
+              where: { contactId: contact.id },
+              include: { tag: { select: { name: true } } },
+            });
+            appliedTags = links.map((l) => l.tag.name);
+          }
+        }
+      }
+
+      return reply.status(201).send({ ...contact, tags: appliedTags });
     } catch (err) {
       logger.error('[public-api] POST /contacts error:', err);
       return reply.status(500).send({ error: 'Failed to create contact' });
@@ -129,11 +173,22 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
           source: body.source,
           status: body.status,
           notes: body.notes,
-          tags: body.tags,
         },
       });
 
-      return updated;
+      // Feature 0019 Phase C: when `tags` is supplied, replace the full tag
+      // set through the junction — mirrors the JWT endpoint's behavior.
+      if (Array.isArray(body.tags)) {
+        const tagIds = await legacyTagsByName(orgId, body.tags as unknown[], null);
+        await setContactTags(orgId, id, tagIds, null);
+      }
+
+      const links = await prisma.contactTag.findMany({
+        where: { contactId: id },
+        include: { tag: { select: { name: true } } },
+        orderBy: { tag: { order: 'asc' } },
+      });
+      return { ...updated, tags: links.map((l) => l.tag.name) };
     } catch (err) {
       logger.error('[public-api] PUT /contacts/:id error:', err);
       return reply.status(500).send({ error: 'Failed to update contact' });
