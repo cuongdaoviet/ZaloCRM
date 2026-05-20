@@ -28,6 +28,8 @@ export interface ContactFilters {
   search: string;
   source: string;
   status: string;
+  /** Feature 0019 — filter by CRM tag IDs (multi-select). */
+  tagIds?: string[];
 }
 
 export const SOURCE_OPTIONS = [
@@ -56,6 +58,7 @@ export function useContacts() {
     search: '',
     source: '',
     status: '',
+    tagIds: [],
   });
 
   const pagination = reactive({ page: 1, limit: 20 });
@@ -63,6 +66,9 @@ export function useContacts() {
   async function fetchContacts() {
     loading.value = true;
     try {
+      const tagIds = filters.tagIds && filters.tagIds.length > 0
+        ? filters.tagIds.join(',')
+        : undefined;
       const res = await api.get('/contacts', {
         params: {
           page: pagination.page,
@@ -70,6 +76,7 @@ export function useContacts() {
           search: filters.search || undefined,
           source: filters.source || undefined,
           status: filters.status || undefined,
+          tagIds,
         },
       });
       contacts.value = res.data.contacts ?? res.data;
@@ -138,6 +145,7 @@ export function useContacts() {
     filters.search = '';
     filters.source = '';
     filters.status = '';
+    filters.tagIds = [];
     pagination.page = 1;
     fetchContacts();
   }

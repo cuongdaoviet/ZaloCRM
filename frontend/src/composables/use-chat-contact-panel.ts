@@ -6,6 +6,7 @@
  */
 import { ref, watch, reactive } from 'vue';
 import { useContacts, type Contact } from '@/composables/use-contacts';
+import { useCrmTags } from '@/composables/use-crm-tags';
 import { api } from '@/api/index';
 import type { Appointment } from '@/components/chat/ChatAppointments.vue';
 
@@ -15,6 +16,9 @@ export function useChatContactPanel(
   onSaved: () => void,
 ) {
   const { updateContact, fetchContact } = useContacts();
+  // Feature 0019: tag cache used to translate legacy contact.tags (names) -> ids.
+  const { loadTags, resolveByName } = useCrmTags();
+  loadTags();
 
   const saving = ref(false);
   const saveSuccess = ref(false);
@@ -29,9 +33,20 @@ export function useChatContactPanel(
     status: null as string | null,
     nextAppointmentDate: '',
     firstContactDate: '',
-    tags: [] as string[],
+    tagIds: [] as string[],
     notes: '',
   });
+
+  function namesToIds(names: unknown): string[] {
+    if (!Array.isArray(names)) return [];
+    const out: string[] = [];
+    for (const n of names) {
+      if (typeof n !== 'string') continue;
+      const tag = resolveByName(n);
+      if (tag) out.push(tag.id);
+    }
+    return out;
+  }
 
   function populateForm(c: Contact) {
     form.fullName = c.fullName ?? '';
@@ -45,7 +60,7 @@ export function useChatContactPanel(
     form.firstContactDate = c.firstContactDate
       ? new Date(c.firstContactDate).toISOString().split('T')[0]
       : '';
-    form.tags = Array.isArray(c.tags) ? [...c.tags] : [];
+    form.tagIds = namesToIds(c.tags);
     form.notes = c.notes ?? '';
   }
 
@@ -94,9 +109,17 @@ export function useChatContactPanel(
       firstContactDate: form.firstContactDate
         ? new Date(form.firstContactDate + 'T00:00:00').toISOString()
         : null,
-      tags: form.tags,
       notes: form.notes || null,
     });
+
+    // Feature 0019: push tag set through the dedicated tags endpoint.
+    if (result) {
+      try {
+        await api.put(`/contacts/${contactId}/tags`, { tagIds: form.tagIds });
+      } catch (err) {
+        console.error('Failed to update tags:', err);
+      }
+    }
 
     saving.value = false;
     if (result) {

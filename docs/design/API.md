@@ -874,3 +874,132 @@ Every transition emits an `ActivityLog` row via `logActivityAsync`:
 | `friendship.timeout` | sweep > FRIENDSHIP_TIMEOUT_DAYS | null |
 | `friendship.cancelled` | manual cancel | caller |
 | `friendship.error` | worker failed | null |
+
+---
+
+## Feature 0019 — CRM tags (Phase A)
+
+Promotes `Contact.tags` from a free-text JSON array to a proper relational
+model. Phase A ships the new schema + CRUD endpoints + a backward-compatible
+`PUT /contacts/:id/tags` and keeps the legacy JSON column populated via
+dual-write so campaigns / KPI / Customer 360 don't break.
+
+**Naming:** `normalizedName = name.trim().normalize('NFC').toLowerCase()`.
+Two display names that collapse to the same normalized form collide on the
+`(orgId, normalizedName)` unique constraint → `409 TAG_DUPLICATE`.
+
+### GET `/api/v1/crm-tags`
+
+List all tags in the org. Default hides archived tags.
+
+**Query:**
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `groupId` | string | — | Filter to a single group. |
+| `managedBy` | `'crm' \| 'zalo_sync'` | — | `'crm'` = `managedBy IS NULL`. |
+| `includeArchived` | bool | `false` | Include rows with `archivedAt` set. |
+| `search` | string | — | Substring match on `name` (case-insensitive). |
+
+**Response 200:** `{ "tags": CrmTag[] }`.
+
+### POST `/api/v1/crm-tags`
+
+Create a tag. **Any authenticated user** in the org can call this (BR-0004) —
+sales staff need to create tags inline while chatting.
+
+**Body:**
+
+```json
+{ "name": "VIP", "color": "#FF0000", "emoji": "⭐", "groupId": null }
+```
+
+- `name` — required, 1-50 chars after trim.
+- `color` — optional, defaults to `#9E9E9E`. Must match `/^#[0-9A-Fa-f]{6}$/`.
+- `emoji` — optional, free-form.
+- `groupId` — optional; must reference an existing group in the same org.
+
+**Response 201:** the created `CrmTag` row.
+
+**Errors:**
+
+- `400 INVALID_NAME` — empty / whitespace / > 50 chars / not a string.
+- `400 INVALID_COLOR` — color is not `#RRGGBB`.
+- `400 INVALID_GROUP` — `groupId` doesn't exist in this org.
+- `409 TAG_DUPLICATE` — another tag with the same normalized name exists.
+  Body includes `"existingTagId": "<uuid>"` so the FE can offer "use existing".
+
+### PUT `/api/v1/crm-tags/:id`
+
+Patch a tag. **Owner/admin only** (BR-0005). `managedBy='zalo_sync'` tags
+only allow `order` and `groupId` mutations — anything else returns
+`400 ZALO_MANAGED` (BR-0008).
+
+**Body:** any subset of `{ name, color, emoji, description, groupId, order, archivedAt }`.
+
+`archivedAt: null` un-archives a previously archived tag (BR-0013).
+
+**Errors:** `400 INVALID_NAME / INVALID_COLOR / INVALID_GROUP / ZALO_MANAGED`,
+`403`, `404`, `409 TAG_DUPLICATE`.
+
+### DELETE `/api/v1/crm-tags/:id`
+
+Soft-delete (sets `archivedAt`). **Owner/admin only.** Idempotent — calling
+twice returns the row in both calls without raising. `ContactTag` links are
+preserved (BR-0012). Zalo-sync tags reject with `400 ZALO_MANAGED`.
+
+### GET `/api/v1/crm-tag-groups`
+
+List groups in the org. Default hides archived groups.
+
+**Query:** `includeArchived?: bool`.
+
+**Response 200:** `{ "groups": CrmTagGroup[] }`.
+
+### POST `/api/v1/crm-tag-groups`
+
+Create a group. **Owner/admin only** (BR-0007).
+
+**Body:** `{ "name": "Khách quan trọng" }` (1-50 chars).
+
+**Errors:** `400 INVALID_NAME`, `403`.
+
+### PUT `/api/v1/contacts/:id/tags` *(updated in Phase A)*
+
+Replace the contact's tag set. Accepts BOTH body shapes during Phase A:
+
+- **New:** `{ "tagIds": ["uuid", "uuid"] }`
+- **Legacy:** `{ "tags": ["VIP", "vip"] }` — backend upserts names to tags
+  (case-folded), then converts. Logs a single deprecation warning per call.
+  Callers should migrate to the new shape.
+
+Behavior:
+
+- Computes `add` / `remove` diff against the contact's current `ContactTag`
+  links and only writes the difference.
+- Increments / decrements `CrmTag.usageCount` accordingly.
+- **Dual-write:** mirrors the resulting tag NAMES into `contact.tags` (Json)
+  so legacy readers (campaigns / KPI / Customer 360 / keyword-rules) keep
+  working without a join. Phase C will drop this mirror.
+
+**Errors:**
+
+- `400 INVALID_TAG_ID` — one of the `tagIds` doesn't belong to the org.
+- `400 TAG_ARCHIVED` — applying an archived tag is rejected.
+- `404` — contact doesn't exist or is cross-org.
+
+### GET `/api/v1/contacts` — tag filter (new in Phase A)
+
+The contact list endpoint accepts a new `tagIds` query param. Accepts a
+comma-separated string or repeated `?tagIds=A&tagIds=B` form. Filter is
+**OR** across the supplied IDs (any contact carrying at least one of the
+tags matches).
+
+### Out of scope for Phase A
+
+- **`POST /api/v1/zalo-accounts/:id/sync-labels`** — deferred to Phase A.1.
+  The schema (`ZaloLabel`, `CrmTagGroup.zaloAccountId`, `CrmTag.sourceZaloLabelId`)
+  is in place; only the sync endpoint and Zalo SDK glue are pending.
+- **Backfill of existing string tags** — Phase B (separate PR).
+- **Dropping `contacts.tags` Json column** — Phase C (separate PR after
+  ≥ 1 sprint of observing the dual-write).

@@ -68,17 +68,9 @@
             />
           </v-col>
 
-          <!-- Tags -->
+          <!-- Tags — feature 0019: switched from free-text combobox to tag picker -->
           <v-col cols="12" sm="6">
-            <v-combobox
-              v-model="form.tags"
-              label="Tags"
-              multiple
-              chips
-              closable-chips
-              clearable
-              hide-details
-            />
+            <TagPicker v-model="form.tagIds" label="Nhãn" />
           </v-col>
 
           <!-- Notes -->
@@ -124,10 +116,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
+import { ref, watch, computed, onMounted } from 'vue';
 import type { Contact } from '@/composables/use-contacts';
 import { SOURCE_OPTIONS, STATUS_OPTIONS, useContacts } from '@/composables/use-contacts';
 import FriendshipBadge from '@/components/contacts/FriendshipBadge.vue';
+import TagPicker from '@/components/tags/TagPicker.vue';
+import { useCrmTags } from '@/composables/use-crm-tags';
+import { api } from '@/api/index';
 
 const props = defineProps<{
   modelValue: boolean;
@@ -167,10 +162,18 @@ interface FormState {
   nextAppointmentDate: string;
   firstContactDate: string;
   notes: string;
-  tags: string[];
+  /** Feature 0019 — tag IDs replace the old free-text array. */
+  tagIds: string[];
 }
 
 const form = ref<FormState>(emptyForm());
+
+// Tag cache — used to translate legacy contact.tags (names) -> tag IDs.
+const { allTags, loadTags, resolveByName } = useCrmTags();
+
+onMounted(() => {
+  loadTags();
+});
 
 function emptyForm(): FormState {
   return {
@@ -182,8 +185,24 @@ function emptyForm(): FormState {
     nextAppointmentDate: '',
     firstContactDate: '',
     notes: '',
-    tags: [],
+    tagIds: [],
   };
+}
+
+/**
+ * Resolve a `contact.tags` array (legacy = names) into tag IDs using the cache.
+ * Names that don't yet exist in the cache are skipped silently — they'll be
+ * created via the legacy {tags} body path on save if needed.
+ */
+function namesToIds(names: string[] | null | undefined): string[] {
+  if (!Array.isArray(names)) return [];
+  const out: string[] = [];
+  for (const n of names) {
+    if (typeof n !== 'string') continue;
+    const tag = resolveByName(n);
+    if (tag) out.push(tag.id);
+  }
+  return out;
 }
 
 watch(() => props.contact, (c) => {
@@ -201,18 +220,28 @@ watch(() => props.contact, (c) => {
         ? new Date(c.firstContactDate).toISOString().split('T')[0]
         : '',
       notes: c.notes ?? '',
-      tags: c.tags ?? [],
+      tagIds: namesToIds(c.tags ?? []),
     };
   } else {
     form.value = emptyForm();
   }
 }, { immediate: true, deep: true });
 
+// When the tag cache loads after the dialog opens, re-resolve names → IDs.
+watch(allTags, () => {
+  if (props.contact && form.value.tagIds.length === 0 && (props.contact.tags?.length ?? 0) > 0) {
+    form.value.tagIds = namesToIds(props.contact.tags ?? []);
+  }
+}, { deep: true });
+
 function required(v: string) {
   return !!v || 'Bắt buộc';
 }
 
 async function onSave() {
+  // Save core contact fields first (without tags). Tags are written via the
+  // dedicated PUT /contacts/:id/tags endpoint which knows about the new
+  // tagIds shape + does the dual-write.
   const payload: Partial<Contact> = {
     fullName: form.value.fullName || null,
     phone: form.value.phone || null,
@@ -226,7 +255,6 @@ async function onSave() {
       ? new Date(form.value.firstContactDate + 'T00:00:00').toISOString()
       : null,
     notes: form.value.notes || null,
-    tags: form.value.tags,
   };
 
   let result: Contact | null;
@@ -235,10 +263,17 @@ async function onSave() {
   } else {
     result = await updateContact(props.contact!.id, payload);
   }
-  if (result) {
-    emit('saved', result);
-    close();
+  if (!result) return;
+
+  // Push tag set (idempotent — backend computes diff).
+  try {
+    await api.put(`/contacts/${result.id}/tags`, { tagIds: form.value.tagIds });
+  } catch (err) {
+    console.error('Failed to update tags:', err);
   }
+
+  emit('saved', result);
+  close();
 }
 
 async function onDelete() {

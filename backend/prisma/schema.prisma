@@ -29,6 +29,10 @@ model Organization {
   webhookDeliveries WebhookDelivery[]
   pinnedConversations PinnedConversation[]
   duplicateGroups   DuplicateGroup[]
+  // Feature 0019 — CRM tags
+  crmTags       CrmTag[]
+  crmTagGroups  CrmTagGroup[]
+  zaloLabels    ZaloLabel[]
 
   @@map("organizations")
 }
@@ -74,6 +78,7 @@ model User {
   conversationNotes  ConversationNote[]  @relation("ConversationNotes")
   preferences        UserPreference[]
   createdFriendshipAttempts FriendshipAttempt[] @relation("CreatedFriendshipAttempts")
+  contactTagsAdded   ContactTag[]        @relation("ContactTagsAdded")
 
   @@map("users")
 }
@@ -102,6 +107,8 @@ model ZaloAccount {
   pinnedConversations PinnedConversation[]
   friendshipAttempts FriendshipAttempt[]
   friends       Friend[]
+  zaloLabels    ZaloLabel[]
+  crmTagGroups  CrmTagGroup[]
 
   @@map("zalo_accounts")
 }
@@ -157,6 +164,7 @@ model Contact {
   mergedChildren  Contact[]        @relation("ContactMerges")
   attempts        FriendshipAttempt[]
   friends         Friend[]
+  contactTags     ContactTag[]
 
   @@index([orgId, mergedIntoId])
   @@map("contacts")
@@ -627,4 +635,101 @@ model Friend {
   @@unique([zaloAccountId, zaloUid])
   @@index([orgId, createdAt(sort: Desc)])
   @@map("friends")
+}
+
+// ─── Feature 0019 — CRM tags ──────────────────────────────────────────────────
+// Replaces the legacy Contact.tags Json column with a proper relational model.
+// Phase A keeps the Json column as a denormalized read-cache (dual-write) so
+// campaigns / KPI / keyword-rules continue to read tag names without joining.
+// Phase B will backfill existing string tags; Phase C drops the Json column.
+//
+// `managedBy='zalo_sync'` tags are read-only and pulled from Zalo. Users cannot
+// rename, archive, or delete them through the regular CRUD endpoints.
+// Case-folding: `normalizedName = name.trim().normalize('NFC').toLowerCase()`
+// — "VIP" and "vip" collide on `(orgId, normalizedName)`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model CrmTag {
+  id                String    @id @default(uuid())
+  orgId             String    @map("org_id")
+  name              String    // hiển thị, giữ nguyên case
+  normalizedName    String    @map("normalized_name") // lowercase, trimmed
+  color             String    @default("#9E9E9E") // hex #RRGGBB
+  emoji             String?
+  description       String?
+  groupId           String?   @map("group_id")
+  managedBy         String?   @map("managed_by") // null | 'zalo_sync'
+  sourceZaloLabelId String?   @map("source_zalo_label_id") // FK soft → ZaloLabel.id
+  order             Int       @default(0)
+  isActive          Boolean   @default(true) @map("is_active")
+  usageCount        Int       @default(0) @map("usage_count")
+  archivedAt        DateTime? @map("archived_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  org          Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  group        CrmTagGroup?  @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  contactTags  ContactTag[]
+
+  @@unique([orgId, normalizedName])
+  @@index([orgId, isActive, archivedAt])
+  @@index([orgId, groupId])
+  @@map("crm_tags")
+}
+
+model CrmTagGroup {
+  id            String    @id @default(uuid())
+  orgId         String    @map("org_id")
+  name          String
+  managedBy     String?   @map("managed_by") // null | 'zalo_sync'
+  zaloAccountId String?   @map("zalo_account_id") // set when group mirrors a Zalo account's labels
+  order         Int       @default(0)
+  archivedAt    DateTime? @map("archived_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  zaloAccount ZaloAccount? @relation(fields: [zaloAccountId], references: [id], onDelete: SetNull)
+  tags        CrmTag[]
+
+  @@unique([orgId, name])
+  @@map("crm_tag_groups")
+}
+
+model ZaloLabel {
+  id            String   @id @default(uuid())
+  orgId         String   @map("org_id")
+  zaloAccountId String   @map("zalo_account_id")
+  zaloLabelId   String   @map("zalo_label_id") // numeric id from Zalo SDK
+  textKey       String   @map("text_key")
+  text          String
+  color         String
+  emoji         String?
+  offset        Int      @default(0)
+  version       Int      @default(0)
+  conversations Json     @default("[]") // string[] of external thread ids
+  createTime    BigInt?  @map("create_time")
+  syncedAt      DateTime @default(now()) @map("synced_at")
+
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  zaloAccount ZaloAccount  @relation(fields: [zaloAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([zaloAccountId, zaloLabelId])
+  @@index([orgId])
+  @@map("zalo_labels")
+}
+
+model ContactTag {
+  contactId     String   @map("contact_id")
+  tagId         String   @map("tag_id")
+  addedAt       DateTime @default(now()) @map("added_at")
+  addedByUserId String?  @map("added_by_user_id")
+
+  contact     Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag         CrmTag  @relation(fields: [tagId],     references: [id], onDelete: Cascade)
+  addedByUser User?   @relation("ContactTagsAdded", fields: [addedByUserId], references: [id], onDelete: SetNull)
+
+  @@id([contactId, tagId])
+  @@index([tagId])
+  @@map("contact_tags")
 }

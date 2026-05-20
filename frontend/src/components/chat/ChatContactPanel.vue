@@ -31,8 +31,8 @@
       <v-text-field v-model="form.nextAppointmentDate" label="Hẹn tái khám" type="date"
         density="compact" variant="outlined" class="mb-2" hide-details />
 
-      <v-combobox v-model="form.tags" label="Tags" multiple chips closable-chips
-        density="compact" variant="outlined" class="mb-2" hide-details />
+      <!-- Feature 0019: tag picker replaces the legacy free-text combobox. -->
+      <TagPicker v-model="form.tagIds" label="Nhãn" class="mb-2" />
 
       <v-textarea v-model="form.notes" label="Ghi chú" rows="2" auto-grow
         density="compact" variant="outlined" class="mb-3" hide-details />
@@ -72,6 +72,7 @@ import { useChatContactPanel } from '@/composables/use-chat-contact-panel';
 import ChatAppointments, { type AppointmentPrefill } from './ChatAppointments.vue';
 import ChatOrders from './ChatOrders.vue';
 import ConversationNotes from './ConversationNotes.vue';
+import TagPicker from '@/components/tags/TagPicker.vue';
 
 const props = defineProps<{
   contactId: string | null;
