@@ -7,6 +7,7 @@
  */
 import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
+import { trackBackground } from '../../shared/utils/background-tasks.js';
 import crypto from 'node:crypto';
 
 const MAX_DELIVERIES_PER_ORG = 1000;
@@ -26,7 +27,7 @@ export async function emitWebhook(orgId: string, event: string, data: any): Prom
       : null;
 
     // Fire-and-forget on the I/O, but synchronously schedule the delivery row.
-    void deliverAndPersist({ orgId, event, url: urlConfig.valuePlain, payload, signature });
+    trackBackground(deliverAndPersist({ orgId, event, url: urlConfig.valuePlain, payload, signature }));
   } catch (err) {
     logger.error('[webhook] Error emitting webhook:', err);
   }

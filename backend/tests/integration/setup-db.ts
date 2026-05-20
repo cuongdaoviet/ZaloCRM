@@ -80,6 +80,11 @@ export async function teardownDb(): Promise<void> {
 }
 
 export async function resetDb(client: PrismaClient): Promise<void> {
+  // Drain any in-flight fire-and-forget writes (activity log, webhook
+  // deliveries) BEFORE truncating — otherwise their INSERT can hold a lock
+  // that deadlocks against TRUNCATE's AccessExclusiveLock.
+  const { flushBackgroundTasks } = await import('../../src/shared/utils/background-tasks.js');
+  await flushBackgroundTasks();
   // Truncate all tables in FK-respecting order
   await client.$executeRawUnsafe(
     'TRUNCATE TABLE messages, conversations, contacts, zalo_accounts, users, teams, organizations RESTART IDENTITY CASCADE',
