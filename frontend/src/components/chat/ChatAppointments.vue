@@ -134,7 +134,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue';
+import { ref, reactive, watch } from 'vue';
 import { api } from '@/api/index';
 
 export interface Appointment {
@@ -146,9 +146,19 @@ export interface Appointment {
   notes: string | null;
 }
 
+export interface AppointmentPrefill {
+  /** ISO date+time string from the parser. */
+  date: string;
+  /** Matched phrase, used as the prefilled `notes`. */
+  matchedPhrase?: string;
+  /** Monotonic counter — change it to re-trigger the prefill watcher. */
+  token: number;
+}
+
 const props = defineProps<{
   contactId: string;
   appointments: Appointment[];
+  prefill?: AppointmentPrefill | null;
 }>();
 
 const emit = defineEmits<{
@@ -192,6 +202,22 @@ function formatAptDate(d: string): string {
     year: 'numeric',
   });
 }
+
+// Feature 0017 — open the create form pre-filled when the parent passes a
+// new prefill payload (changes are signalled via `token`).
+watch(
+  () => props.prefill?.token,
+  (token, prevToken) => {
+    if (token == null || token === prevToken) return;
+    const p = props.prefill;
+    if (!p) return;
+    const d = new Date(p.date);
+    createForm.date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    createForm.time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    createForm.notes = p.matchedPhrase ? `Gợi ý từ tin nhắn: "${p.matchedPhrase}"` : '';
+    showForm.value = true;
+  },
+);
 
 function startEdit(apt: Appointment) {
   editingId.value = apt.id;

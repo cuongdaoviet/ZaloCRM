@@ -429,3 +429,63 @@ the body is **not** the same as `value: null` — it returns 400.
 
 Idempotent — always returns `204` whether or not the row existed. Invalid
 keys also return `204` (they can't be in the table anyway).
+
+---
+
+## Feature 0017 — Appointment parser
+
+A pure-compute endpoint that extracts appointment intent from free-form
+Vietnamese chat text using a rule-based regex parser. No DB writes, no FK
+lookups — safe to call frequently from the chat UI.
+
+### POST `/api/v1/appointments/parse`
+
+**Auth:** JWT required.
+
+**Request body:**
+
+```json
+{ "text": "9h sáng mai gặp em nhé" }
+```
+
+- `text` (string, required, ≤ 5000 chars).
+
+**Response 200 — intent found:**
+
+```json
+{
+  "date": "2026-05-21T09:00:00.000Z",
+  "confidence": 0.65,
+  "matchedPhrase": "9h sáng mai gặp em nhé",
+  "type": "meeting"
+}
+```
+
+`date` is the combined date+time as ISO-8601. `confidence` is in `[0.35, 1]`.
+`type` is optional; when present it is one of `call | message | meeting |
+follow_up`.
+
+**Response 200 — no intent detected:**
+
+```json
+{ "result": null }
+```
+
+**Errors:**
+
+- `400` — `text` is missing, not a string, or longer than 5000 characters.
+- `401` — token missing/invalid.
+
+### Supported patterns
+Same as feature 0014's webhook section, this is a quick reference. The full
+list with examples lives in
+[`docs/features/0017-appointment-parser/SPEC.md`](../features/0017-appointment-parser/SPEC.md).
+
+- Relative days: `hôm nay`, `mai`, `kia`, `N ngày nữa`.
+- Weekdays: `thứ 2..7`, `T2..T7`, `chủ nhật`, `CN` (with optional
+  `tuần sau\|tới` for next week).
+- Absolute dates: `DD/MM(/YYYY)`, `ngày DD tháng MM (năm YYYY)`.
+- Weeks/months: `tuần sau`, `N tuần nữa\|sau`.
+- Times: `HH:MM`, `Xh`, `Xh sáng\|chiều\|tối`, `Xpm`, `Xam`, period-only
+  (`sáng` → 09:00, `trưa` → 12:00, `chiều` → 14:00, `tối` → 19:00).
+- Type hints: `gọi` → call, `nhắn` → message, `gặp`/`cafe`/`hẹn` → meeting.

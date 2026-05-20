@@ -28,6 +28,7 @@
       @send-attachment="onSendAttachment"
       @toggle-contact-panel="showContactPanel = !showContactPanel"
       @toggle-pin="onTogglePinHeader"
+      @appointment-suggest="onAppointmentSuggest"
       :show-contact-panel="showContactPanel"
       style="flex: 1; min-width: 300px;"
     />
@@ -39,6 +40,7 @@
         :contact-id="selectedConv.contact.id"
         :conversation-id="selectedConv.id"
         :contact="selectedConv.contact"
+        :appointment-prefill="appointmentPrefill"
         @close="showContactPanel = false"
         @saved="fetchConversations()"
       />
@@ -65,6 +67,8 @@ import ChatContactPanel from '@/components/chat/ChatContactPanel.vue';
 import NewChatDialog from '@/components/chat/NewChatDialog.vue';
 import { useChat } from '@/composables/use-chat';
 import { usePinnedConversations } from '@/composables/use-pinned-conversations';
+import type { ParsedAppointment } from '@/composables/use-appointment-parser';
+import type { AppointmentPrefill } from '@/components/chat/ChatAppointments.vue';
 
 const {
   conversations, selectedConvId, selectedConv, messages,
@@ -98,6 +102,19 @@ function onFilterAccount(id: string | null) {
 
 const showContactPanel = ref(false);
 const showNewChatDialog = ref(false);
+
+// Feature 0017 — appointment suggestion handoff from MessageThread.
+const appointmentPrefill = ref<AppointmentPrefill | null>(null);
+let appointmentPrefillToken = 0;
+function onAppointmentSuggest(payload: ParsedAppointment) {
+  appointmentPrefillToken += 1;
+  appointmentPrefill.value = {
+    date: payload.date,
+    matchedPhrase: payload.matchedPhrase,
+    token: appointmentPrefillToken,
+  };
+  showContactPanel.value = true;
+}
 
 async function onCreateConversation(params: { accountId: string; contactId: string }) {
   await createConversation(params.accountId, params.contactId);

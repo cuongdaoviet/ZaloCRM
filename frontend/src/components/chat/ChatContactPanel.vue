@@ -51,6 +51,7 @@
         v-if="props.contactId"
         :contact-id="props.contactId"
         :appointments="contactAppointments"
+        :prefill="props.appointmentPrefill"
         @refresh="reloadAppointments"
       />
 
@@ -68,7 +69,7 @@
 import { SOURCE_OPTIONS, STATUS_OPTIONS } from '@/composables/use-contacts';
 import type { Contact } from '@/composables/use-contacts';
 import { useChatContactPanel } from '@/composables/use-chat-contact-panel';
-import ChatAppointments from './ChatAppointments.vue';
+import ChatAppointments, { type AppointmentPrefill } from './ChatAppointments.vue';
 import ChatOrders from './ChatOrders.vue';
 import ConversationNotes from './ConversationNotes.vue';
 
@@ -76,6 +77,8 @@ const props = defineProps<{
   contactId: string | null;
   conversationId: string | null;
   contact: Contact | null;
+  /** Feature 0017 — pre-fill the appointment-create form (matched phrase + date). */
+  appointmentPrefill?: AppointmentPrefill | null;
 }>();
 
 const emit = defineEmits<{ close: []; saved: [] }>();
