@@ -82,12 +82,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useTheme } from 'vuetify';
 import { useAuthStore } from '@/stores/auth';
 import { useRouter } from 'vue-router';
 import NotificationBell from '@/components/NotificationBell.vue';
 import GlobalSearch from '@/components/GlobalSearch.vue';
+import { useUserPreferences } from '@/composables/use-user-preferences';
 
 const theme = useTheme();
 const authStore = useAuthStore();
@@ -95,7 +96,25 @@ const router = useRouter();
 
 const drawer = ref(true);
 const rail = ref(false);
-const isDark = ref(localStorage.getItem('theme') !== 'light');
+
+// Feature 0016: theme is persisted server-side as `ui.theme` (per-user).
+// localStorage is kept as a fast-path read on initial load so we don't flash
+// the wrong theme while the API call is in flight; we write through to both.
+const { usePref } = useUserPreferences();
+const initialTheme: 'dark' | 'light' =
+  localStorage.getItem('theme') === 'light' ? 'light' : 'dark';
+const themePref = usePref<'dark' | 'light'>('ui.theme', initialTheme);
+const isDark = computed(() => themePref.value === 'dark');
+
+// Apply theme + mirror to localStorage on every change.
+watch(
+  themePref,
+  (val) => {
+    theme.global.name.value = val === 'dark' ? 'dark' : 'light';
+    localStorage.setItem('theme', val);
+  },
+  { immediate: false },
+);
 
 onMounted(() => {
   theme.global.name.value = isDark.value ? 'dark' : 'light';
@@ -131,9 +150,7 @@ const visibleMenuItems = computed(() =>
 );
 
 function toggleTheme() {
-  isDark.value = !isDark.value;
-  theme.global.name.value = isDark.value ? 'dark' : 'light';
-  localStorage.setItem('theme', isDark.value ? 'dark' : 'light');
+  themePref.value = isDark.value ? 'light' : 'dark';
 }
 
 function logout() {

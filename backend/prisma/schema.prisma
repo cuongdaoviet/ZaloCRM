@@ -71,6 +71,7 @@ model User {
   createdCampaigns   Campaign[]          @relation("CreatedCampaigns")
   keywordRuleAssigns KeywordRule[]       @relation("KeywordRuleAssign")
   conversationNotes  ConversationNote[]  @relation("ConversationNotes")
+  preferences        UserPreference[]
 
   @@map("users")
 }
@@ -501,4 +502,24 @@ model PinnedConversation {
 
   @@index([orgId, pinnedAt(sort: Desc)])
   @@map("pinned_conversations")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Feature 0016 — User preferences KV store
+// Per-user JSON key-value store for UI preferences (theme, density, sidebar
+// state, last-used filters, ...). Values are arbitrary JSON; the key allowlist
+// lives in user-preference-routes.ts so we don't need a migration for every
+// new client-side preference.
+// ─────────────────────────────────────────────────────────────────────────────
+model UserPreference {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  key       String
+  value     Json     @default("null")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
+  @@map("user_preferences")
 }
