@@ -13,6 +13,7 @@ import {
 import { maybeAutoReply } from '../auto-reply/auto-reply-service.js';
 import { processInboundForKeywordRules } from '../keyword-rules/keyword-rule-service.js';
 import { handleFriendEvent } from '../friendship/friendship-listener.js';
+import { handleReactionEvent } from '../reactions/reaction-listener.js';
 
 export type { UserInfoCacheEntry };
 
@@ -125,6 +126,14 @@ export function attachZaloListener(ctx: ListenerContext): void {
   // listener — see friendship-listener.ts.
   listener.on('friend_event', (event: any) => {
     void handleFriendEvent(accountId, event);
+  });
+
+  // Feature 0021: message reactions. zca-js emits one event per react
+  // (add / change / unreact); handleReactionEvent persists + broadcasts.
+  // EC-0009: `'old_reactions'` reconnect-burst event is intentionally NOT
+  // subscribed in Phase 1.
+  listener.on('reaction', (reactionObject: any) => {
+    void handleReactionEvent(accountId, reactionObject, io);
   });
 
   listener.on('closed', (code: number, reason: string) => {

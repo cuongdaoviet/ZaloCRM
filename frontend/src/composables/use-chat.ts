@@ -2,10 +2,13 @@ import { ref, computed } from 'vue';
 import { api } from '@/api/index';
 import { io, Socket } from 'socket.io-client';
 import type { Contact } from '@/composables/use-contacts';
+import { useReactions, type MessageReaction } from '@/composables/use-reactions';
 
 interface ZaloAccount {
   id: string;
   displayName: string | null;
+  // Feature 0021 — Zalo UID is used by ReactionChips dedupe (EC-0004)
+  zaloUid?: string | null;
 }
 
 interface ConversationMessage {
@@ -36,6 +39,8 @@ export interface Message {
   sentAt: string;
   isDeleted: boolean;
   zaloMsgId: string | null;
+  // Feature 0021 — reactions delivered inline on each Message
+  reactions?: MessageReaction[];
 }
 
 export function useChat() {
@@ -47,7 +52,18 @@ export function useChat() {
   const sendingMsg = ref(false);
   const searchQuery = ref('');
   const accountFilter = ref<string | null>(null);
+  // Feature 0021 — caller identity for optimistic reactions
+  const selfUserId = ref<string | null>(null);
+  const selfFullName = ref<string | null>(null);
   let socket: Socket | null = null;
+
+  // Reactions composable — operates on the same `messages` ref so optimistic
+  // changes and socket events both update the visible thread.
+  const reactions = useReactions({
+    messages,
+    selfUserId,
+    selfFullName,
+  });
 
   const selectedConv = computed(() =>
     conversations.value.find(c => c.id === selectedConvId.value) || null,
@@ -170,6 +186,9 @@ export function useChat() {
         msg.isDeleted = true;
       }
     });
+
+    // Feature 0021 — reactions live-merge from BE listener / other clients
+    reactions.subscribe(socket);
   }
 
   function destroySocket() {
@@ -212,6 +231,8 @@ export function useChat() {
     sendingMsg,
     searchQuery,
     accountFilter,
+    selfUserId,
+    selfFullName,
     fetchConversations,
     selectConversation,
     sendMessage,
@@ -219,5 +240,8 @@ export function useChat() {
     createConversation,
     initSocket,
     destroySocket,
+    // Feature 0021 — reaction operations re-exported for the view layer
+    addOrToggleReaction: reactions.addOrToggle,
+    removeReaction: reactions.remove,
   };
 }

@@ -214,6 +214,8 @@ model Message {
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   repliedBy    User?        @relation("RepliedMessages", fields: [repliedByUserId], references: [id])
+  // Feature 0021 — emoji reactions persisted per (message, reactor)
+  reactions    MessageReaction[]
 
   @@index([zaloMsgId])
   // Powers /search/messages: filter by conversation, sort by sentAt desc
@@ -732,4 +734,40 @@ model ContactTag {
   @@id([contactId, tagId])
   @@index([tagId])
   @@map("contact_tags")
+}
+
+// ─── Feature 0021 — Message reactions ────────────────────────────────────────
+// One row per (message, reactor). BR-0004/0005: each reactor can hold AT MOST
+// one reaction per message at a time — same emoji again means "toggle off"
+// (row deleted), different emoji means override (emoji column updated).
+//
+// `reactorSource` discriminates the side that produced the row:
+//   - "crm"  → outbound from CRM, reactorId = User.id (UUID)
+//   - "zalo" → inbound from zca-js listener, reactorId = Zalo UID (string)
+//
+// Two rows CAN coexist for the same react when self-listen fires (EC-0004):
+// one CRM-side row with reactorId = user.id, one Zalo-side row with
+// reactorId = zaloAccount.zaloUid. The compound key (messageId, reactorId)
+// never collides because the two id namespaces (UUID vs Zalo UID) don't
+// overlap. FE dedupes the counter on (reactorSource, reactorId).
+//
+// `emoji` stores the displayable character ("❤️", "👍", …) directly so FE
+// can render it without a lookup. For unknown rType > 6 (custom reactions —
+// BR-0010 / EC-0007), we persist `"custom:<rType>"`; rendering is fallback.
+// ─────────────────────────────────────────────────────────────────────────────
+model MessageReaction {
+  id            String   @id @default(uuid())
+  messageId     String   @map("message_id")
+  reactorId     String   @map("reactor_id")
+  reactorSource String   @default("crm") @map("reactor_source")
+  reactorName   String?  @map("reactor_name")
+  emoji         String
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, reactorId])
+  @@index([messageId])
+  @@map("message_reactions")
 }

@@ -51,57 +51,91 @@
       <!-- Messages -->
       <div ref="messagesContainer" class="flex-grow-1 overflow-y-auto pa-3 chat-messages-area">
         <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-2" />
-        <div v-for="msg in messages" :key="msg.id" class="mb-2 d-flex" :class="msg.senderType === 'self' ? 'justify-end' : 'justify-start'">
+        <div v-for="msg in messages" :key="msg.id" class="mb-2 d-flex message-row" :class="msg.senderType === 'self' ? 'justify-end' : 'justify-start'">
           <div style="max-width: 70%;">
             <div v-if="conversation.threadType === 'group' && msg.senderType !== 'self'" class="text-caption text-primary font-weight-medium mb-1">
               {{ msg.senderName || 'Unknown' }}
             </div>
-            <div class="message-bubble pa-2 px-3 rounded-lg" :class="msg.senderType === 'self' ? 'bg-primary text-white' : 'bg-white'" style="word-wrap: break-word;">
-              <!-- Deleted -->
-              <div v-if="msg.isDeleted" class="text-decoration-line-through font-italic" style="opacity: 0.6;">
-                {{ msg.content || '(tin nhắn)' }}<span class="text-caption"> (đã thu hồi)</span>
-              </div>
-              <!-- Image -->
-              <div v-else-if="getImageUrl(msg)">
-                <img :src="getImageUrl(msg)!" alt="Hình ảnh" class="chat-image" @click="previewImageUrl = getImageUrl(msg)!" />
-              </div>
-              <!-- File/PDF -->
-              <div v-else-if="getFileInfo(msg)" class="file-card">
-                <v-icon size="20" class="mr-2" color="info">mdi-file-document-outline</v-icon>
-                <div class="flex-grow-1">
-                  <div class="text-body-2 font-weight-medium">{{ getFileInfo(msg)!.name }}</div>
-                  <div class="text-caption" style="opacity: 0.6;">{{ getFileInfo(msg)!.size }}</div>
+            <!-- Bubble + hover reaction trigger -->
+            <div class="bubble-wrapper" :class="msg.senderType === 'self' ? 'bubble-wrapper--self' : 'bubble-wrapper--contact'">
+              <div class="message-bubble pa-2 px-3 rounded-lg" :class="msg.senderType === 'self' ? 'bg-primary text-white' : 'bg-white'" style="word-wrap: break-word;">
+                <!-- Deleted -->
+                <div v-if="msg.isDeleted" class="text-decoration-line-through font-italic" style="opacity: 0.6;">
+                  {{ msg.content || '(tin nhắn)' }}<span class="text-caption"> (đã thu hồi)</span>
                 </div>
-                <v-btn v-if="getFileInfo(msg)!.href" icon size="x-small" variant="text" @click="openFile(getFileInfo(msg)!.href)">
-                  <v-icon size="16">mdi-download</v-icon>
-                </v-btn>
-              </div>
-              <!-- Sticker/Video/Voice/GIF -->
-              <div v-else-if="msg.contentType === 'sticker'">🏷️ Sticker</div>
-              <div v-else-if="msg.contentType === 'video'">🎥 Video</div>
-              <div v-else-if="msg.contentType === 'voice'">🎤 Tin nhắn thoại</div>
-              <div v-else-if="msg.contentType === 'gif'">GIF</div>
-              <!-- Reminder/Calendar -->
-              <div v-else-if="isReminderMessage(msg)" class="reminder-card">
-                <div class="d-flex align-center mb-1">
-                  <v-icon size="16" color="warning" class="mr-1">mdi-calendar-clock</v-icon>
-                  <span class="text-caption text-warning font-weight-bold">Nhắc hẹn</span>
+                <!-- Image -->
+                <div v-else-if="getImageUrl(msg)">
+                  <img :src="getImageUrl(msg)!" alt="Hình ảnh" class="chat-image" @click="previewImageUrl = getImageUrl(msg)!" />
                 </div>
-                <div class="text-body-2">{{ getReminderTitle(msg) }}</div>
-                <div v-if="getReminderTime(msg)" class="text-caption mt-1" style="opacity: 0.7;">
-                  <v-icon size="12" class="mr-1">mdi-clock-outline</v-icon>{{ getReminderTime(msg) }}
+                <!-- File/PDF -->
+                <div v-else-if="getFileInfo(msg)" class="file-card">
+                  <v-icon size="20" class="mr-2" color="info">mdi-file-document-outline</v-icon>
+                  <div class="flex-grow-1">
+                    <div class="text-body-2 font-weight-medium">{{ getFileInfo(msg)!.name }}</div>
+                    <div class="text-caption" style="opacity: 0.6;">{{ getFileInfo(msg)!.size }}</div>
+                  </div>
+                  <v-btn v-if="getFileInfo(msg)!.href" icon size="x-small" variant="text" @click="openFile(getFileInfo(msg)!.href)">
+                    <v-icon size="16">mdi-download</v-icon>
+                  </v-btn>
                 </div>
-                <v-btn size="x-small" variant="tonal" color="warning" class="mt-2" prepend-icon="mdi-calendar-sync" @click="syncAppointment(msg)">
-                  Đồng bộ lịch
-                </v-btn>
+                <!-- Sticker/Video/Voice/GIF -->
+                <div v-else-if="msg.contentType === 'sticker'">🏷️ Sticker</div>
+                <div v-else-if="msg.contentType === 'video'">🎥 Video</div>
+                <div v-else-if="msg.contentType === 'voice'">🎤 Tin nhắn thoại</div>
+                <div v-else-if="msg.contentType === 'gif'">GIF</div>
+                <!-- Reminder/Calendar -->
+                <div v-else-if="isReminderMessage(msg)" class="reminder-card">
+                  <div class="d-flex align-center mb-1">
+                    <v-icon size="16" color="warning" class="mr-1">mdi-calendar-clock</v-icon>
+                    <span class="text-caption text-warning font-weight-bold">Nhắc hẹn</span>
+                  </div>
+                  <div class="text-body-2">{{ getReminderTitle(msg) }}</div>
+                  <div v-if="getReminderTime(msg)" class="text-caption mt-1" style="opacity: 0.7;">
+                    <v-icon size="12" class="mr-1">mdi-clock-outline</v-icon>{{ getReminderTime(msg) }}
+                  </div>
+                  <v-btn size="x-small" variant="tonal" color="warning" class="mt-2" prepend-icon="mdi-calendar-sync" @click="syncAppointment(msg)">
+                    Đồng bộ lịch
+                  </v-btn>
+                </div>
+                <!-- Default text -->
+                <div v-else>{{ parseDisplayContent(msg.content) }}</div>
+                <!-- Timestamp -->
+                <div class="text-caption mt-1 msg-time" :class="msg.senderType === 'self' ? 'msg-time-self' : 'msg-time-contact'" style="font-size: 0.7rem;">
+                  {{ formatMessageTime(msg.sentAt) }}
+                </div>
               </div>
-              <!-- Default text -->
-              <div v-else>{{ parseDisplayContent(msg.content) }}</div>
-              <!-- Timestamp -->
-              <div class="text-caption mt-1 msg-time" :class="msg.senderType === 'self' ? 'msg-time-self' : 'msg-time-contact'" style="font-size: 0.7rem;">
-                {{ formatMessageTime(msg.sentAt) }}
+              <!-- Feature 0021 — hover-triggered reaction picker -->
+              <!-- Hidden on deleted bubbles; positioned opposite the bubble. -->
+              <div
+                v-if="canReact && !msg.isDeleted"
+                class="reaction-trigger"
+                :class="msg.senderType === 'self' ? 'reaction-trigger--self' : 'reaction-trigger--contact'"
+              >
+                <button
+                  type="button"
+                  class="reaction-trigger-btn"
+                  :aria-label="'Thả cảm xúc cho tin nhắn'"
+                  @click.stop="togglePicker(msg.id)"
+                >
+                  <v-icon size="16">mdi-emoticon-happy-outline</v-icon>
+                </button>
+                <ReactionPicker
+                  v-if="openPickerMsgId === msg.id"
+                  class="reaction-picker-popover"
+                  :class="msg.senderType === 'self' ? 'reaction-picker-popover--self' : 'reaction-picker-popover--contact'"
+                  @pick="onPickReaction(msg.id, $event)"
+                />
               </div>
             </div>
+            <!-- Feature 0021 — chip stack under bubble -->
+            <ReactionChips
+              v-if="(msg.reactions ?? []).length > 0"
+              :reactions="msg.reactions ?? []"
+              :self-user-id="selfUserId ?? null"
+              :zalo-account-uid="conversation.zaloAccount?.zaloUid ?? null"
+              :align="msg.senderType === 'self' ? 'right' : 'left'"
+              @toggle="onToggleReactionFromChip(msg.id, $event)"
+            />
           </div>
         </div>
         <div v-if="!loading && messages.length === 0" class="text-center pa-8 text-grey">Chưa có tin nhắn</div>
@@ -201,7 +235,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, computed, onMounted } from 'vue';
+import { ref, watch, nextTick, computed, onMounted, onBeforeUnmount } from 'vue';
 import type { Conversation, Message } from '@/composables/use-chat';
 import {
   useQuickReplies,
@@ -214,6 +248,8 @@ import {
 } from '@/composables/use-appointment-parser';
 import { api } from '@/api/index';
 import QuickReplyPopover from './QuickReplyPopover.vue';
+import ReactionPicker from './ReactionPicker.vue';
+import ReactionChips from './ReactionChips.vue';
 
 const props = defineProps<{
   conversation: Conversation | null;
@@ -222,6 +258,14 @@ const props = defineProps<{
   sending: boolean;
   showContactPanel?: boolean;
   isPinned?: boolean;
+  /** Feature 0021 — current user id (used for "is this mine" + optimistic stub). */
+  selfUserId?: string | null;
+  /**
+   * Feature 0021 — caller-provided handler. The parent owns the optimistic
+   * state on `messages`; MessageThread just dispatches user intent. When
+   * absent, the picker is hidden (read-only viewers).
+   */
+  onReact?: (messageId: string, emoji: string) => void;
 }>();
 
 const emit = defineEmits<{
@@ -230,7 +274,41 @@ const emit = defineEmits<{
   'toggle-contact-panel': [];
   'toggle-pin': [];
   'appointment-suggest': [payload: ParsedAppointment];
+  react: [messageId: string, emoji: string];
 }>();
+
+// ── Feature 0021 — reaction picker state ─────────────────────────────────────
+const openPickerMsgId = ref<string | null>(null);
+const canReact = computed(() => !!props.selfUserId);
+
+function togglePicker(messageId: string) {
+  openPickerMsgId.value = openPickerMsgId.value === messageId ? null : messageId;
+}
+
+function onPickReaction(messageId: string, emoji: string) {
+  openPickerMsgId.value = null;
+  dispatchReaction(messageId, emoji);
+}
+
+function onToggleReactionFromChip(messageId: string, emoji: string) {
+  dispatchReaction(messageId, emoji);
+}
+
+function dispatchReaction(messageId: string, emoji: string) {
+  if (props.onReact) props.onReact(messageId, emoji);
+  emit('react', messageId, emoji);
+}
+
+// Dismiss the picker on any outside click. Capture-phase so we close BEFORE
+// the page re-renders on the click target itself.
+function closePickerOnOutsideClick(e: MouseEvent) {
+  if (!openPickerMsgId.value) return;
+  const target = e.target as HTMLElement | null;
+  if (target && target.closest('.reaction-trigger')) return;
+  openPickerMsgId.value = null;
+}
+onMounted(() => window.addEventListener('click', closePickerOnOutsideClick, true));
+onBeforeUnmount(() => window.removeEventListener('click', closePickerOnOutsideClick, true));
 
 const inputText = ref('');
 const messagesContainer = ref<HTMLElement | null>(null);
@@ -564,4 +642,52 @@ function emitAppointmentSuggest() {
   pointer-events: none;
   color: rgb(var(--v-theme-primary));
 }
+
+/* ── Feature 0021 — reaction picker affordance ─────────────────────────── */
+.bubble-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.bubble-wrapper--self { flex-direction: row-reverse; }
+
+/* The hover trigger lives next to the bubble; hidden by default, fades in
+   when the row is hovered. Doesn't shift bubble layout. */
+.reaction-trigger {
+  position: relative;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  margin: 0 6px;
+}
+.message-row:hover .reaction-trigger,
+.reaction-trigger:focus-within {
+  opacity: 1;
+}
+.reaction-trigger-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  cursor: pointer;
+  color: rgba(0, 0, 0, 0.6);
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.reaction-trigger-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: rgba(0, 0, 0, 0.85);
+}
+/* Picker popover floats above and to the side of the trigger. */
+.reaction-picker-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+}
+.reaction-picker-popover--contact { left: 0; }
+.reaction-picker-popover--self    { right: 0; }
 </style>

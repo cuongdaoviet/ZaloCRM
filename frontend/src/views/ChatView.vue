@@ -25,6 +25,8 @@
       :loading="loadingMsgs"
       :sending="sendingMsg"
       :is-pinned="selectedConv ? pinnedIds.has(selectedConv.id) : false"
+      :self-user-id="selfUserId ?? null"
+      :on-react="addOrToggleReaction"
       @send="sendMessage"
       @send-attachment="onSendAttachment"
       @toggle-contact-panel="showContactPanel = !showContactPanel"
@@ -68,15 +70,22 @@ import ChatContactPanel from '@/components/chat/ChatContactPanel.vue';
 import NewChatDialog from '@/components/chat/NewChatDialog.vue';
 import { useChat } from '@/composables/use-chat';
 import { usePinnedConversations } from '@/composables/use-pinned-conversations';
+import { useAuthStore } from '@/stores/auth';
 import type { ParsedAppointment } from '@/composables/use-appointment-parser';
 import type { AppointmentPrefill } from '@/components/chat/ChatAppointments.vue';
 
 const {
   conversations, selectedConvId, selectedConv, messages,
   loadingConvs, loadingMsgs, sendingMsg, searchQuery, accountFilter,
+  selfUserId, selfFullName,
   fetchConversations, selectConversation, sendMessage, sendAttachment, createConversation,
-  initSocket, destroySocket,
+  initSocket, destroySocket, addOrToggleReaction,
 } = useChat();
+
+// Feature 0021 — feed auth identity into the chat composable so the
+// reactions sub-composable can build optimistic stubs + dedupe self-listen
+// rows. We do this in onMounted (below) so the auth store has rehydrated.
+const auth = useAuthStore();
 
 const { pinnedIds, pinnedOrder, fetchPinned, togglePin } = usePinnedConversations();
 
@@ -161,8 +170,21 @@ function stopResize() {
   document.body.style.userSelect = '';
 }
 
-onMounted(() => { fetchConversations(); fetchPinned(); initSocket(); });
+onMounted(() => {
+  selfUserId.value = auth.user?.id ?? null;
+  selfFullName.value = auth.user?.fullName ?? null;
+  fetchConversations();
+  fetchPinned();
+  initSocket();
+});
 onUnmounted(() => { destroySocket(); });
+
+// Keep selfUserId in sync if auth profile lands AFTER ChatView mounts
+// (e.g. token rehydrate races with route navigation).
+watch(() => auth.user, (u) => {
+  selfUserId.value = u?.id ?? null;
+  selfFullName.value = u?.fullName ?? null;
+});
 
 let searchTimeout: ReturnType<typeof setTimeout>;
 watch(searchQuery, () => {

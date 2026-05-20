@@ -96,6 +96,22 @@ export async function chatRoutes(app: FastifyInstance) {
     const [messages, total] = await Promise.all([
       prisma.message.findMany({
         where: { conversationId: id },
+        // Feature 0021 — reactions are returned inline so MessageThread
+        // doesn't need a round-trip per message. Other relations stay
+        // implicit (Prisma includes scalar fields by default).
+        include: {
+          reactions: {
+            select: {
+              id: true,
+              reactorId: true,
+              reactorSource: true,
+              reactorName: true,
+              emoji: true,
+              createdAt: true,
+            },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
         orderBy: { sentAt: 'desc' },
         skip: (parseInt(page) - 1) * parseInt(limit),
         take: parseInt(limit),
