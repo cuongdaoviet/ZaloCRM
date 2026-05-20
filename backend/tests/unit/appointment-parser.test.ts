@@ -94,14 +94,33 @@ describe('parseAppointmentFromText — weekdays', () => {
   });
 
   it('"tuần sau" alone → +7 days at 10h', () => {
-    // The parser checks "tuần sau" before weekday patterns; combining a weekday
-    // with "tuần sau" defers to the relative-week match (=> +7 days). This is
-    // an intentional limitation inherited from the reference rule-based parser.
     const r = parseAppointmentFromText('hẹn lúc 10h tuần sau', NOW);
     expect(r).not.toBeNull();
     expect(r!.date.getDate()).toBe(27); // May 20 + 7
     expect(r!.date.getMonth()).toBe(4); // May
     expect(r!.date.getHours()).toBe(10);
+  });
+
+  it('"thứ 2 tuần sau" → Monday next week, not +2 weeks', () => {
+    // NOW is Wed 2026-05-20. Without "tuần sau" the next Monday is 2026-05-25
+    // (5 days). With "tuần sau", the weekday block treats it as next week's
+    // Monday — same as the natural reading "Monday next week" = 2026-05-25.
+    const r = parseAppointmentFromText('hẹn thứ 2 tuần sau lúc 9h', NOW);
+    expect(r).not.toBeNull();
+    expect(r!.date.getDate()).toBe(25);
+    expect(r!.date.getMonth()).toBe(4); // May
+    expect(r!.date.getHours()).toBe(9);
+  });
+
+  it('"T6 tuần tới" → Friday of next calendar week', () => {
+    // Regression: the "tuần tới/sau" hint must NOT collide with the
+    // "N tuần sau" branch when a weekday keyword is present. NOW is
+    // Wed 2026-05-20; next week's Monday is 2026-05-25, so next Friday is
+    // 2026-05-29.
+    const r = parseAppointmentFromText('gặp T6 tuần tới', NOW);
+    expect(r).not.toBeNull();
+    expect(r!.date.getDate()).toBe(29);
+    expect(r!.date.getMonth()).toBe(4); // May
   });
 
   it('"chủ nhật" → upcoming Sunday', () => {

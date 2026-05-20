@@ -67,10 +67,20 @@ function addDays(base: Date, n: number): Date {
 }
 
 function nextWeekday(base: Date, target: number, nextWeek = false): Date {
-  const cur = base.getDay();
+  // WEEKDAY_MAP uses Sun=0..Sat=6 (matches JS getDay()). For the "next week"
+  // semantic we anchor to the Monday of the upcoming calendar week.
+  const cur = base.getDay(); // 0..6 (Sun=0)
+  if (nextWeek) {
+    // Days until the upcoming Monday: Sun=1, Mon=7 (next-week's Mon),
+    // Tue=6, Wed=5, ..., Sat=2.
+    const daysToNextMon = cur === 0 ? 1 : 8 - cur;
+    // Offset from Monday to target weekday within that next week.
+    // target: Sun(0)→6, Mon(1)→0, Tue(2)→1, ..., Sat(6)→5.
+    const offsetFromMon = target === 0 ? 6 : target - 1;
+    return addDays(base, daysToNextMon + offsetFromMon);
+  }
   let diff = (target - cur + 7) % 7;
   if (diff === 0) diff = 7; // same weekday → next week
-  if (nextWeek && diff < 7) diff += 7;
   return addDays(base, diff);
 }
 
@@ -103,12 +113,18 @@ function parseInternal(text: string, now: Date): InternalParsed {
     }
   }
 
-  if (!isoDate) {
+  // Skip the entire "N tuần sau" block when the message is really "thứ X
+  // tuần sau" (weekday + week modifier). Lets the weekday block below handle
+  // it correctly via `nextWeekHint`.
+  // NOTE: \b doesn't work around non-ASCII letters like "ứ" in "thứ", so the
+  // pattern uses explicit start-or-non-letter anchors instead.
+  const hasWeekdayKeyword = /(?:^|[^a-z])(thứ|thu\s|t[234567](?:[^a-z]|$)|chủ\s*nhật|chu\s*nhat|cn(?:[^a-z]|$))/i.test(lower);
+  if (!isoDate && !hasWeekdayKeyword) {
     const m = lower.match(/(\d+)\s*tuần\s*(nữa|sau|tới)/i);
     if (m) {
       isoDate = toIsoDate(addDays(now, parseInt(m[1]) * 7));
       confidence += 0.4;
-    } else if (/\btuần\s*(sau|tới)\b/i.test(lower)) {
+    } else if (/\btuần\s*(sau|tới|kế)\b/i.test(lower)) {
       isoDate = toIsoDate(addDays(now, 7));
       confidence += 0.35;
     }

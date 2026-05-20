@@ -5,7 +5,7 @@
  * pin/unpin/toggle methods. The Set lets ConversationList query membership in
  * O(1) when partitioning conversations into "pinned" and "unpinned" buckets.
  */
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { api } from '@/api/index';
 import type { Conversation } from '@/composables/use-chat';
 
@@ -16,6 +16,15 @@ export interface PinnedConversation extends Conversation {
 const pinnedIds = ref<Set<string>>(new Set());
 const pinnedConversations = ref<PinnedConversation[]>([]);
 const loading = ref(false);
+
+/**
+ * Stable ordering of pinned conversation IDs by `pinnedAt DESC` (most
+ * recently pinned first). Used by ConversationList to sort the inline
+ * "Đã ghim" section so it matches the dedicated /pinned endpoint's order.
+ */
+const pinnedOrder = computed<string[]>(() =>
+  pinnedConversations.value.map((c) => c.id),
+);
 
 export function usePinnedConversations() {
   /** Replace local state with whatever the server has. */
@@ -44,6 +53,9 @@ export function usePinnedConversations() {
 
     try {
       await api.post(`/conversations/${conversationId}/pin`);
+      // Refresh from server so `pinnedConversations` is sorted by pinnedAt
+      // DESC (with the new pin at the head). Cheap query — only pinned rows.
+      void fetchPinned();
       return true;
     } catch (err) {
       // Rollback
@@ -88,6 +100,7 @@ export function usePinnedConversations() {
 
   return {
     pinnedIds,
+    pinnedOrder,
     pinnedConversations,
     loading,
     fetchPinned,

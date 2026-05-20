@@ -169,6 +169,13 @@ const props = defineProps<{
   loading: boolean;
   search: string;
   pinnedIds?: Set<string>;
+  /**
+   * Ordered list of pinned conversation IDs by `pinnedAt DESC`. When passed,
+   * the inline "Đã ghim" section sorts pinned items by pin-time instead of
+   * `lastMessageAt` so the most recently-pinned thread floats to the top.
+   * Falls back to the parent's list order when omitted.
+   */
+  pinnedOrder?: string[];
 }>();
 
 defineEmits<{
@@ -179,13 +186,19 @@ defineEmits<{
   'toggle-pin': [id: string];
 }>();
 
-// Split the incoming list into pinned vs. unpinned. We DON'T re-sort the
-// pinned slice — the order respects whatever the parent passes (the pinned-
-// dedicated fetch returns by pinnedAt DESC; if the parent is only passing
-// the regular list, pinned items appear in lastMessageAt order which is OK).
+// Split the incoming list into pinned vs. unpinned. When `pinnedOrder` is
+// supplied we sort the pinned slice by it so the section matches the
+// dedicated /pinned endpoint's `pinnedAt DESC` ordering (PR #26 follow-up).
 const pinnedConvs = computed(() => {
   if (!props.pinnedIds || props.pinnedIds.size === 0) return [];
-  return props.conversations.filter((c) => props.pinnedIds!.has(c.id));
+  const filtered = props.conversations.filter((c) => props.pinnedIds!.has(c.id));
+  if (!props.pinnedOrder || props.pinnedOrder.length === 0) return filtered;
+  const rank = new Map(props.pinnedOrder.map((id, idx) => [id, idx]));
+  return filtered.slice().sort(
+    (a, b) =>
+      (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+      (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+  );
 });
 
 const unpinnedConvs = computed(() => {
