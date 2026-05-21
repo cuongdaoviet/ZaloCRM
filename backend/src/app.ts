@@ -66,6 +66,11 @@ import { reactionRoutes } from './modules/reactions/reaction-routes.js';
 import { workflowDefinitionRoutes } from './modules/workflow/definition-routes.js';
 import { workflowExecutionRoutes } from './modules/workflow/execution-routes.js';
 import { startWorkflowRunner } from './workers/workflow-runner.js';
+// Feature 0036 — AI reply suggestions (BYOK)
+import { aiConfigRoutes } from './modules/ai/ai-config-routes.js';
+import { aiUsageRoutes } from './modules/ai/ai-usage-routes.js';
+import { aiSuggestionRoutes } from './modules/ai/ai-suggestion-routes.js';
+import { assertAiMasterKey } from './shared/crypto/encrypt-config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -182,6 +187,10 @@ async function bootstrap() {
   await app.register(reactionRoutes);
   await app.register(workflowDefinitionRoutes);
   await app.register(workflowExecutionRoutes);
+  // Feature 0036 — AI reply suggestions
+  await app.register(aiConfigRoutes);
+  await app.register(aiUsageRoutes);
+  await app.register(aiSuggestionRoutes);
 
   // Liveness/readiness probe — also checks DB connectivity
   app.get('/health', async () => {
@@ -228,6 +237,14 @@ async function bootstrap() {
     logger.info(`[minio] bucket ${config.s3Bucket} ready`);
   } catch (err) {
     logger.error('[minio] ensureBucket failed — refusing to start:', err);
+    process.exit(1);
+  }
+
+  // Feature 0036 — refuse to start in production without a real master key.
+  try {
+    assertAiMasterKey();
+  } catch (err) {
+    logger.error('[ai] AI_CONFIG_MASTER_KEY check failed — refusing to start:', err);
     process.exit(1);
   }
 

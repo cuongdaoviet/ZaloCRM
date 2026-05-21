@@ -161,6 +161,13 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    // Feature 0036 — AI reply suggestions (BYOK) config page.
+    path: '/settings/ai-config',
+    name: 'SettingsAiConfig',
+    component: () => import('@/views/SettingsAiConfigView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('@/views/NotFoundView.vue'),
