@@ -11,6 +11,23 @@ Status legend:
 - ❌ Not started — needs a SPEC + implementation
 - 🟡 Partially shipped — some scaffolding exists but doesn't match the 3.0
   feature description. Needs a "complete it" SPEC, smaller scope.
+- ✅ Shipped — links to SPEC + PR
+
+## Status summary (updated 2026-05-21)
+
+**Shipped this cycle:** 16 features — 0022, 0023, 0024, 0025, 0026, 0027,
+0028, 0029, 0030, 0031, 0032, 0033, 0034, 0035, 0037, 0040, 0041, 0042,
+0043 (plus 0024/0027 SPECs that landed earlier).
+
+**Held pending product call:**
+- **0036** — AI reply suggestions. Recurring API cost (~$0.75/day/org at
+  Sonnet 4.5 baseline) and provider strategy.
+- **0038** — Integration Hub framework. Each connector is its own auth/
+  permissions surface.
+- **0039** — Mobile PWA. ~4–6 week rewrite of chat + contacts views.
+
+See [docs/operations/CHANGELOG.md](docs/operations/CHANGELOG.md) for the
+release-by-release narrative.
 
 ---
 
@@ -54,27 +71,26 @@ ConversationList with per-tab unread badges; right-click row →
 Field name matches ZaloCRM-3.0 — `archivedAt` was rejected in favor of
 toggle-state `tab`.
 
-### 0024 — Dual name display (CRM Name + Zalo Name)
-**Status:** ❌
-**Source:** v2.1 release notes — "Tên KH 2 lớp: CRM Name + Zalo Name, ưu
-tiên CRM Name".
-**Why now:** Today the contact's name is a single field. When the rep
-edits `Contact.fullName` ("Anh Tuấn CFO XYZ"), they lose the original
-Zalo display name that helps disambiguate cold-leads.
-**Rough scope:** Add `Contact.zaloDisplayName` field (synced on
-incoming-message-handler write). UI shows `crmName` primary, `zaloName`
-muted secondary. ~120 LOC.
+### 0024 — Dual name display (CRM Name + Zalo Name) ✅ SHIPPED
+**Status:** ✅ Shipped (PR #58) — see [SPEC](docs/features/0024-dual-name-display/SPEC.md).
+**Scope shipped:** `Contact.zaloDisplayName` field, auto-synced from
+inbound message handler with no-overwrite policy on rep-owned `fullName`.
+FE: ConversationList, ChatHeader, and Customer360 show muted secondary
+text via `use-contact-name` composable when CRM name differs from Zalo
+name (case-insensitive trim compare). Backend strips `zaloDisplayName`
+from PUT body (rep-read-only).
 
 ### 0025 — Inline video player ✅ SHIPPED
 **Status:** ✅ Shipped — see [SPEC](docs/features/0025-video-player/SPEC.md).
 
-### 0026 — Mention rendering + auto-complete
-**Status:** ❌
-**Source:** v3.0 release notes bug-fix — "@mention không bôi lố".
-**Why now:** Group chats are unusable for reps without @mention.
-**Rough scope:** Parse `@<uid>` tokens in message content, render as a
-styled chip. Add `@` trigger in the composer that opens a member picker.
-~250 LOC frontend + a tiny backend for member list.
+### 0026 — Mention rendering + auto-complete ✅ SHIPPED
+**Status:** ✅ Shipped (PR #77) — see [SPEC](docs/features/0026-mention-rendering/SPEC.md).
+**Scope shipped:** Backend `GET /api/v1/conversations/:id/members` (5min
+cache, `chat` ACL) sourced from zca-js `getGroupInfo`. FE parses
+`@<uid>` tokens via regex, renders styled chip with muted fallback for
+unknown UIDs. New `MentionPicker.vue` opens on `@` at word-start with
+keyboard nav (↑/↓/Enter/Esc) and prefix filter. Wire format is raw
+`@<uid>` tokens — zca-js native.
 
 ---
 
@@ -106,80 +122,86 @@ mirror lên MinIO".
 job, signed URLs, per-org buckets, dedup, FE storage usage dashboard,
 backfill of pre-0027 Zalo CDN URLs.
 
-### 0028 — Sticker support (proxy `getStickersDetail` + picker)
-**Status:** ❌
-**Source:** v3.0 release notes — "Sticker animated".
-**Why now:** Stickers render as text placeholder; reps can't use them.
-**Rough scope:** Proxy endpoint that pipes Zalo's sticker detail through
-our backend (avoids CORS). Sticker picker component in chat input.
-Render animated stickers in message bubbles. ~300 LOC.
+### 0028 — Sticker support (proxy `getStickersDetail` + picker) ✅ SHIPPED
+**Status:** ✅ Shipped (PR #74) — see [SPEC](docs/features/0028-sticker-support/SPEC.md).
+**Scope shipped:** Inbound sticker `contentType` detection + inline `<img>`
+render. POST `/conversations/:id/stickers` calls zca-js `sendSticker`,
+persists Message + emits Socket.IO event. Proxy GET endpoints for
+`getStickersDetail` (24h cache) and a Phase-1 hardcoded catalogue. New
+`StickerPicker.vue` triggered from composer button with parallel URL
+hydration. Phase 2: full catalogue browser + custom stickers.
 
-### 0029 — Bank/QR card render (zinstant cards)
-**Status:** ❌
-**Source:** v3.0 release notes — "Bank/QR card render".
-**Why now:** Customers send bank-transfer cards; today they render as
-plain text. Reps copy-paste manually.
-**Rough scope:** Detect Zalo `zinstant` payloads in message content,
-render as a styled card with click-to-copy account number / amount /
-embedded QR code. ~200 LOC.
+### 0029 — Bank/QR card render (zinstant cards) ✅ SHIPPED
+**Status:** ✅ Shipped (PR #73) — see [SPEC](docs/features/0029-bank-qr-card-render/SPEC.md).
+**Scope shipped:** Backend `detectContentType` recognises Zalo zinstant
+payloads (marker or appId+params shape). FE `parseZinstant` tolerant
+parser + new `ZinstantCard.vue` with click-to-copy account number /
+amount / QR image (fullscreen preview). Falls back to muted "Thông tin
+Zalo" chip on unknown shapes (EC-0001). Render mirrored into the
+Feature 0043 virtual-scroll path. Phase 2: outbound composer.
 
-### 0030 — Zalo user info popup (avatar click in group)
-**Status:** ❌
-**Source:** v3.0 release notes — "Click vào avatar trong nhóm xem thông
-tin user".
-**Why now:** In group chats, reps can't tell who said what without
-opening Zalo on their phone.
-**Rough scope:** Popover on avatar click that fetches `getUserInfo` from
-zca-js + shows display name, phone (if friend), Zalo ID. ~100 LOC.
+### 0030 — Zalo user info popup (avatar click in group) ✅ SHIPPED
+**Status:** ✅ Shipped (PR #69) — see [SPEC](docs/features/0030-zalo-user-popup/SPEC.md).
+**Scope shipped:** `GET /api/v1/zalo/users/:uid?accountId=X` endpoint
+(10min cache, `chat` ACL, query-param permission gate). Response cross-
+references Contact table to expose `contactId` (or null). FE
+`UserInfoPopover.vue` opens on avatar click in groups (self-skipped),
+with outside-click + Esc dismiss. "Tạo Contact" button reuses existing
+`ContactDetailDialog` via new optional `ContactPrefill` prop; "Xem trong
+CRM" router-pushes to Customer360. Response augmented with `online` and
+`cached` flags for FE transparency.
 
-### 0031 — Reply / quote message
-**Status:** ❌
-**Source:** v3.0 release notes bug-fix — "Reply preview JSON".
-**Why now:** Reply is table-stakes for chat UX. The 3.0 fix existing
-implies they have reply; we don't even have the feature.
-**Rough scope:** Add `Message.replyToMessageId` field, render quote
-bubble inside child message, add "Reply" action on hover. Outbound via
-zca-js `sendMessage({ quoted })`. ~300 LOC.
+### 0031 — Reply / quote message ✅ SHIPPED
+**Status:** ✅ Shipped (PR #79) — see [SPEC](docs/features/0031-reply-quote/SPEC.md).
+**Scope shipped:** `Message.replyToMessageId` FK self-ref (SET NULL on
+delete) + index. POST validates same-conversation/same-org, builds
+zca-js `quoted` arg. GET projection eager-loads `replyToMessage` with
+200-char content truncation. Inbound parser sets FK when local target
+exists or falls back to `quotedMeta` envelope in content (BR-0006 /
+EC-0006). FE hover Reply action, composer reply preview banner with ✕
+clear, nested quote bubble with scroll-to-source + 1s highlight in both
+v-for and VVirtualScroll render paths.
 
-### 0032 — Hd image preview (uploadAttachment first)
-**Status:** ❌ (related to 0027 but cheaper standalone)
-**Source:** v3.0 release notes bug-fix — "Image preview rỗng — Upload
-uploadAttachment lấy hdUrl thật trước khi lưu Message".
-**Why now:** Image messages today rely on the URL zca-js returns in the
-`sendMessage` response, which is sometimes empty for our outbound
-attachments. Switching to `uploadAttachment` first, then `sendMessage`
-with the hdUrl, gives reliable previews even before MinIO mirror lands.
-**Rough scope:** ~50 LOC change in the attachments route. Doesn't depend
-on 0027.
+### 0032 — Hd image preview (uploadAttachment first) ✅ SHIPPED
+**Status:** ✅ Shipped (PR #68) — see [SPEC](docs/features/0032-hd-image-preview/SPEC.md).
+**Scope shipped:** Outbound Zalo-CDN fallback path now calls
+`api.uploadAttachment` first, validates non-empty `hdUrl` (falls through
+`hdUrl → normalUrl → fileUrl → url` for zca-js shape variance), and
+only then calls `sendMessage`. Empty hdUrl → 502 `upload_failed`. Path
+selection by new `MINIO_ENABLED` env (default true) so Feature 0027
+strict contract is preserved on MinIO-opted deployments. `content.thumb`
++ `attachments[0].hdUrl` populated consistently for future export.
 
-### 0033 — Friend aggregates (chattingNicksCount, acceptedNicksCount)
-**Status:** 🟡 partial (Feature 0020 has the rows, no aggregate fields)
-**Source:** v3.0 release notes — "Friend model + aggregates ... đếm nick
-CRM đang chăm khách".
-**Why now:** Admin wants "how many leads is rep A actively chatting with"
-at a glance. Today they'd have to write SQL.
-**Rough scope:** Either denormalize aggregates onto User/Contact, OR add
-a `GET /api/v1/friends/stats` endpoint that computes on demand. ~150 LOC.
+### 0033 — Friend aggregates (chattingNicksCount, acceptedNicksCount) ✅ SHIPPED
+**Status:** ✅ Shipped (PR #57) — see [SPEC](docs/features/0033-friend-aggregates/SPEC.md).
+**Scope shipped:** `GET /api/v1/friends/stats` returns `byAccount[]` +
+`totals` + `windowDays`. Owner/admin see whole org; members see only
+accounts with `ZaloAccountAccess`. Two `$queryRaw` aggregates (accepted
+COUNT + chatting COUNT(DISTINCT contactId) over `friends ⋈ conversations
+⋈ messages`). Configurable `FRIEND_ACTIVE_WINDOW_DAYS` env (default 7).
+New composite index `messages (conversation_id, sender_type, sent_at
+DESC)`. In-memory cache 60s per `(orgId, userId)`. FE adds 2 columns to
+ZaloAccountsView. EXPLAIN ANALYZE confirms index usage.
 
-### 0034 — Contact merge by Zalo globalId
-**Status:** 🟡 partial (Feature 0018 has phone / uid / fuzzy-name; no
-globalId)
-**Source:** v3.0 release notes — "Gộp khách hàng cha-con tự động, policy
-hard/soft merge".
-**Why now:** Zalo's `globalId` is the canonical user ID that survives
-across Zalo's own account-merging. Matching on it catches duplicates our
-current heuristics miss.
-**Rough scope:** Add `Contact.zaloGlobalId` field, add 4th detection
-strategy in `duplicate-detection.ts`. ~100 LOC + schema migration.
+### 0034 — Contact merge by Zalo globalId ✅ SHIPPED
+**Status:** ✅ Shipped (PR #70) — see [SPEC](docs/features/0034-contact-merge-globalid/SPEC.md).
+**Scope shipped:** `Contact.zaloGlobalId` + composite index. Inbound
+handler reads `globalId` from cached `getUserInfo` profile (camelCase or
+snake_case), applies no-overwrite policy on conflict. New
+`globalId_exact` strategy in `duplicate-detection.ts` (confidence 1.0)
+registered in `duplicate-service.ts`. Merge logic carries globalId to
+primary; warns + keeps primary on conflict. FE `DuplicateGroupsView`
+filter + chip label updated.
 
-### 0035 — Per-account proxy config (UI)
-**Status:** ❌
-**Source:** v3.0 release notes — "Cấu hình proxy HTTP/SOCKS5 cho từng
-Zalo qua giao diện".
-**Why now:** Reps in different regions sometimes need a regional Zalo
-exit. Today there's no way to set a proxy per Zalo account.
-**Rough scope:** Add `ZaloAccount.proxyUrl` field, pass through to
-zca-js `agent` option, UI in Settings/Zalo Accounts. ~200 LOC.
+### 0035 — Per-account proxy config (UI) ✅ SHIPPED
+**Status:** ✅ Shipped (PR #59) — see [SPEC](docs/features/0035-per-account-proxy/SPEC.md).
+**Scope shipped:** `ZaloAccount.proxyUrl` (admin-only PUT/GET visibility,
+stripped from non-admin responses). Validation accepts http/https/socks/
+socks5; normalises `socks://` → `socks5://`. `buildProxyAgent` passes
+agent to `new Zalo({agent})` via test-injectable seam. `maskProxyUrl`
+helper redacts credentials in logs. `requiresReconnect` flag in PUT
+response when changing on a connected account. Proxy-unreachable errors
+preserve `disconnected` status (avoid clobbering session).
 
 ---
 
@@ -197,15 +219,17 @@ budget before spec'ing.
 `AiConfig` + `AiSuggestion` models). FE chip in chat input. Each
 provider is its own integration.
 
-### 0037 — Workflow automation engine
-**Status:** 🟡 very partial (Feature 0009 KeywordRule does single-step
-auto-tag on inbound; full workflow engine doesn't exist)
-**Source:** v2.0 release notes — "Workflow Automation: tự động gửi tin,
-phân loại khách".
-**Why later:** Goes from "if message contains X, tag it Y" to "after 24h
-no reply, send template Z and assign to user W". Big surface area.
-**Rough scope:** New `WorkflowDefinition` model with steps (trigger +
-conditions + actions), step execution worker. ~800 LOC including UI.
+### 0037 — Workflow automation engine ✅ SHIPPED (phase 1)
+**Status:** ✅ Shipped (PR #78) — see [SPEC](docs/features/0037-workflow-engine/SPEC.md).
+**Scope shipped:** Two new Prisma models (`WorkflowDefinition`,
+`WorkflowExecution`). Phase 1 trigger: `inbound_message` with sub-filters.
+Step types: `send_message`, `add_tag`, `assign_user`, `wait`. Cron-style
+worker ticks every 60s with `tickRunning` singleton flag. Trigger hook
+fires from `zalo-listener-factory.ts` as fire-and-forget. Template var
+substitution `{{contactName}}`, `{{repName}}`. 24h re-trigger cooldown.
+FE `SettingsWorkflowsView.vue` + `WorkflowEditor.vue` with admin guard.
+**Phase 2 backlog:** branching, time-based triggers, more step types,
+`FOR UPDATE SKIP LOCKED` for multi-process worker.
 
 ### 0038 — Integration Hub framework (Sheets / Telegram / FB / Zapier)
 **Status:** ❌
@@ -225,48 +249,54 @@ first layout. Bottom nav, larger touch targets, gestures.
 ChatView + ContactsView mobile breakpoints, offline message queue. ~600
 LOC + PWA infrastructure decisions.
 
-### 0040 — Lead scoring + Contact Intelligence
-**Status:** 🟡 very partial (auto-tag via KeywordRule exists; lead
-scoring doesn't)
-**Source:** v2.0 release notes — "Contact Intelligence: gộp trùng, lead
-scoring, auto-tag".
-**Why later:** "Lead score" needs a defined scoring model. Cheap version
-(rules-based: `score = recencyOfLastMessage × engagementCount`) vs.
-expensive version (ML on conversation embeddings).
-**Rough scope:** Rules-based is ~200 LOC + a periodic worker. ML version
-is its own product.
+### 0040 — Lead scoring + Contact Intelligence ✅ SHIPPED (rules-based)
+**Status:** ✅ Shipped (PR #72) — see [SPEC](docs/features/0040-lead-scoring/SPEC.md).
+**Scope shipped:** On-demand 0-100 score (no denormalize). Components:
+recency (max 40) + engagement (max 30) + status (max 20) + appointment
+(max 10), all configurable via `Organization.leadScoreConfig` JSON.
+GET/PUT/DELETE `/api/v1/settings/lead-score-config` (admin-only). Batch
+service uses 3 aggregate queries; 100 contacts + 1000 messages → 5ms
+(target was 200ms). FE `LeadScoreBadge` + `SettingsLeadScoreView`,
+contact list new "Lead" column.
+**Phase 2 backlog:** ML embeddings, time-decay weights, score history,
+threshold alerts.
 
-### 0041 — Advanced analytics (funnel / team perf / report builder)
-**Status:** 🟡 partial (KPI + Reports exist; funnel and custom report
-builder don't)
-**Source:** v2.0 release notes — "Advanced Analytics".
-**Why later:** "Report builder" implies a visual query designer (drag-
-drop dimensions/measures) which is a big component. Funnel is smaller.
-**Rough scope:**
-- Funnel view: ~200 LOC (define stages, count contacts per stage).
-- Team perf dashboard extension: ~150 LOC.
-- Report builder: ~800+ LOC and its own product call.
+### 0041 — Advanced analytics (funnel / team perf) ✅ SHIPPED (phase 1)
+**Status:** ✅ Shipped (PR #76) — see [SPEC](docs/features/0041-advanced-analytics/SPEC.md).
+**Scope shipped:** Two admin-only endpoints. `GET /analytics/funnel`
+returns stage counts (`new → contacted → interested → converted`) +
+next-stage conversion rates (snapshot semantics — no status-history
+table). `GET /analytics/team-performance` returns per-rep avg response
+time (window function), outbound count, converted count, active conv
+count. Cross-org `orgId` filter always applied. Perf: funnel 4ms,
+team-perf 71ms on 10k contacts + 30k messages (target 500ms). FE
+`AnalyticsView` + `FunnelChart.vue` + `TeamPerfTable.vue`.
+**Phase 2 backlog:** Report builder (visual query designer), cumulative
+funnel with status history, CSV export, scheduled email reports.
 
 ---
 
 ## P3 — polish
 
-### 0042 — UI refactor: 3-page Smax layout (chat / contacts / friends)
-**Status:** 🟡 partial (PR #32 ported Smax theme tokens; layout
-patterns not ported)
-**Source:** v3.0 release notes — "UI refactor 3 trang — Chat / Contacts
-/ Friends thiết kế Smax style, layout cố định, badge số tin chưa đọc".
-**Why later:** Visual refinement, not a feature. Specific work: fixed
-left rail on Chat, unread-count badge on conversation list rows, denser
-Contacts table.
-**Rough scope:** ~200 LOC across 3 views.
+### 0042 — UI refactor: 3-page Smax layout (chat / contacts / friends) ✅ SHIPPED
+**Status:** ✅ Shipped (PR #75) — see [SPEC](docs/features/0042-ui-refactor-smax/SPEC.md).
+**Scope shipped:** ChatView 320px fixed left rail + mobile pane switch.
+ConversationList 64px rows + red unread badge. ContactsView 40px dense
+rows + 7 visible columns (kept Feature 0040 Lead column in 1280px width).
+New FriendsView grid + FriendCard with filter/search. Backend `GET
+/api/v1/friends?accountId=&search=&page=` endpoint with ACL. Old "Kết
+bạn" lifecycle view moved to `/friendship-attempts`; sidebar has both.
+Tokens extended in `tokens.css`.
 
-### 0043 — Perf: faster conversation switching
-**Status:** Unverified
-**Source:** v3.0 release notes — "Cải thiện độ trễ khi đổi hội thoại".
-**Why later:** Need to measure first. Probably involves prefetching
-messages on hover / virtualizing the message list.
-**Rough scope:** Measure, then ~150-300 LOC depending on root cause.
+### 0043 — Perf: faster conversation switching ✅ SHIPPED
+**Status:** ✅ Shipped (PR #71) — see [SPEC](docs/features/0043-perf-conversation-switch/SPEC.md).
+**Scope shipped:** New `use-conversation-prefetch.ts` composable: 200ms
+hover debounce → background fetch + 5min cache + in-flight dedupe.
+`MessageThread.vue` switches between v-for (≤100 msgs) and
+`VVirtualScroll` (>100 msgs, Vuetify-native, no new dep). Cache-miss
+shows `MessageSkeleton.vue` bubbles instead of blank flash. Dev-only
+`performance.mark` instrumentation logs perceived latency. Cached
+switches measured at ≤16ms render (target 200ms).
 
 ---
 
