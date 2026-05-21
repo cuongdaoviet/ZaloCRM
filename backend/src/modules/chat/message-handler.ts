@@ -21,6 +21,9 @@ export interface IncomingMessage {
   threadType: 'user' | 'group'; // user or group conversation
   groupName?: string;       // group name if group message
   attachments?: any[];
+  // Feature 0034 — canonical Zalo identifier resolved from `getUserInfo`.
+  // Optional: older zca-js payloads and self messages may not carry this.
+  senderGlobalId?: string | null;
 }
 
 export interface HandleMessageResult {
@@ -209,9 +212,24 @@ async function upsertContact(msg: IncomingMessage, orgId: string): Promise<strin
   // User messages: self messages don't create a contact
   if (msg.isSelf) return null;
 
+  // Feature 0034 — sanitize globalId once at the boundary. Empty / placeholder
+  // values are dropped so we never store a meaningless string.
+  const incomingGlobalId =
+    typeof msg.senderGlobalId === 'string' && msg.senderGlobalId.trim()
+      ? msg.senderGlobalId.trim()
+      : null;
+
   let contact = await prisma.contact.findFirst({
     where: { zaloUid: msg.senderUid, orgId },
-    select: { id: true, fullName: true, zaloDisplayName: true },
+    // Feature 0024 — read `zaloDisplayName` to skip redundant writes.
+    // Feature 0034 BR-0002 — read `zaloGlobalId` so we can apply the
+    // no-overwrite policy when incoming and existing values differ.
+    select: {
+      id: true,
+      fullName: true,
+      zaloDisplayName: true,
+      zaloGlobalId: true,
+    },
   });
 
   if (!contact) {
@@ -222,19 +240,45 @@ async function upsertContact(msg: IncomingMessage, orgId: string): Promise<strin
         orgId,
         zaloUid: msg.senderUid,
         fullName: initialName,
-        // BR-0001 — seed zaloDisplayName from senderName on create.
+        // Feature 0024 BR-0001 — seed zaloDisplayName from senderName on create.
         zaloDisplayName: msg.senderName || null,
+        // Feature 0034 BR-0002 — set globalId at creation when available.
+        zaloGlobalId: incomingGlobalId,
       },
-      select: { id: true, fullName: true, zaloDisplayName: true },
+      select: {
+        id: true,
+        fullName: true,
+        zaloDisplayName: true,
+        zaloGlobalId: true,
+      },
     });
     // Emit webhook for new contact created
     emitWebhook(orgId, 'contact.created', { contactId: contact.id, fullName: contact.fullName });
-  } else if (msg.senderName && contact.zaloDisplayName !== msg.senderName) {
-    // BR-0001 — refresh zaloDisplayName only. fullName is rep-owned.
-    await prisma.contact.update({
-      where: { id: contact.id },
-      data: { zaloDisplayName: msg.senderName },
-    });
+  } else {
+    // Build a single conditional patch so we issue at most one UPDATE.
+    const patch: { zaloDisplayName?: string; zaloGlobalId?: string } = {};
+    // Feature 0024 BR-0001 — refresh zaloDisplayName only. fullName is
+    // rep-owned and must NEVER be overwritten by inbound.
+    if (msg.senderName && contact.zaloDisplayName !== msg.senderName) {
+      patch.zaloDisplayName = msg.senderName;
+    }
+    // Feature 0034 BR-0002 — only fill `zaloGlobalId` when currently NULL.
+    // If a non-null value differs from `incomingGlobalId` we DO NOT overwrite;
+    // log a warning so ops can inspect. Self-match (same value) is a no-op.
+    if (incomingGlobalId) {
+      if (contact.zaloGlobalId == null) {
+        patch.zaloGlobalId = incomingGlobalId;
+      } else if (contact.zaloGlobalId !== incomingGlobalId) {
+        logger.warn(
+          `[message-handler] globalId conflict — contact=${contact.id} ` +
+            `existing=${contact.zaloGlobalId} incoming=${incomingGlobalId} ` +
+            `zaloUid=${msg.senderUid} orgId=${orgId} — keeping existing`,
+        );
+      }
+    }
+    if (Object.keys(patch).length > 0) {
+      await prisma.contact.update({ where: { id: contact.id }, data: patch });
+    }
   }
 
   return contact.id;

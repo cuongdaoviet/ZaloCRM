@@ -137,6 +137,10 @@ model Contact {
   id               String    @id @default(uuid())
   orgId            String    @map("org_id")
   zaloUid          String?   @map("zalo_uid")
+  // Feature 0034 — canonical Zalo identifier that survives nick/account changes.
+  // Filled in by the inbound message pipeline once `getUserInfo` returns a non-empty
+  // `globalId`. Indexed for the new `globalId_exact` duplicate detection strategy.
+  zaloGlobalId     String?   @map("zalo_global_id")
   phone            String?
   email            String?   @map("email")
   fullName         String?   @map("full_name")
@@ -176,6 +180,9 @@ model Contact {
   contactTags     ContactTag[]
 
   @@index([orgId, mergedIntoId])
+  // Feature 0034 — composite index powers fast `globalId_exact` lookup in the
+  // duplicate detector and any future per-org globalId queries.
+  @@index([orgId, zaloGlobalId])
   @@map("contacts")
 }
 

@@ -39,6 +39,9 @@ type Tx = Prisma.TransactionClient | PrismaClient;
 export const ALL_LEVELS: DuplicateLevel[] = [
   'phone_exact',
   'zaloUid_exact',
+  // Feature 0034 — register the new strategy in the default level set so
+  // scan-duplicates picks it up without an explicit `levels` arg.
+  'globalId_exact',
   'name_fuzzy',
 ];
 
@@ -93,7 +96,15 @@ export async function scanDuplicates(
   // Only consider live contacts (not previously merged).
   const contacts = await prisma.contact.findMany({
     where: { orgId, mergedIntoId: null },
-    select: { id: true, fullName: true, phone: true, zaloUid: true },
+    // Feature 0034 — pull `zaloGlobalId` so the globalId_exact detector can
+    // bucket on it. Always-selected; cost is one extra column per row.
+    select: {
+      id: true,
+      fullName: true,
+      phone: true,
+      zaloUid: true,
+      zaloGlobalId: true,
+    },
   });
 
   const rows: ContactRow[] = contacts;
@@ -292,6 +303,9 @@ export async function mergeContacts(
           notes: true,
           metadata: true,
           mergedIntoId: true,
+          // Feature 0034 BR-0005 — required so we can carry the canonical
+          // globalId onto the primary when it was previously NULL.
+          zaloGlobalId: true,
         },
       });
       const byId = new Map(contacts.map((c) => [c.id, c]));
@@ -353,6 +367,32 @@ export async function mergeContacts(
 
       (primaryUpdate as Record<string, unknown>).notes = mergedNotes || null;
       (primaryUpdate as Record<string, unknown>).metadata = mergedMetadata;
+
+      // Feature 0034 BR-0005 — carry the canonical Zalo `globalId` onto the
+      // primary if the primary itself is missing one but a secondary has it.
+      // Conflicting non-null values: KEEP primary's, log warning so ops can
+      // inspect. We do NOT expose this as a fieldsToKeep override on purpose —
+      // it's a derived identity, not a user-facing field.
+      if (primary.zaloGlobalId == null) {
+        const carrier = secondaries.find((s) => s.zaloGlobalId != null);
+        if (carrier?.zaloGlobalId) {
+          (primaryUpdate as Record<string, unknown>).zaloGlobalId =
+            carrier.zaloGlobalId;
+        }
+      } else {
+        for (const s of secondaries) {
+          if (
+            s.zaloGlobalId &&
+            s.zaloGlobalId !== primary.zaloGlobalId
+          ) {
+            logger.warn(
+              `[duplicate-merge] globalId conflict on merge — primary=${primary.id} ` +
+                `keptGlobalId=${primary.zaloGlobalId} secondary=${s.id} ` +
+                `discardedGlobalId=${s.zaloGlobalId} groupId=${groupId}`,
+            );
+          }
+        }
+      }
 
       const secondaryIds = secondaries.map((s) => s.id);
 
