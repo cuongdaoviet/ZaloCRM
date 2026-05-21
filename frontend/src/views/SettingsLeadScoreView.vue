@@ -174,11 +174,17 @@
       </v-btn>
     </v-card>
 
-    <div class="d-flex align-center" style="gap: 8px;">
+    <!-- Feature 0039 EC-0005 — sticky action bar on mobile.
+         The lead-score editor is long (4 cards + 4 buckets) and the save
+         button used to scroll off-screen on a 360px viewport. We pin the
+         action row to the bottom on `xs/sm` so admins can save without
+         scrolling back. Desktop keeps the inline placement. -->
+    <div class="settings-action-bar d-flex align-center" style="gap: 8px;">
       <v-btn
         color="primary"
         :loading="saving"
         :disabled="!authStore.isAdmin"
+        size="large"
         @click="onSave"
       >
         Lưu cấu hình
@@ -197,6 +203,32 @@
     </v-snackbar>
   </div>
 </template>
+
+<style scoped>
+/* Feature 0039 EC-0005 — sticky save bar on phones so the long lead-score
+   form has its primary action reachable without scrolling back to the
+   bottom. Above 600px we render inline. We use `position: sticky` (not
+   fixed) so the bar still scrolls with content above 600px and is part
+   of the natural document flow. */
+.settings-action-bar {
+  padding: 8px 0;
+}
+@media (max-width: 600px) {
+  .settings-action-bar {
+    position: sticky;
+    /* MobileLayout adds 56px nav + safe-area inset to v-main's bottom
+       padding, so anchoring at 0 puts us flush with the visible viewport
+       bottom (above the nav). */
+    bottom: 0;
+    background: rgb(var(--v-theme-surface));
+    z-index: 5;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    margin-top: 16px;
+    border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  }
+}
+</style>
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
