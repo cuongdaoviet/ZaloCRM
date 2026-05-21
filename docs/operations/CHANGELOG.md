@@ -6,6 +6,163 @@ Each entry links to the merging PR for traceability.
 
 ---
 
+## [Unreleased] — 2026-05-21
+
+A multi-day drain of the entire ZaloCRM-3.0 audit backlog plus three
+phase-2 operational items and a security hardening pass. **27 features
+shipped** (0022–0046), all merged through PR review with CI green.
+Backend test count grew from 675 → 1083+; frontend tests from ~35 →
+183+.
+
+### Added
+
+#### Daily-life features (P0)
+
+- **Conversation filters** (feature 0022, PR #44) — chip-row filter
+  (`unread` / `unreplied` / date range / tags) above conversation list
+  + new `GET /api/v1/conversations/counts` aggregate. State persisted
+  via user-preferences KV.
+- **Hide / archive conversations** (feature 0023, PR #46) — `Conversation.tab`
+  string field (`main | other`) + Chính/Khác tab UI, right-click context
+  menu, auto-promote on inbound contact message.
+- **Dual name display** (feature 0024, PR #58) — `Contact.zaloDisplayName`
+  auto-synced from inbound; CRM name primary, Zalo name muted secondary.
+- **Inline video player** (feature 0025) — `<video controls>` with
+  Zalo-provided thumbnail as poster (~30 LOC).
+- **@mention rendering + auto-complete** (feature 0026, PR #77) —
+  `GET /api/v1/conversations/:id/members` (5min cache), styled chip
+  render in MessageThread, `@` trigger MentionPicker in composer.
+
+#### Feature parity with 3.0 (P1)
+
+- **MinIO/S3 attachment mirror** (feature 0027, PR #49) — outbound +
+  inbound mirror, 6 env vars, anonymous-read bucket policy, retry on
+  fail.
+- **Sticker support** (feature 0028, PR #74) — inbound render +
+  composer picker (phase-1 hardcoded catalogue) + proxy endpoints.
+- **Bank/QR zinstant card render** (feature 0029, PR #73) — tolerant
+  parser + ZinstantCard component with click-to-copy + QR preview.
+- **Zalo user info popup** (feature 0030, PR #69) — `GET /api/v1/zalo/users/:uid`
+  (10min cache), popover on avatar click with "Tạo Contact" prefill flow.
+- **Reply / quote message** (feature 0031, PR #79) — `Message.replyToMessageId`
+  FK self-ref + zca-js `quoted` outbound + nested quote bubble with
+  scroll-to-source.
+- **HD image preview** (feature 0032, PR #68) — outbound fallback path
+  calls `api.uploadAttachment` first, validates non-empty `hdUrl` before
+  `sendMessage`. Closes 3.0 v3.0 bug-fix "Image preview rỗng".
+- **Friend aggregates** (feature 0033, PR #57) — `GET /api/v1/friends/stats`
+  with `acceptedNicksCount` + `chattingNicksCount` per ZaloAccount,
+  60s cache, EXPLAIN ANALYZE-tested.
+- **Contact merge by Zalo globalId** (feature 0034, PR #70) —
+  `Contact.zaloGlobalId` + 4th duplicate detection strategy at
+  confidence 1.0.
+- **Per-account proxy config** (feature 0035, PR #59) — `ZaloAccount.proxyUrl`
+  with HTTP/HTTPS/SOCKS5 support, encrypted at rest (extended in
+  feature 0044), masked in logs.
+
+#### Moonshots (P2)
+
+- **AI reply suggestions (BYOK)** (feature 0036, PR #87) — 6 providers
+  (Anthropic, OpenAI, Gemini, Qwen, Kimi, Ollama), AES-256-GCM
+  encrypted keys, 5min cache, prompt-injection hardening ported from
+  3.0, per-org + per-user rate limits.
+- **Workflow automation engine** (feature 0037, PR #78) —
+  `WorkflowDefinition` + `WorkflowExecution`, 1 trigger type
+  (`inbound_message`), 4 step types, cron worker.
+- **Integration Hub** (feature 0038, PR #86) — generic Integration
+  model + Google Sheets (OAuth) + Telegram bot (webhook tee from
+  emitWebhook).
+- **Mobile responsive layout** (feature 0039, PR #85) — phase-1
+  cut from PWA: layout switcher, MobileBottomNav, MobileContactView,
+  44px touch targets. NO service worker / offline.
+- **Lead scoring** (feature 0040, PR #72) — on-demand 0-100 score with
+  configurable weights (recency / engagement / status / appointment).
+- **Advanced analytics** (feature 0041, PR #76) — funnel + team
+  performance dashboards with admin-only endpoints.
+
+#### Polish (P3)
+
+- **UI refactor 3-page Smax layout** (feature 0042, PR #75) — ChatView
+  320px fixed rail + 64px conversation rows + Friends grid page.
+- **Conversation switching perf** (feature 0043, PR #71) — hover
+  prefetch with 5min cache + Vuetify VVirtualScroll for >100-message
+  threads.
+
+#### Operational unblockers (phase-2 cross-cutting)
+
+- **Master-key rotation tooling** (feature 0044, PR #92) — dual-key
+  read window via `AI_CONFIG_MASTER_KEY_PREVIOUS`, CLI
+  `pnpm rotate-master-key`, proxyUrl encryption-at-rest (closes 0035's
+  deferred plaintext gap), RUNBOOK §10 procedure.
+- **Multi-process worker locks** (feature 0045, PR #93) — workflow-runner
+  + integration-runner refactored to use Postgres `FOR UPDATE SKIP
+  LOCKED`. Behavior-preserving; `tickRunning` flag kept as within-process
+  belt-and-suspenders.
+- **Security hardening** (feature 0046, PR #96) — closes all 8 CSO
+  findings: fast-jwt CVE chain via `npm audit fix`, JWT_SECRET boot
+  guard, MinIO bound to 127.0.0.1 + nginx proxy + required non-default
+  credentials, public API keys SHA-256-hashed with lazy migration,
+  OAuth state via `timingSafeEqual`, per-email login rate limit,
+  Dockerfile USER directive.
+
+### Changed
+
+- **`docker-compose.yml`** MinIO ports — was bound to `0.0.0.0:9000`
+  (publicly accessible with `minioadmin/minioadmin` defaults), now
+  bound to `127.0.0.1:9000` with required non-default credentials and
+  nginx reverse proxy at `/attachments/`.
+- **JWT session validity** — Feature 0046 introduces a `JWT_SECRET`
+  boot guard. Operators MUST set a real value before redeploying;
+  existing tokens signed with the dev placeholder become invalid and
+  users re-authenticate.
+- **`docs/design/API.md`** — refreshed in PR #94 with ~25 new endpoints
+  documented across 11 feature sections; added Feature index with
+  anchors at the top.
+
+### Fixed
+
+- **fast-jwt CVE chain** (feature 0046) — upgraded `@fastify/jwt`
+  10.0.0 → 10.1.0 pulling `fast-jwt` 6.1.0 → 6.2.4; closes
+  CVE-2023-48223 incomplete-fix (CVSS 9.1 algorithm confusion via
+  whitespace-prefixed RSA), cache-confusion identity mixup, RFC 7515
+  crit-header violation.
+- **Fastify body-validation bypass** (feature 0046) — upgraded
+  `fastify` 5.8.4 → 5.8.5 closing CVE GHSA-247c-9743-5963 (CVSS 7.5).
+- **OAuth state HMAC compare** (feature 0046) — was `expected !== sig`
+  (timing-leak), now `crypto.timingSafeEqual`.
+- **Login brute-force window** (feature 0046) — login endpoint now
+  rate-limited per email (5 failures / 15 min → 429 with `Retry-After`),
+  applied before bcrypt.compare so failed attempts don't waste CPU.
+
+### Skipped (deliberate scope cuts)
+
+- **Native iOS / Android app** — Feature 0039 phase-2 backlog. PWA shell
+  + offline mode explicitly NOT shipped (half-measure). Separate product
+  call required.
+- **External KMS integration** (Vault / AWS KMS) — Feature 0044 phase-2.
+  Phase-1 stays env-var-based.
+- **Multi-process worker spawn test harness** — Feature 0045 phase-2.
+  Phase-1 has single-process correctness tests + manual concurrent-tx
+  lock test; full spawn-2-processes test deferred to horizontal-scaling
+  rollout.
+
+### Operational notes for upgraders
+
+Before deploying this cycle:
+1. Generate fresh `JWT_SECRET`: `openssl rand -base64 48`.
+2. Generate fresh `MINIO_ROOT_USER` + `MINIO_ROOT_PASSWORD` —
+   docker-compose now refuses defaults.
+3. Generate fresh `AI_CONFIG_MASTER_KEY`: `openssl rand -hex 32`.
+4. Update `S3_PUBLIC_URL` to nginx path (was raw MinIO port).
+5. Deploy. **All users will be re-authenticated** (intentional —
+   invalidates tokens signed with the dev placeholder).
+
+See `docs/operations/RUNBOOK.md` §0046 for the full migration checklist
+and `docs/operations/2026-cycle-hardening.md` Parts 4–4b for the
+pre-release manual QA punch list.
+
+---
+
 ## [Unreleased] — 2026-05-20
 
 A single-day batch landing nine features, four bug fixes, a design-language
