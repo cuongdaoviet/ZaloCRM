@@ -19,6 +19,10 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import Fastify, { type FastifyInstance } from 'fastify';
 import { PrismaClient } from '@prisma/client';
 import { setupDb, teardownDb, resetDb } from './setup-db.js';
+import {
+  encryptProxyUrl,
+  decryptProxyUrl,
+} from '../../src/shared/crypto/encrypt-proxy-url.js';
 
 let prisma: PrismaClient;
 
@@ -83,16 +87,42 @@ async function seed(initialStatus = 'disconnected', proxyUrl: string | null = nu
       role: 'member',
     },
   });
+  // Feature 0044 — proxyUrl now stored as AES-256-GCM cipher columns.
+  const cipher = encryptProxyUrl(org.id, proxyUrl);
   const account = await prisma.zaloAccount.create({
     data: {
       orgId: org.id,
       ownerUserId: admin.id,
       displayName: 'Acc-1',
       status: initialStatus,
-      proxyUrl,
+      proxyUrlCipher: cipher.proxyUrlCipher,
+      proxyUrlIv: cipher.proxyUrlIv,
+      proxyUrlTag: cipher.proxyUrlTag,
     },
   });
   return { orgId: org.id, adminId: admin.id, memberId: member.id, accountId: account.id };
+}
+
+/** Test-only: read the stored proxyUrl from the DB and decrypt it. */
+async function readStoredProxy(
+  prisma: PrismaClient,
+  accountId: string,
+): Promise<string | null> {
+  const row = await prisma.zaloAccount.findUnique({
+    where: { id: accountId },
+    select: {
+      orgId: true,
+      proxyUrlCipher: true,
+      proxyUrlIv: true,
+      proxyUrlTag: true,
+    },
+  });
+  if (!row) return null;
+  return decryptProxyUrl(row.orgId, {
+    proxyUrlCipher: row.proxyUrlCipher,
+    proxyUrlIv: row.proxyUrlIv,
+    proxyUrlTag: row.proxyUrlTag,
+  });
 }
 
 async function buildApp(user: { id: string; orgId: string; role: string }): Promise<FastifyInstance> {
@@ -125,9 +155,10 @@ describe('Feature 0035 — PUT /api/v1/zalo-accounts/:id (proxyUrl)', () => {
     const body = JSON.parse(res.payload);
     // trailing slash stripped on save
     expect(body.proxyUrl).toBe('socks5://user:pass@10.0.0.1:1080');
-    // DB row reflects the same.
-    const row = await prisma.zaloAccount.findUnique({ where: { id: s.accountId } });
-    expect(row?.proxyUrl).toBe('socks5://user:pass@10.0.0.1:1080');
+    // DB row reflects the same (decrypt the cipher to compare plaintext).
+    expect(await readStoredProxy(prisma, s.accountId)).toBe(
+      'socks5://user:pass@10.0.0.1:1080',
+    );
     // Not connected → no reconnect required.
     expect(body.requiresReconnect).toBe(false);
     await app.close();
@@ -165,8 +196,9 @@ describe('Feature 0035 — PUT /api/v1/zalo-accounts/:id (proxyUrl)', () => {
       payload: { proxyUrl: 'socks://10.0.0.1:1080' },
     });
     expect(res.statusCode).toBe(200);
-    const row = await prisma.zaloAccount.findUnique({ where: { id: s.accountId } });
-    expect(row?.proxyUrl).toBe('socks5://10.0.0.1:1080');
+    expect(await readStoredProxy(prisma, s.accountId)).toBe(
+      'socks5://10.0.0.1:1080',
+    );
     await app.close();
   });
 
@@ -208,8 +240,7 @@ describe('Feature 0035 — PUT /api/v1/zalo-accounts/:id (proxyUrl)', () => {
     }
 
     // DB row unchanged.
-    const row = await prisma.zaloAccount.findUnique({ where: { id: s.accountId } });
-    expect(row?.proxyUrl).toBeNull();
+    expect(await readStoredProxy(prisma, s.accountId)).toBeNull();
     await app.close();
   });
 
@@ -223,8 +254,7 @@ describe('Feature 0035 — PUT /api/v1/zalo-accounts/:id (proxyUrl)', () => {
       payload: { proxyUrl: null },
     });
     expect(res.statusCode).toBe(200);
-    const row = await prisma.zaloAccount.findUnique({ where: { id: s.accountId } });
-    expect(row?.proxyUrl).toBeNull();
+    expect(await readStoredProxy(prisma, s.accountId)).toBeNull();
     await app.close();
   });
 
@@ -238,8 +268,7 @@ describe('Feature 0035 — PUT /api/v1/zalo-accounts/:id (proxyUrl)', () => {
       payload: { proxyUrl: '' },
     });
     expect(res.statusCode).toBe(200);
-    const row = await prisma.zaloAccount.findUnique({ where: { id: s.accountId } });
-    expect(row?.proxyUrl).toBeNull();
+    expect(await readStoredProxy(prisma, s.accountId)).toBeNull();
     await app.close();
   });
 
@@ -273,8 +302,7 @@ describe('Feature 0035 — PUT /api/v1/zalo-accounts/:id (proxyUrl)', () => {
     });
     expect(res.statusCode).toBe(403);
     // DB unchanged.
-    const row = await prisma.zaloAccount.findUnique({ where: { id: s.accountId } });
-    expect(row?.proxyUrl).toBeNull();
+    expect(await readStoredProxy(prisma, s.accountId)).toBeNull();
     await app.close();
   });
 
@@ -462,13 +490,16 @@ describe('Feature 0035 — zalo-pool integration (AC-0008, AC-0009)', () => {
 
       const row = await prisma.zaloAccount.findUnique({
         where: { id: s.accountId },
-        select: { status: true, proxyUrl: true },
+        select: { status: true },
       });
       // BR-0008: status must NOT be flipped to qr_pending for proxy errors.
       // We allow `disconnected` (the value updateAccountDB writes in the
       // proxy-error branch) but explicitly reject `qr_pending`.
       expect(row?.status).not.toBe('qr_pending');
-      expect(row?.proxyUrl).toBe('socks5://127.0.0.1:1');
+      // proxyUrl is now stored encrypted — decrypt to compare.
+      expect(await readStoredProxy(prisma, s.accountId)).toBe(
+        'socks5://127.0.0.1:1',
+      );
     } finally {
       pool.__resetZaloConstructorForTests();
       lsSpy.mockRestore();
