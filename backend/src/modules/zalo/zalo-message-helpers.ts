@@ -12,22 +12,32 @@ export interface UserInfoCacheEntry {
   zaloName: string;
   avatar: string;
   phone?: string;
+  // Feature 0034 — canonical Zalo identifier. Cached alongside the
+  // existing zaloName/avatar so we don't pay a second `getUserInfo` call
+  // when persisting an incoming message.
+  globalId?: string;
   cachedAt: number;
 }
 
 const USER_INFO_CACHE_TTL_MS = 5 * 60 * 1000;
 
 /**
- * Fetch zaloName + avatar from API with a shared in-memory cache (5 min TTL).
+ * Fetch zaloName + avatar (+ globalId, Feature 0034) from API with a shared
+ * in-memory cache (5 min TTL). Returns empty defaults on error so callers
+ * can keep going.
  */
 export async function resolveZaloName(
   api: any,
   uid: string,
   cache: Map<string, UserInfoCacheEntry>,
-): Promise<{ zaloName: string; avatar: string }> {
+): Promise<{ zaloName: string; avatar: string; globalId: string }> {
   const cached = cache.get(uid);
   if (cached && Date.now() - cached.cachedAt < USER_INFO_CACHE_TTL_MS) {
-    return { zaloName: cached.zaloName, avatar: cached.avatar };
+    return {
+      zaloName: cached.zaloName,
+      avatar: cached.avatar,
+      globalId: cached.globalId ?? '',
+    };
   }
   try {
     const result = await api.getUserInfo(uid);
@@ -43,15 +53,25 @@ export async function resolveZaloName(
           '',
         avatar: profile.avatar || '',
         phone: profile.phoneNumber || '',
+        // Feature 0034 — zca-js exposes both `globalId` (camelCase, User type)
+        // and `global_id` (snake_case, UserBasic raw) shapes. Read both.
+        globalId:
+          (typeof profile.globalId === 'string' && profile.globalId) ||
+          (typeof profile.global_id === 'string' && profile.global_id) ||
+          '',
         cachedAt: Date.now(),
       };
       cache.set(uid, entry);
-      return { zaloName: entry.zaloName, avatar: entry.avatar };
+      return {
+        zaloName: entry.zaloName,
+        avatar: entry.avatar,
+        globalId: entry.globalId ?? '',
+      };
     }
   } catch {
     // Network/permission error — fall through and return empty defaults
   }
-  return { zaloName: '', avatar: '' };
+  return { zaloName: '', avatar: '', globalId: '' };
 }
 
 /**
@@ -82,10 +102,15 @@ export async function processZaloMessage(opts: {
   const senderUid = String(message.data?.uidFrom || '');
 
   let senderName: string = message.data?.dName || '';
+  // Feature 0034 — track the canonical Zalo identifier through the pipeline.
+  // Always captured from the same `getUserInfo` call we already make for the
+  // display name/avatar, so no extra API roundtrip.
+  let senderGlobalId: string | null = null;
   if (!message.isSelf && senderUid && api?.getUserInfo) {
     const userInfo = await resolveZaloName(api, senderUid, userInfoCache);
     if (userInfo.zaloName) senderName = userInfo.zaloName;
     if (userInfo.avatar) updateContactAvatar(senderUid, userInfo.avatar);
+    if (userInfo.globalId) senderGlobalId = userInfo.globalId;
   }
 
   let groupName: string | undefined;
@@ -111,6 +136,8 @@ export async function processZaloMessage(opts: {
     threadType: isGroup ? 'group' : 'user',
     groupName,
     attachments: [],
+    // Feature 0034 — propagated through to upsertContact for BR-0002.
+    senderGlobalId,
   });
 }
 

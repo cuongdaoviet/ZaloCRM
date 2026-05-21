@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   detectPhoneGroups,
   detectUidGroups,
+  detectGlobalIdGroups,
   detectNameGroups,
   detectAll,
   UnionFind,
@@ -13,8 +14,9 @@ function row(
   fullName: string | null = null,
   phone: string | null = null,
   zaloUid: string | null = null,
+  zaloGlobalId: string | null = null,
 ): ContactRow {
-  return { id, fullName, phone, zaloUid };
+  return { id, fullName, phone, zaloUid, zaloGlobalId };
 }
 
 describe('UnionFind', () => {
@@ -103,6 +105,55 @@ describe('detectUidGroups (BR-0003 zaloUid_exact)', () => {
   });
 });
 
+describe('detectGlobalIdGroups (Feature 0034 globalId_exact)', () => {
+  it('AC-0005 unit: groups two contacts sharing zaloGlobalId, different zaloUid', () => {
+    const groups = detectGlobalIdGroups([
+      row('a', null, null, 'uid-old', 'g-1'),
+      row('b', null, null, 'uid-new', 'g-1'),
+      row('c', null, null, 'uid-other', 'g-2'),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].level).toBe('globalId_exact');
+    expect(groups[0].confidence).toBe(1.0);
+    expect(groups[0].contactIds).toEqual(['a', 'b']);
+  });
+
+  it('EC-0002: 3+ contacts on same globalId merge into one cluster', () => {
+    const groups = detectGlobalIdGroups([
+      row('a', null, null, 'uid-1', 'g-x'),
+      row('b', null, null, 'uid-2', 'g-x'),
+      row('c', null, null, 'uid-3', 'g-x'),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].contactIds.sort()).toEqual(['a', 'b', 'c']);
+  });
+
+  it('null zaloGlobalId does not match other null (EC-0001 / EC-0004)', () => {
+    const groups = detectGlobalIdGroups([
+      row('a', null, null, 'u-1', null),
+      row('b', null, null, 'u-2', null),
+    ]);
+    expect(groups).toEqual([]);
+  });
+
+  it('trims whitespace when grouping', () => {
+    const groups = detectGlobalIdGroups([
+      row('a', null, null, 'u-1', 'g-1'),
+      row('b', null, null, 'u-2', '  g-1  '),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].contactIds).toEqual(['a', 'b']);
+  });
+
+  it('empty-string globalId is treated as missing', () => {
+    const groups = detectGlobalIdGroups([
+      row('a', null, null, 'u-1', ''),
+      row('b', null, null, 'u-2', ''),
+    ]);
+    expect(groups).toEqual([]);
+  });
+});
+
 describe('detectNameGroups (BR-0003 name_fuzzy)', () => {
   it('groups identical normalized names', () => {
     const { groups } = detectNameGroups([
@@ -156,25 +207,37 @@ describe('detectNameGroups (BR-0003 name_fuzzy)', () => {
 describe('detectAll', () => {
   it('runs all levels and merges results without overlap', () => {
     const contacts: ContactRow[] = [
-      row('a', 'Same Name', '0901234567', null),
-      row('b', 'Same Name', '0901234567', null), // same phone + same name
-      row('c', 'Other Name', null, 'uid-1'),
-      row('d', 'Other Name', null, 'uid-1'), // same uid + same name
+      row('a', 'Same Name', '0901234567', null, null),
+      row('b', 'Same Name', '0901234567', null, null), // same phone + same name
+      row('c', 'Other Name', null, 'uid-1', null),
+      row('d', 'Other Name', null, 'uid-1', null), // same uid + same name
+      row('e', null, null, 'uid-old', 'g-merge'),
+      row('f', null, null, 'uid-new', 'g-merge'), // Feature 0034 globalId_exact
     ];
-    const { groups } = detectAll(contacts, ['phone_exact', 'zaloUid_exact', 'name_fuzzy']);
+    const { groups } = detectAll(contacts, [
+      'phone_exact',
+      'zaloUid_exact',
+      'globalId_exact',
+      'name_fuzzy',
+    ]);
     const levels = groups.map((g) => g.level).sort();
-    // Expect at least one of each level (a/b appear in phone_exact AND name_fuzzy)
     expect(levels).toContain('phone_exact');
     expect(levels).toContain('zaloUid_exact');
+    expect(levels).toContain('globalId_exact');
     expect(levels).toContain('name_fuzzy');
   });
 
   it('honours level selection', () => {
     const contacts: ContactRow[] = [
-      row('a', null, '0901234567', 'uid-1'),
-      row('b', null, '0901234567', 'uid-1'),
+      row('a', null, '0901234567', 'uid-1', 'g-1'),
+      row('b', null, '0901234567', 'uid-1', 'g-1'),
     ];
     const phoneOnly = detectAll(contacts, ['phone_exact']);
     expect(phoneOnly.groups.every((g) => g.level === 'phone_exact')).toBe(true);
+
+    // Feature 0034 — globalId_exact opt-in works in isolation.
+    const gidOnly = detectAll(contacts, ['globalId_exact']);
+    expect(gidOnly.groups.every((g) => g.level === 'globalId_exact')).toBe(true);
+    expect(gidOnly.groups[0].contactIds).toEqual(['a', 'b']);
   });
 });

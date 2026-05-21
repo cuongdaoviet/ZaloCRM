@@ -17,6 +17,27 @@ export interface ZaloAccount {
   sessionData: any;
   ownerUserId: string;
   createdAt: string;
+  // Feature 0035 — per-account proxy. Present only when caller is Owner/Admin.
+  // null = direct connect; string = `socks5://...` / `http(s)://...`.
+  proxyUrl?: string | null;
+}
+
+// Feature 0035 — UI validation regex (UX only; backend is authoritative).
+// Mirrors backend/src/shared/network/proxy-agent.ts (PROXY_URL_REGEX).
+export const PROXY_URL_REGEX =
+  /^(https?|socks5?):\/\/(?:([^@/:\s]+(?::[^@/\s]*)?)@)?(\[[0-9a-fA-F:]+\]|[a-zA-Z0-9.\-_]+)(?::(\d{1,5}))?\/?$/i;
+
+/** Mask credentials in a proxy URL for display. Mirrors backend maskProxyUrl. */
+export function maskProxyUrlForDisplay(url: string | null | undefined): string {
+  if (!url) return '';
+  const trimmed = url.trim();
+  const m = trimmed.match(PROXY_URL_REGEX);
+  if (!m) return url;
+  const scheme = m[1].toLowerCase();
+  const creds = m[2];
+  const host = m[3];
+  const port = m[4];
+  return `${scheme}://${creds ? '****@' : ''}${host}${port ? `:${port}` : ''}`;
 }
 
 export function useZaloAccounts() {
@@ -102,6 +123,16 @@ export function useZaloAccounts() {
     }
   }
 
+  /**
+   * Feature 0035 — update per-account proxy URL.
+   * `proxyUrl` may be string, '', or null. Empty/null clears the field.
+   * Returns the BE response which includes `requiresReconnect: boolean`.
+   */
+  async function updateProxy(accountId: string, proxyUrl: string | null) {
+    const res = await api.put(`/zalo-accounts/${accountId}`, { proxyUrl });
+    return res.data as { proxyUrl: string | null; requiresReconnect: boolean };
+  }
+
   async function deleteAccount(account: ZaloAccount) {
     deleting.value = true;
     try {
@@ -165,6 +196,7 @@ export function useZaloAccounts() {
     showQRDialog, qrImage, qrScanned, scannedName, qrError,
     statusColor, statusText,
     fetchAccounts, addAccount, loginAccount, reconnectAccount, deleteAccount,
+    updateProxy,
     cancelQR, setupSocket,
   };
 }

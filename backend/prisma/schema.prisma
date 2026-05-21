@@ -100,6 +100,10 @@ model ZaloAccount {
   phone           String?
   status          String    @default("disconnected") // connected, disconnected, qr_pending
   sessionData     Json?     @map("session_data")
+  // Feature 0035 — Per-account proxy config.
+  // NULL = no proxy (direct connect). Accepted schemes: http, https, socks, socks5.
+  // Stored normalized (socks→socks5, trailing slash stripped).
+  proxyUrl        String?   @map("proxy_url")
   lastConnectedAt DateTime? @map("last_connected_at")
   createdAt       DateTime  @default(now()) @map("created_at")
 
@@ -139,6 +143,10 @@ model Contact {
   id               String    @id @default(uuid())
   orgId            String    @map("org_id")
   zaloUid          String?   @map("zalo_uid")
+  // Feature 0034 — canonical Zalo identifier that survives nick/account changes.
+  // Filled in by the inbound message pipeline once `getUserInfo` returns a non-empty
+  // `globalId`. Indexed for the new `globalId_exact` duplicate detection strategy.
+  zaloGlobalId     String?   @map("zalo_global_id")
   phone            String?
   email            String?   @map("email")
   fullName         String?   @map("full_name")
@@ -178,6 +186,9 @@ model Contact {
   contactTags     ContactTag[]
 
   @@index([orgId, mergedIntoId])
+  // Feature 0034 — composite index powers fast `globalId_exact` lookup in the
+  // duplicate detector and any future per-org globalId queries.
+  @@index([orgId, zaloGlobalId])
   @@map("contacts")
 }
 

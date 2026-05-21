@@ -4,6 +4,7 @@ import { io, Socket } from 'socket.io-client';
 import type { Contact } from '@/composables/use-contacts';
 import { useReactions, type MessageReaction } from '@/composables/use-reactions';
 import { useUserPreferences } from '@/composables/use-user-preferences';
+import { useConversationPrefetch } from '@/composables/use-conversation-prefetch';
 
 interface ZaloAccount {
   id: string;
@@ -42,6 +43,8 @@ export interface Message {
   contentType: string;
   senderType: string;
   senderName: string | null;
+  /** Feature 0030 — Zalo UID of the sender (used by the user-info popover). */
+  senderUid: string | null;
   sentAt: string;
   isDeleted: boolean;
   zaloMsgId: string | null;
@@ -84,6 +87,9 @@ export function useChat() {
   const loadingConvs = ref(false);
   const loadingMsgs = ref(false);
   const sendingMsg = ref(false);
+  // Feature 0043 — hover prefetch + 5-min in-memory cache so cached
+  // conversation switches render in ≤ 200ms (AC-0002).
+  const prefetch = useConversationPrefetch();
   const searchQuery = ref('');
   const accountFilter = ref<string | null>(null);
   // Feature 0021 — caller identity for optimistic reactions
@@ -192,8 +198,33 @@ export function useChat() {
   }
 
   async function selectConversation(convId: string) {
+    // Feature 0043 — Strategy 3 (optimistic header swap): set selectedConvId
+    // FIRST so the computed `selectedConv` flips to the new row's cached
+    // header data (avatar / name / Zalo account) before any await. The view
+    // layer reads from `selectedConv` synchronously, which is what makes the
+    // header swap feel instant.
+    if (selectedConvId.value !== convId) {
+      // perf mark — only in dev. `performance.mark` is a no-op in prod
+      // builds where DEV is false, so this stays cheap.
+      if (typeof performance !== 'undefined' && import.meta.env?.DEV) {
+        try { performance.mark('conv-click'); } catch { /* SSR / Safari edge */ }
+      }
+    }
     selectedConvId.value = convId;
-    await fetchMessages(convId);
+
+    // Feature 0043 — Strategy 1 (cache hit): render cached messages
+    // instantly, then silently revalidate (EC-0001). Cache miss falls back
+    // to the spinner + fetch path.
+    const cached = prefetch.getCached(convId);
+    if (cached) {
+      messages.value = cached;
+      loadingMsgs.value = false;
+      // Silent revalidate so the next switch sees fresh data.
+      void fetchMessages(convId, { silent: true });
+    } else {
+      await fetchMessages(convId);
+    }
+
     // Fetch full conversation detail to populate contact CRM fields
     try {
       const convDetail = await api.get(`/conversations/${convId}`);
@@ -214,17 +245,27 @@ export function useChat() {
     }
   }
 
-  async function fetchMessages(convId: string) {
-    loadingMsgs.value = true;
+  /**
+   * Feature 0043 — `silent` skips the loading spinner so cached-then-
+   * revalidate doesn't flash a progress bar over the already-rendered
+   * messages. On silent failure we keep the cached view untouched.
+   */
+  async function fetchMessages(
+    convId: string,
+    opts: { silent?: boolean } = {},
+  ): Promise<void> {
+    if (!opts.silent) loadingMsgs.value = true;
     try {
       const res = await api.get(`/conversations/${convId}/messages`, {
         params: { limit: 100 },
       });
       messages.value = res.data.messages;
     } catch (err) {
-      console.error('Failed to fetch messages:', err);
+      if (!opts.silent) {
+        console.error('Failed to fetch messages:', err);
+      }
     } finally {
-      loadingMsgs.value = false;
+      if (!opts.silent) loadingMsgs.value = false;
     }
   }
 
@@ -284,6 +325,9 @@ export function useChat() {
           messages.value.push(data.message);
         }
       }
+      // Feature 0043 — drop the stale cached snapshot so the next switch
+      // back into this conversation re-fetches and includes the new row.
+      prefetch.invalidate(data.conversationId);
       // Refresh conversation list to update last message / unread count
       fetchConversations();
     });
@@ -447,5 +491,10 @@ export function useChat() {
     // Feature 0021 — reaction operations re-exported for the view layer
     addOrToggleReaction: reactions.addOrToggle,
     removeReaction: reactions.remove,
+    // Feature 0043 — hover prefetch handles wired through the view layer.
+    // The list calls onConversationHover / onConversationHoverLeave; the
+    // composable handles debounce + cache + dedupe internally.
+    onConversationHover: prefetch.onHover,
+    onConversationHoverLeave: prefetch.onHoverLeave,
   };
 }
