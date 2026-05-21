@@ -15,6 +15,12 @@
  * Master key: `config.aiConfigMasterKey` — 64 hex chars (32 bytes).
  * Per-org sub-key: HKDF-derived using orgId as salt+info.
  *
+ * Feature 0044 — dual-key read window. When
+ * `config.aiConfigMasterKeyPrevious` is set, `decryptForOrg` first tries the
+ * current key, then falls back to the previous key. Encrypt ALWAYS uses the
+ * current key. This makes rotation a graceful procedure (deploy new env,
+ * re-encrypt in batches via the CLI, then drop the previous env var).
+ *
  * IMPORTANT: maskApiKey() is the ONLY function that should ever produce a
  * string with parts of a key in it for logs. The decrypt() result MUST NOT
  * be logged, ever. See BR-0013.
@@ -27,6 +33,7 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 import { config } from '../../config/index.js';
+import { logger } from '../utils/logger.js';
 
 const ALGO = 'aes-256-gcm';
 const KEY_LEN = 32; // bytes — AES-256
@@ -40,6 +47,8 @@ const TAG_LEN = 16; // bytes — GCM auth tag
 const PLACEHOLDER_KEY =
   '0000000000000000000000000000000000000000000000000000000000000000';
 
+const HEX64_RE = /^[0-9a-fA-F]{64}$/;
+
 export interface EncryptedBlob {
   cipher: string; // hex
   iv: string; // hex
@@ -47,17 +56,24 @@ export interface EncryptedBlob {
 }
 
 /**
- * Derive a per-org 32-byte key from the master key using HKDF-SHA-256.
- * orgId acts as both salt and info — different orgs get unrelated keys, and
- * the same org always derives the same key (so we can decrypt later).
+ * Validate that a master key string is exactly 64 hex chars (32 bytes).
+ * Throws with the same message the original helper produced (kept stable so
+ * existing tests still pass — see unit tests).
  */
-function deriveOrgKey(orgId: string): Buffer {
-  const masterHex = config.aiConfigMasterKey;
-  if (!/^[0-9a-fA-F]{64}$/.test(masterHex)) {
+function validateMasterKey(masterHex: string): void {
+  if (!HEX64_RE.test(masterHex)) {
     throw new Error(
       'AI_CONFIG_MASTER_KEY must be 64 hex chars (32 bytes). Generate with `openssl rand -hex 32`.',
     );
   }
+}
+
+/**
+ * Internal: derive an org sub-key from a specific master-key hex string.
+ * Used by both the current and the previous (fallback) decrypt paths.
+ */
+function deriveOrgKeyFromMaster(orgId: string, masterHex: string): Buffer {
+  validateMasterKey(masterHex);
   const master = Buffer.from(masterHex, 'hex');
   // hkdfSync returns ArrayBuffer; wrap with Buffer.from for downstream use.
   const derived = hkdfSync(
@@ -71,8 +87,19 @@ function deriveOrgKey(orgId: string): Buffer {
 }
 
 /**
+ * Derive a per-org 32-byte key from the CURRENT master key using HKDF-SHA-256.
+ * orgId acts as both salt and info — different orgs get unrelated keys, and
+ * the same org always derives the same key (so we can decrypt later).
+ */
+function deriveOrgKey(orgId: string): Buffer {
+  return deriveOrgKeyFromMaster(orgId, config.aiConfigMasterKey);
+}
+
+/**
  * Encrypt plaintext for the given org. Returns hex blob fields.
  * Throws if the master key is missing/malformed.
+ *
+ * BR-0003: encrypt path ALWAYS uses the current key. Never the previous.
  */
 export function encryptForOrg(orgId: string, plaintext: string): EncryptedBlob {
   const key = deriveOrgKey(orgId);
@@ -91,14 +118,11 @@ export function encryptForOrg(orgId: string, plaintext: string): EncryptedBlob {
 }
 
 /**
- * Decrypt a blob for the given org. Throws on auth-tag mismatch (= tampered
- * ciphertext or wrong key).
+ * Internal: attempt to decrypt a blob using a specific org sub-key. Throws
+ * on any failure (auth-tag mismatch, invalid lengths, …). Callers wrap this
+ * in try/catch to implement the dual-key fallback.
  */
-export function decryptForOrg(orgId: string, blob: EncryptedBlob): string {
-  if (!blob.cipher || !blob.iv || !blob.tag) {
-    throw new Error('Empty encrypted blob');
-  }
-  const key = deriveOrgKey(orgId);
+function decryptWithKey(blob: EncryptedBlob, key: Buffer): string {
   const iv = Buffer.from(blob.iv, 'hex');
   const tag = Buffer.from(blob.tag, 'hex');
   if (iv.length !== IV_LEN) throw new Error('Invalid IV length');
@@ -110,6 +134,68 @@ export function decryptForOrg(orgId: string, blob: EncryptedBlob): string {
     decipher.final(),
   ]);
   return dec.toString('utf8');
+}
+
+/**
+ * Decrypt a blob for the given org. Throws on auth-tag mismatch (= tampered
+ * ciphertext or wrong key).
+ *
+ * Feature 0044 BR-0002 — dual-key fallback:
+ *   1. Try the current key. If it works → return plaintext.
+ *   2. If the current key fails AND `aiConfigMasterKeyPrevious` is set,
+ *      try that. Success → log info + return plaintext.
+ *   3. If neither key works → throw (genuine tamper / wrong env / corrupt blob).
+ */
+export function decryptForOrg(orgId: string, blob: EncryptedBlob): string {
+  if (!blob.cipher || !blob.iv || !blob.tag) {
+    throw new Error('Empty encrypted blob');
+  }
+  const currentKey = deriveOrgKey(orgId);
+  try {
+    return decryptWithKey(blob, currentKey);
+  } catch (currentErr) {
+    const previousHex = config.aiConfigMasterKeyPrevious;
+    if (!previousHex) {
+      throw currentErr;
+    }
+    try {
+      const previousKey = deriveOrgKeyFromMaster(orgId, previousHex);
+      const plain = decryptWithKey(blob, previousKey);
+      // BR-0002: log info (not error) when fallback succeeds. Operator's
+      // signal that the CLI rotation hasn't re-encrypted this row yet.
+      // We never log the plaintext or the org sub-key, only the orgId.
+      logger.info(
+        `[crypto] decrypted with previous key, re-encrypt pending (org=${orgId})`,
+      );
+      return plain;
+    } catch {
+      // Both keys failed → genuine tamper / wrong env / corrupt blob. Re-
+      // throw the ORIGINAL current-key error so the caller stack trace is
+      // not misleading.
+      throw currentErr;
+    }
+  }
+}
+
+/**
+ * Feature 0044 — predicate used by the rotation CLI. Returns true iff the
+ * blob decrypts CLEANLY with the CURRENT master key (no fallback). Used to
+ * decide skip-vs-rewrite during idempotent re-encryption (BR-0007).
+ *
+ * Never throws. An empty/malformed blob returns `false`.
+ */
+export function isCurrentlyEncrypted(
+  orgId: string,
+  blob: EncryptedBlob,
+): boolean {
+  if (!blob || !blob.cipher || !blob.iv || !blob.tag) return false;
+  try {
+    const key = deriveOrgKey(orgId);
+    decryptWithKey(blob, key);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -194,18 +280,42 @@ export function decryptConfig(orgId: string, blob: ConfigBlob): unknown {
 /**
  * Boot-time guard. Call from app.ts before listening. Refuses to start in
  * production when the master key is missing or the placeholder.
+ *
+ * Feature 0044 BR-0004 — additionally refuses to start (any env) when
+ * `AI_CONFIG_MASTER_KEY` and `AI_CONFIG_MASTER_KEY_PREVIOUS` are BOTH set
+ * to the same value. That's a near-certain misconfig signal (operator typo
+ * during rotation) and would silently neutralise the rotation procedure.
  */
 export function assertAiMasterKey(): void {
   const key = config.aiConfigMasterKey;
+  const previous = config.aiConfigMasterKeyPrevious;
   if (!key || key === PLACEHOLDER_KEY) {
     if (config.isProduction) {
       throw new Error(
         'AI_CONFIG_MASTER_KEY is unset or the placeholder. Generate one with `openssl rand -hex 32` and set it in the environment.',
       );
     }
-  } else if (!/^[0-9a-fA-F]{64}$/.test(key)) {
+  } else if (!HEX64_RE.test(key)) {
     throw new Error(
       'AI_CONFIG_MASTER_KEY must be exactly 64 hex chars (32 bytes).',
+    );
+  }
+  // BR-0004 — identical-keys footgun guard. Applies in every env so the dev
+  // accidentally copy-pasting the same value into both vars during testing
+  // gets the same fast failure prod operators do.
+  if (previous && previous === key) {
+    throw new Error(
+      'AI_CONFIG_MASTER_KEY and AI_CONFIG_MASTER_KEY_PREVIOUS must differ. ' +
+        'During rotation the previous key holds the OLD secret while the ' +
+        'current key holds the NEW one. Setting them identical neutralises ' +
+        'the rotation procedure.',
+    );
+  }
+  // If the previous key is set, it must also be a valid 64-hex string (or
+  // unset). Garbage in this var would silently kill the fallback path.
+  if (previous && !HEX64_RE.test(previous)) {
+    throw new Error(
+      'AI_CONFIG_MASTER_KEY_PREVIOUS must be 64 hex chars (32 bytes) or unset.',
     );
   }
 }
