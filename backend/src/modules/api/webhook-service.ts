@@ -4,16 +4,33 @@
  * Feature 0014 adds persistence: every attempt writes a `WebhookDelivery` row
  * with the payload, signature, response status, duration, and any error.
  * Admins read these via the debug panel and can replay failed deliveries.
+ *
+ * Feature 0038 — same event is tee'd to the Integration Hub so Telegram bots
+ * (and future Slack/Zapier connectors) can deliver formatted notifications.
+ * The tee runs even when no `webhook_url` is configured, since the two
+ * destinations are independent.
  */
 import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
 import { trackBackground } from '../../shared/utils/background-tasks.js';
+import { dispatchEvent as dispatchIntegrationEvent } from '../integrations/integration-service.js';
 import crypto from 'node:crypto';
 
 const MAX_DELIVERIES_PER_ORG = 1000;
 const FETCH_TIMEOUT_MS = 10_000;
 
 export async function emitWebhook(orgId: string, event: string, data: any): Promise<void> {
+  // Tee to Integration Hub first — these are independent paths and we want
+  // Telegram notifications even when no generic webhook URL is configured.
+  trackBackground(
+    dispatchIntegrationEvent({
+      orgId,
+      type: event,
+      payload: data ?? {},
+      emittedAt: new Date(),
+    }).catch((err) => logger.warn('[webhook] integration tee failed:', err)),
+  );
+
   try {
     const [urlConfig, secretConfig] = await Promise.all([
       prisma.appSetting.findFirst({ where: { orgId, settingKey: 'webhook_url' } }),

@@ -10,9 +10,9 @@
  * Storage policy: BR-0007 — overwrite each run. Phase 2: append-only with a
  * timestamp column.
  *
- * Rate-limit-safe: BR-0003 calls out >100k rows requires chunking. We cap
- * the worst case at 5000 rows in phase 1 and document the limit in EC-0003;
- * a real chunked write helper is phase-2 work.
+ * Rate-limit-safe: EC-0003 calls out >100k rows hits Google API rate limits.
+ * We chunk writes at 1000 rows per batch (BATCH_SIZE) and cap phase-1 export
+ * at 50k rows. Phase 2: append-only with timestamp column + bigger cap.
  */
 import { google } from 'googleapis';
 import { prisma } from '../../../shared/database/prisma-client.js';
@@ -48,7 +48,10 @@ const HEADERS = [
   'assignedUserName',
 ];
 
-const MAX_ROWS_PHASE_1 = 5000;
+// EC-0003: chunked writes at 1000 rows/batch keep us under Google's 60
+// writes-per-minute quota even on the largest export.
+const BATCH_SIZE = 1000;
+const MAX_ROWS_PHASE_1 = 50_000;
 
 function clientId(): string | undefined {
   return process.env.GOOGLE_OAUTH_CLIENT_ID;
@@ -176,26 +179,41 @@ export const googleSheetsConnector: IntegrationConnector<GoogleSheetsConfig> = {
         c.assignedUser?.fullName ?? '',
       ]);
 
-      const values = [HEADERS, ...rows];
-
       const auth = buildOAuth2Client(config.refreshToken);
       const sheets = google.sheets({ version: 'v4', auth });
-      const range = `${config.sheetName}!A1`;
 
-      // Clear + overwrite (BR-0007).
+      // Clear + overwrite (BR-0007). Header row goes first; data rows follow
+      // in 1000-row chunks (EC-0003).
       await sheets.spreadsheets.values.clear({
         spreadsheetId: config.spreadsheetId,
         range: config.sheetName,
       });
+
+      // Write headers as row 1.
       await sheets.spreadsheets.values.update({
         spreadsheetId: config.spreadsheetId,
-        range,
+        range: `${config.sheetName}!A1`,
         valueInputOption: 'RAW',
-        requestBody: { values },
+        requestBody: { values: [HEADERS] },
       });
 
+      // Chunked data writes start at row 2. Each chunk's range is computed
+      // from the running offset to keep Google's parser happy.
+      for (let offset = 0; offset < rows.length; offset += BATCH_SIZE) {
+        const chunk = rows.slice(offset, offset + BATCH_SIZE);
+        const startRow = 2 + offset; // 1 is header row
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: config.spreadsheetId,
+          range: `${config.sheetName}!A${startRow}`,
+          valueInputOption: 'RAW',
+          requestBody: { values: chunk },
+        });
+      }
+
       logger.info(
-        `[google-sheets] sync orgId=${orgId} rows=${rows.length} sheet=${config.spreadsheetId}`,
+        `[google-sheets] sync orgId=${orgId} rows=${rows.length} batches=${Math.ceil(
+          rows.length / BATCH_SIZE,
+        )} sheet=${config.spreadsheetId}`,
       );
       return { status: 'succeeded', recordsProcessed: rows.length };
     } catch (err) {

@@ -71,6 +71,9 @@ import { aiConfigRoutes } from './modules/ai/ai-config-routes.js';
 import { aiUsageRoutes } from './modules/ai/ai-usage-routes.js';
 import { aiSuggestionRoutes } from './modules/ai/ai-suggestion-routes.js';
 import { assertAiMasterKey } from './shared/crypto/encrypt-config.js';
+// Feature 0038 — Integration Hub (Sheets + Telegram)
+import { integrationRoutes } from './modules/integrations/integration-routes.js';
+import { startIntegrationRunner } from './workers/integration-runner.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -191,6 +194,8 @@ async function bootstrap() {
   await app.register(aiConfigRoutes);
   await app.register(aiUsageRoutes);
   await app.register(aiSuggestionRoutes);
+  // Feature 0038 — Integration Hub
+  await app.register(integrationRoutes);
 
   // Liveness/readiness probe — also checks DB connectivity
   app.get('/health', async () => {
@@ -257,6 +262,7 @@ async function bootstrap() {
     startCampaignWorker(io);
     startFriendshipWorker(io);
     startWorkflowRunner();
+    startIntegrationRunner();
   } catch (err) {
     logger.error('Failed to start server:', err);
     process.exit(1);
