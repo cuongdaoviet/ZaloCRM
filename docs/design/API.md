@@ -2138,3 +2138,380 @@ Error body shape:
 ```
 
 `retryAfter` is only present on 429 responses.
+
+---
+
+## Feature 0037 — Workflow engine
+
+Lightweight CRM automation. Admins define a `WorkflowDefinition`
+(trigger + sequential steps); the engine spawns
+`WorkflowExecution` rows when an inbound message matches and a
+cron worker advances them step-by-step. See
+[features/0037-workflow-engine/SPEC.md](../features/0037-workflow-engine/SPEC.md).
+
+### GET `/api/v1/workflows`
+
+List all workflows in the caller's org.
+
+**Permission:** owner/admin (BR-0008). Phase 1 lists are admin-only.
+
+**Response 200:**
+
+```json
+{
+  "workflows": [
+    {
+      "id": "uuid",
+      "orgId": "uuid",
+      "name": "Welcome new leads",
+      "description": "Send greeting + tag",
+      "isActive": true,
+      "trigger": { "type": "inbound_message", "isFirstInbound": true },
+      "steps": [
+        { "type": "send_message", "content": "Chào {{contactName}}!", "delayMinutes": 0 },
+        { "type": "add_tag", "tag": "Lead", "delayMinutes": 0 }
+      ],
+      "createdAt": "...",
+      "updatedAt": "...",
+      "_count": { "executions": 12 }
+    }
+  ]
+}
+```
+
+### GET `/api/v1/workflows/:id`
+
+Detail. Returns the raw `WorkflowDefinition` row.
+
+**Permission:** owner/admin.
+
+**Errors:** `404` `{ "error": "Không tồn tại" }`.
+
+### POST `/api/v1/workflows`
+
+Create. Body is validated by `validateWorkflowInput` — invalid input
+returns `400` with a Vietnamese reason.
+
+**Permission:** owner/admin.
+
+**Body:**
+
+```json
+{
+  "name": "Welcome new leads",
+  "description": "...",
+  "isActive": true,
+  "trigger": {
+    "type": "inbound_message",
+    "messageMatch": "(?i)báo giá",
+    "contactStatus": ["new", "contacted"],
+    "isFirstInbound": false
+  },
+  "steps": [
+    { "type": "send_message", "content": "Cảm ơn anh/chị {{contactName}}", "delayMinutes": 0 },
+    { "type": "wait",         "delayMinutes": 60 },
+    { "type": "assign_user",  "userId": "uuid", "delayMinutes": 0 }
+  ]
+}
+```
+
+**Validation errors (400)** — sampled from `workflow-helpers.ts`:
+
+- `Body không hợp lệ`
+- `name phải dài 1-200 ký tự`
+- `trigger phải là object`
+- `trigger.type chỉ hỗ trợ "inbound_message" (phase 1)`
+- `trigger.messageMatch phải là string`
+- `trigger.messageMatch không quá 200 ký tự`
+- `steps phải là mảng`
+- `steps không được rỗng` / `steps không quá 50 phần tử (phase 1)`
+- `steps[<i>].type không hợp lệ (chấp nhận: send_message, add_tag, assign_user, wait)`
+- `steps[<i>].delayMinutes phải là số >= 0` / `không quá 30 ngày`
+- `steps[<i>].content phải dài 1-2000 ký tự`
+- `steps[<i>].tag phải dài 1-64 ký tự`
+- `steps[<i>].userId bắt buộc`
+- `assign_user.userId không thuộc tổ chức: <id>` — the route
+  cross-checks the user lives in the same org before persisting.
+
+**Response 201:** the freshly-created `WorkflowDefinition` row.
+
+### PUT `/api/v1/workflows/:id`
+
+Replace the workflow. Same validation as `POST`.
+
+**Permission:** owner/admin.
+
+**Errors:** `404` if the id doesn't belong to the caller's org;
+`400` for the same validation messages as `POST`.
+
+**Response 200:** the updated row.
+
+### DELETE `/api/v1/workflows/:id`
+
+Hard-delete the definition. Cascade FK removes its executions.
+
+**Permission:** owner/admin.
+
+**Response:** `204 No Content`. `404` if it doesn't exist.
+
+### GET `/api/v1/workflows/:id/executions`
+
+List executions of one workflow with pagination.
+
+**Permission:** owner/admin (Phase 1 — Members see executions only
+through the contact-scoped endpoint below).
+
+**Query params:**
+
+| Name | Type | Notes |
+|---|---|---|
+| `page` | integer | Default 1. |
+| `perPage` | integer | Default 20, max 100. |
+
+**Response 200:**
+
+```json
+{
+  "executions": [
+    {
+      "id": "uuid",
+      "workflowId": "uuid",
+      "contact": { "id": "uuid", "fullName": "...", "zaloUid": "..." },
+      "status": "running",
+      "currentStepIdx": 1,
+      "nextStepDueAt": "...",
+      "stepLog": [{ "idx": 0, "status": "completed", "ranAt": "...", "error": null }],
+      "startedAt": "...",
+      "completedAt": null
+    }
+  ],
+  "pagination": { "page": 1, "perPage": 20, "total": 7, "totalPages": 1 }
+}
+```
+
+`status` ∈ `running | completed | failed | cancelled`.
+
+**Errors:** `404` `{ "error": "Không tồn tại" }`.
+
+### GET `/api/v1/contacts/:id/workflow-executions`
+
+List executions touching one contact. Used by the Customer 360 page.
+
+**Permission:** any authenticated user; cross-org isolation enforced
+by `contact.orgId === user.orgId`.
+
+**Response 200:**
+
+```json
+{
+  "executions": [
+    {
+      "id": "uuid",
+      "status": "completed",
+      "workflow": { "id": "uuid", "name": "Welcome new leads" },
+      "startedAt": "...",
+      "completedAt": "..."
+    }
+  ]
+}
+```
+
+Capped at 50 most recent rows by `startedAt DESC`.
+
+**Errors:** `404` if the contact doesn't belong to the caller's org.
+
+---
+
+## Feature 0038 — Integration Hub
+
+Outbound bridge to third-party tools (Google Sheets, Telegram bot,
+...). Each `Integration` row stores a per-org encrypted `config`
+blob. A manual or scheduled sync enqueues an `IntegrationRun`. See
+[features/0038-integration-hub/SPEC.md](../features/0038-integration-hub/SPEC.md).
+
+### Permissions
+
+Everything under `/api/v1/integrations/*` requires
+`requireRole('owner', 'admin')` (BR-0017). Members → `403`. The
+single **exception** is the OAuth callback (see bottom of section) —
+it's a redirect endpoint that arrives without an auth header.
+
+### GET `/api/v1/integrations`
+
+List the org's integrations. Cipher / token fields are stripped by
+`toSummary()` — only `id`, `type`, `name`, `enabled`, `createdAt`,
+`updatedAt`, plus a non-secret summary of `config` (e.g. spreadsheet
+title, bot username) come back.
+
+**Response 200:**
+
+```json
+{
+  "integrations": [
+    {
+      "id": "uuid",
+      "type": "google_sheets",
+      "name": "Sales pipeline",
+      "enabled": true,
+      "createdAt": "...",
+      "updatedAt": "...",
+      "summary": { "spreadsheetId": "1ABC...", "sheetName": "Leads" }
+    }
+  ]
+}
+```
+
+### POST `/api/v1/integrations`
+
+Create + test connection + encrypt.
+
+**Body:**
+
+```json
+{
+  "type": "google_sheets",
+  "name": "Sales pipeline",
+  "config": {
+    "spreadsheetId": "1ABC...",
+    "sheetName": "Leads",
+    "eventTypes": ["contact.created", "contact.status_changed"],
+    "refreshToken": "<from OAuth callback>"
+  }
+}
+```
+
+**Validation errors (400):**
+
+- `{ "error": "type, name, config are required" }`.
+- `{ "error": "<connector-specific>" }` — the connector's `validate`
+  + test-connect hooks bubble their own messages (e.g. invalid sheet
+  id, OAuth refresh token rejected by Google).
+
+**Response 201:** same shape as a list row.
+
+### PATCH `/api/v1/integrations/:id`
+
+Partial update. Any of `name`, `enabled`, `config` may be omitted.
+A `config` patch re-runs the connector's `validate` step.
+
+**Errors:**
+
+- `404` `{ "error": "Integration not found" }`.
+- `400` `{ "error": "<reason>" }` — connector validation failed.
+
+**Response 200:** the updated row summary.
+
+### DELETE `/api/v1/integrations/:id`
+
+Soft-delete — disables the integration and zeroes out
+`configCipher` so the row stays in audit logs without leaking
+secrets at rest.
+
+**Response:** `204 No Content`. `404` if not in caller's org.
+
+### POST `/api/v1/integrations/:id/sync`
+
+Trigger a manual sync. The run is opened synchronously (`202` +
+`runId`) but executes asynchronously via `trackBackground()`.
+
+**Errors:**
+
+| Status | When |
+|---|---|
+| 404 | Unknown integration. |
+| 409 | Integration is disabled — `{ "error": "Integration is disabled" }`. |
+| 409 | Integration has no config (typically because of a prior delete) — `{ "error": "Integration has no config" }`. |
+| 500 | Failed to open the run — message bubbled (truncated to 300 chars). |
+
+**Response 202:**
+
+```json
+{ "runId": "uuid" }
+```
+
+Poll `GET /:id/runs` to watch the result.
+
+### GET `/api/v1/integrations/:id/runs`
+
+Recent `IntegrationRun` rows for this integration, newest first.
+
+**Query params:**
+
+| Name | Type | Notes |
+|---|---|---|
+| `limit` | integer | Default 20, range [1, 100]. |
+
+**Response 200:**
+
+```json
+{
+  "runs": [
+    {
+      "id": "uuid",
+      "integrationId": "uuid",
+      "status": "succeeded",
+      "rowCount": 12,
+      "startedAt": "...",
+      "finishedAt": "...",
+      "error": null
+    }
+  ]
+}
+```
+
+`status` ∈ `running | succeeded | failed`.
+
+### GET `/api/v1/integrations/oauth/google/url`
+
+Build a signed Google OAuth consent URL. The signed `state` carries
+`orgId + nonce + 10-minute expiry` so the callback can verify the
+request wasn't forged.
+
+**Permission:** owner/admin.
+
+**Errors:**
+
+- `503` `{ "error": "Google OAuth not configured on server" }` —
+  `GOOGLE_OAUTH_CLIENT_ID` not set.
+
+**Response 200:**
+
+```json
+{ "url": "https://accounts.google.com/o/oauth2/v2/auth?..." }
+```
+
+### GET `/api/v1/integrations/oauth/google/callback`
+
+The endpoint Google redirects the admin's browser to after consent.
+**Unauthenticated** — the signed `state` (HMAC of
+`orgId.nonce.expiry`) is the CSRF guard.
+
+**Query params:**
+
+| Name | Type | Notes |
+|---|---|---|
+| `code` | string | Authorization code from Google. |
+| `state` | string | The `orgId.nonce.exp.sig` blob from `/oauth/google/url`. |
+| `error` | string | Set when the user denied consent. |
+
+**Errors (400):**
+
+- `{ "error": "OAuth provider error: <code>" }` — Google returned
+  `?error=`.
+- `{ "error": "Missing code or state" }`.
+- `{ "error": "Malformed state" }` / `"State signature mismatch"` /
+  `"State expired"`.
+- `{ "error": "<google-error>" }` — `exchangeCode` rejected.
+
+**Response 200:**
+
+```json
+{ "orgId": "uuid", "refreshToken": "1//..." }
+```
+
+The FE then composes the full `config` (refresh token + admin's
+chosen `spreadsheetId` + `sheetName` + `eventTypes`) and POSTs to
+`/api/v1/integrations` to persist it. Why the indirection? The
+callback has no session, and the config needs admin choices that
+the OAuth flow itself doesn't capture (see SPEC §3 "Why OAuth
+callback returns to the FE").
