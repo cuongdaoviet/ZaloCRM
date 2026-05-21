@@ -94,6 +94,10 @@ model ZaloAccount {
   phone           String?
   status          String    @default("disconnected") // connected, disconnected, qr_pending
   sessionData     Json?     @map("session_data")
+  // Feature 0035 — Per-account proxy config.
+  // NULL = no proxy (direct connect). Accepted schemes: http, https, socks, socks5.
+  // Stored normalized (socks→socks5, trailing slash stripped).
+  proxyUrl        String?   @map("proxy_url")
   lastConnectedAt DateTime? @map("last_connected_at")
   createdAt       DateTime  @default(now()) @map("created_at")
 
@@ -136,6 +140,10 @@ model Contact {
   phone            String?
   email            String?   @map("email")
   fullName         String?   @map("full_name")
+  // Feature 0024 — Zalo display name auto-synced from inbound messages.
+  // Never overwritten by rep edits (fullName is the CRM-editable name).
+  // Display rule: show as muted secondary when it differs from fullName.
+  zaloDisplayName  String?   @map("zalo_display_name")
   avatarUrl        String?   @map("avatar_url")
   source           String?   // FB, TT, GT, CN, etc.
   sourceDate       DateTime? @map("source_date")

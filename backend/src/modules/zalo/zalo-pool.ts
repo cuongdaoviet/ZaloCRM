@@ -12,11 +12,26 @@ import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
 import { attachZaloListener, type UserInfoCacheEntry } from './zalo-listener-factory.js';
 import { emitWebhook } from '../api/webhook-service.js';
+import { buildProxyAgent, maskProxyUrl } from '../../shared/network/proxy-agent.js';
 
 // zca-js has no reliable ESM type exports — load via CJS interop
 const require = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { Zalo } = require('zca-js') as { Zalo: new (opts: { logging: boolean }) => any };
+const { Zalo } = require('zca-js') as {
+  Zalo: new (opts: { logging: boolean; agent?: unknown }) => any;
+};
+
+// Indirection so integration tests can spy/replace the Zalo constructor.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ZaloCtor = new (opts: { logging: boolean; agent?: unknown }) => any;
+let ZaloCtorRef: ZaloCtor = Zalo;
+/** Test-only seam: swap the Zalo constructor for mocked verification (AC-0008). */
+export function __setZaloConstructorForTests(ctor: ZaloCtor): void {
+  ZaloCtorRef = ctor;
+}
+export function __resetZaloConstructorForTests(): void {
+  ZaloCtorRef = Zalo;
+}
 
 interface ZaloCredentials {
   cookie: any;
@@ -47,7 +62,13 @@ class ZaloAccountPool {
 
   // Initiate QR-based login; emits QR events to frontend via Socket.IO
   async loginQR(accountId: string): Promise<void> {
-    const zalo = new Zalo({ logging: false });
+    // Feature 0035: pull per-account proxy URL and build the agent if set.
+    const proxyUrl = await this.loadProxyUrl(accountId);
+    const agent = buildProxyAgent(proxyUrl);
+    if (proxyUrl) {
+      logger.info(`[zalo:${accountId}] QR login via proxy ${maskProxyUrl(proxyUrl)}`);
+    }
+    const zalo = new ZaloCtorRef({ logging: false, agent });
     this.instances.set(accountId, { zalo, api: null, status: 'qr_pending', lastActivity: new Date() });
 
     try {
@@ -115,7 +136,14 @@ class ZaloAccountPool {
 
   // Reconnect using previously saved session credentials
   async reconnect(accountId: string, credentials: ZaloCredentials): Promise<void> {
-    const zalo = new Zalo({ logging: false });
+    // Feature 0035: pick up the latest proxy URL each reconnect so admin can
+    // change it without restarting the process.
+    const proxyUrl = await this.loadProxyUrl(accountId);
+    const agent = buildProxyAgent(proxyUrl);
+    if (proxyUrl) {
+      logger.info(`[zalo:${accountId}] Reconnect via proxy ${maskProxyUrl(proxyUrl)}`);
+    }
+    const zalo = new ZaloCtorRef({ logging: false, agent });
     this.instances.set(accountId, { zalo, api: null, status: 'connecting', lastActivity: new Date() });
 
     try {
@@ -155,8 +183,23 @@ class ZaloAccountPool {
     } catch (err) {
       const instance = this.instances.get(accountId);
       if (instance) instance.status = 'disconnected';
-      await this.updateAccountDB(accountId, 'qr_pending', null);
-      this.io?.emit('zalo:reconnect-failed', { accountId, error: String(err) });
+
+      // BR-0008: proxy failure must NOT silently fall back to direct connect and
+      // must NOT overwrite the account's stored status with `qr_pending` if the
+      // root cause was the proxy (which can be fixed without re-logging in).
+      const proxyErr = isProxyError(err);
+      if (proxyErr) {
+        // Keep DB status as-is (`disconnected`) so admin can fix proxy and
+        // retry without losing the saved session.
+        await this.updateAccountDB(accountId, 'disconnected', null);
+        this.io?.emit('zalo:reconnect-failed', {
+          accountId,
+          error: 'Proxy không kết nối được — kiểm tra URL/credentials',
+        });
+      } else {
+        await this.updateAccountDB(accountId, 'qr_pending', null);
+        this.io?.emit('zalo:reconnect-failed', { accountId, error: String(err) });
+      }
     }
   }
 
@@ -277,6 +320,33 @@ class ZaloAccountPool {
   getInstance(accountId: string): ZaloInstance | undefined {
     return this.instances.get(accountId);
   }
+
+  // Feature 0035: fetch latest proxyUrl from DB so admin changes take effect
+  // on the next reconnect without restarting the process. Returns null if
+  // the account has no proxy or the row is missing.
+  private async loadProxyUrl(accountId: string): Promise<string | null> {
+    try {
+      const row = await prisma.zaloAccount.findUnique({
+        where: { id: accountId },
+        select: { proxyUrl: true },
+      });
+      return row?.proxyUrl ?? null;
+    } catch (err) {
+      logger.warn(`[zalo:${accountId}] loadProxyUrl error:`, err);
+      return null;
+    }
+  }
+}
+
+// Heuristic: distinguish proxy errors from auth/session errors. The proxy
+// agent libraries surface ECONNREFUSED / ETIMEDOUT / ENOTFOUND with the
+// proxy host in the message. We avoid logging the raw err.message because
+// it could include credentials in odd cases.
+function isProxyError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    /\bECONNREFUSED\b|\bETIMEDOUT\b|\bENOTFOUND\b|\bproxy\b|\bSOCKS\b/i.test(msg)
+  );
 }
 
 export const zaloPool = new ZaloAccountPool();

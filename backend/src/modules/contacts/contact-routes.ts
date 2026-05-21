@@ -248,6 +248,10 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
       // Feature 0019 Phase C: `tags` is no longer a column. Use
       // PUT /contacts/:id/tags for tag mutations. If a legacy caller sends
       // `tags: string[]` here we ignore it silently — they should migrate.
+      //
+      // Feature 0024 (BR-0007): `zaloDisplayName` is auto-synced from inbound
+      // messages and is read-only over this endpoint. If a client sends it in
+      // the body it's silently ignored (we never copy it into updateData).
       const updateData: any = {
         fullName: body.fullName,
         phone: body.phone,
