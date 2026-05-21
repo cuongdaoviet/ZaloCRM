@@ -122,6 +122,22 @@
                     <div v-else-if="msg.contentType === 'video'">🎥 Video</div>
                     <div v-else-if="msg.contentType === 'voice'">🎤 Tin nhắn thoại</div>
                     <div v-else-if="msg.contentType === 'gif'">GIF</div>
+                    <!-- Zinstant bank/QR card (feature 0029) — same render
+                         path as the short-thread branch below. Tolerant
+                         parser; falls back to muted "Thông tin Zalo" chip
+                         when payload is unrecognisable (EC-0001). -->
+                    <ZinstantCard
+                      v-else-if="msg.contentType === 'zinstant' && parsedZinstant(msg)"
+                      :data="parsedZinstant(msg)!"
+                      @preview="previewImageUrl = $event"
+                    />
+                    <div
+                      v-else-if="msg.contentType === 'zinstant'"
+                      class="zinstant-fallback"
+                    >
+                      <v-icon size="16" class="mr-1">mdi-package-variant-closed</v-icon>
+                      Thông tin Zalo
+                    </div>
                     <div v-else-if="isReminderMessage(msg)" class="reminder-card">
                       <div class="d-flex align-center mb-1">
                         <v-icon size="16" color="warning" class="mr-1">mdi-calendar-clock</v-icon>
@@ -213,6 +229,21 @@
                 <div v-else-if="msg.contentType === 'video'">🎥 Video</div>
                 <div v-else-if="msg.contentType === 'voice'">🎤 Tin nhắn thoại</div>
                 <div v-else-if="msg.contentType === 'gif'">GIF</div>
+                <!-- Zinstant bank/QR card (feature 0029) — tolerant parser;
+                     falls back to muted "📦 Thông tin Zalo" chip when the
+                     payload is unrecognisable (EC-0001). -->
+                <ZinstantCard
+                  v-else-if="msg.contentType === 'zinstant' && parsedZinstant(msg)"
+                  :data="parsedZinstant(msg)!"
+                  @preview="previewImageUrl = $event"
+                />
+                <div
+                  v-else-if="msg.contentType === 'zinstant'"
+                  class="zinstant-fallback"
+                >
+                  <v-icon size="16" class="mr-1">mdi-package-variant-closed</v-icon>
+                  Thông tin Zalo
+                </div>
                 <!-- Reminder/Calendar -->
                 <div v-else-if="isReminderMessage(msg)" class="reminder-card">
                   <div class="d-flex align-center mb-1">
@@ -392,10 +423,12 @@ import QuickReplyPopover from './QuickReplyPopover.vue';
 import ReactionPicker from './ReactionPicker.vue';
 import ReactionChips from './ReactionChips.vue';
 import MessageSkeleton from './MessageSkeleton.vue';
+import ZinstantCard from './ZinstantCard.vue';
 import { secondaryZaloName } from '@/composables/use-contact-name';
 import UserInfoPopover, {
   type CreateContactPayload,
 } from './UserInfoPopover.vue';
+import { parseZinstant } from '@/utils/parse-zinstant';
 
 // Feature 0043 — virtual scroll kicks in past this many messages. Below the
 // threshold the v-for path stays so short threads pay no virtualization
@@ -767,6 +800,23 @@ function getVideoInfo(
   }
 }
 
+/**
+ * Feature 0029 — memoised per-message zinstant parse. Computed inside
+ * `parsedZinstant(msg)` so we don't re-JSON.parse the same payload on
+ * every re-render. Returns null when the payload isn't extractable
+ * (caller falls through to the generic "📦 Thông tin Zalo" chip).
+ */
+const zinstantCache = new Map<string, ReturnType<typeof parseZinstant>>();
+function parsedZinstant(msg: Message): ReturnType<typeof parseZinstant> {
+  if (msg.contentType !== 'zinstant') return null;
+  if (!msg.content) return null;
+  const cached = zinstantCache.get(msg.id);
+  if (cached !== undefined) return cached;
+  const parsed = parseZinstant(msg.content);
+  zinstantCache.set(msg.id, parsed);
+  return parsed;
+}
+
 function parseDisplayContent(content: string | null): string {
   if (!content) return '';
   if (!content.startsWith('{')) return content;
@@ -940,6 +990,7 @@ function emitAppointmentSuggest() {
 .message-bubble { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); }
 .reminder-card { padding: 8px 12px; border-left: 3px solid rgb(var(--v-theme-warning)); border-radius: 8px; background: rgba(var(--v-theme-warning), 0.08); }
 .file-card { display: flex; align-items: center; padding: 8px 12px; border-radius: 8px; background: rgba(0, 242, 255, 0.05); border: 1px solid rgba(0, 242, 255, 0.1); }
+.zinstant-fallback { display: inline-flex; align-items: center; opacity: 0.65; font-style: italic; font-size: 0.85rem; }
 .chat-image { max-width: 100%; max-height: 300px; border-radius: 12px; cursor: pointer; transition: transform 0.2s; }
 .chat-image:hover { transform: scale(1.02); }
 .chat-video { max-width: 100%; max-height: 360px; border-radius: 12px; background: #000; display: block; }
