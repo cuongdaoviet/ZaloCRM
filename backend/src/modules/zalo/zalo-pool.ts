@@ -13,6 +13,7 @@ import { logger } from '../../shared/utils/logger.js';
 import { attachZaloListener, type UserInfoCacheEntry } from './zalo-listener-factory.js';
 import { emitWebhook } from '../api/webhook-service.js';
 import { buildProxyAgent, maskProxyUrl } from '../../shared/network/proxy-agent.js';
+import { decryptProxyUrl } from '../../shared/crypto/encrypt-proxy-url.js';
 
 // zca-js has no reliable ESM type exports — load via CJS interop
 const require = createRequire(import.meta.url);
@@ -324,13 +325,28 @@ class ZaloAccountPool {
   // Feature 0035: fetch latest proxyUrl from DB so admin changes take effect
   // on the next reconnect without restarting the process. Returns null if
   // the account has no proxy or the row is missing.
+  //
+  // Feature 0044 BR-0013: column is now encrypted at rest (cipher/iv/tag).
+  // We pull orgId + the three cipher columns and decrypt via the shared
+  // dual-key helper. The plaintext URL is held only on the local stack
+  // long enough to hand it to `buildProxyAgent()` — never logged.
   private async loadProxyUrl(accountId: string): Promise<string | null> {
     try {
       const row = await prisma.zaloAccount.findUnique({
         where: { id: accountId },
-        select: { proxyUrl: true },
+        select: {
+          orgId: true,
+          proxyUrlCipher: true,
+          proxyUrlIv: true,
+          proxyUrlTag: true,
+        },
       });
-      return row?.proxyUrl ?? null;
+      if (!row) return null;
+      return decryptProxyUrl(row.orgId, {
+        proxyUrlCipher: row.proxyUrlCipher,
+        proxyUrlIv: row.proxyUrlIv,
+        proxyUrlTag: row.proxyUrlTag,
+      });
     } catch (err) {
       logger.warn(`[zalo:${accountId}] loadProxyUrl error:`, err);
       return null;
