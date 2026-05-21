@@ -55,4 +55,13 @@ export const config = {
   aiConfigMasterKey:
     process.env.AI_CONFIG_MASTER_KEY ||
     '0000000000000000000000000000000000000000000000000000000000000000',
+
+  // Feature 0044 — Master-key rotation tooling.
+  // Optional "previous" master key, used ONLY for decrypt fallback while a
+  // rotation is in flight. Encrypt always uses `aiConfigMasterKey`.
+  // When unset (the default), there is no rotation in progress and dual-key
+  // fallback is disabled. See BR-0001 / BR-0002 in
+  // docs/features/0044-master-key-rotation/SPEC.md and the
+  // `Master key rotation` section of docs/operations/RUNBOOK.md.
+  aiConfigMasterKeyPrevious: process.env.AI_CONFIG_MASTER_KEY_PREVIOUS || '',
 };

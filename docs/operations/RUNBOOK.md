@@ -220,7 +220,136 @@ operator can thiệp.
   tự thêm `--accept-data-loss` → môi trường dev/staging tự heal. Chỉ
   prod (mặc định `docker-compose.yml`) cần can thiệp thủ công.
 
-## 10. Tham khảo nhanh
+## 10. Master key rotation (Feature 0044)
+
+`AI_CONFIG_MASTER_KEY` là khóa chủ HKDF-SHA-256 → AES-256-GCM cho 3
+bề mặt dữ liệu nhạy cảm:
+
+- **0036** — `ai_configs.api_key_cipher/iv/tag` (provider API keys).
+- **0038** — `integrations.config_cipher/iv/tag` (OAuth refresh
+  tokens, Telegram bot tokens).
+- **0035 + 0044** — `zalo_accounts.proxy_url_cipher/iv/tag` (proxy URL
+  có thể chứa credentials).
+
+Mất hoặc rò khóa = mất toàn bộ secret đã mã hóa. Quy trình rotate đảm
+bảo zero-downtime: trong cửa sổ rotate ứng dụng decrypt bằng
+**current key** trước, **previous key** dự phòng. CLI re-encrypt từng
+batch để cuối quy trình chỉ còn current key.
+
+### 10.1. Khi nào rotate
+
+- Nghi ngờ khóa bị rò (nhân viên cũ có quyền prod, accident commit, …).
+- Theo lịch SOC2 / ISO 27001 / audit nội bộ.
+- Sau khi xử lý incident liên quan đến hạ tầng credential.
+
+### 10.2. Quy trình 9 bước
+
+```
+┌─ Step 1 ─────────────────────────────────────────────────────────┐
+│ Tạo khóa mới (chạy local, KHÔNG paste vào chat / ticket):       │
+│                                                                  │
+│     openssl rand -hex 32                                         │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Step 2 — Cập nhật env (staging trước, prod sau):**
+
+- `AI_CONFIG_MASTER_KEY_PREVIOUS=<old key>`
+- `AI_CONFIG_MASTER_KEY=<new key>`
+- `docker compose up -d app` (rebuild nếu cần). Boot guard refuse start
+  nếu 2 biến trùng nhau — đó là lỗi paste, sửa rồi deploy lại.
+
+**Step 3 — Verify app healthy.** Tail log:
+
+```bash
+docker logs --tail 200 zalo-crm-app | grep -i "previous key"
+```
+
+Sau khi user/CRON đầu tiên đọc một row encrypted bằng key cũ, log sẽ
+có dòng `[crypto] decrypted with previous key, re-encrypt pending` —
+đây là tín hiệu fallback hoạt động đúng (không phải lỗi).
+
+**Step 4 — Dry-run CLI:**
+
+```bash
+docker exec -it zalo-crm-app sh -c "cd /app/backend && pnpm rotate-master-key --dry-run"
+```
+
+JSON output cho biết: bao nhiêu rows mỗi bảng cần re-encrypt, bao
+nhiêu đã current, có failed không. Xác nhận số liệu hợp lý trước khi
+chạy thật.
+
+**Step 5 — Run rotation thật:**
+
+```bash
+docker exec -it zalo-crm-app sh -c "cd /app/backend && pnpm rotate-master-key"
+```
+
+CLI in tiến độ mỗi batch (100 rows). Với org có vài nghìn rows nên
+xong < 5 phút. Dùng `FOR UPDATE SKIP LOCKED` nên không block ứng dụng
+đang chạy.
+
+**Step 6 — Nếu exit code = 2:** có row decrypt thất bại bằng cả 2 key.
+
+```
+exit code 2 = partial rotation
+JSON output liệt kê failedIds theo bảng
+```
+
+Nguyên nhân thường gặp:
+- Có một lần rotation cũ chưa hoàn tất → row vẫn dùng key thứ 3.
+- Blob corrupt (DB restore từ backup không khớp với env).
+
+Quyết định theo policy:
+- Xóa row (mất AI config / integration / proxy URL đó).
+- Restore từ backup cũ hơn.
+- Yêu cầu org reconfigure (user nhập lại credentials qua UI).
+
+**KHÔNG remove `AI_CONFIG_MASTER_KEY_PREVIOUS` cho đến khi xử lý xong.**
+
+**Step 7 — Verify done.** Re-run dry-run:
+
+```bash
+docker exec -it zalo-crm-app sh -c "cd /app/backend && pnpm rotate-master-key --dry-run"
+```
+
+Mọi bảng phải báo `reencrypted: 0, skipped: <N>`. Nếu vẫn còn rows
+cần encrypt → quay lại step 5.
+
+**Step 8 — Remove previous key:**
+
+- Xóa `AI_CONFIG_MASTER_KEY_PREVIOUS` khỏi `.env`.
+- `docker compose up -d app`.
+- Tail log 5-10 phút — không được có dòng "previous key" nào nữa.
+
+**Step 9 — Ghi log operations:** ngày, người thực hiện, lý do rotate,
+số rows được re-encrypt. Lưu trong vault nội bộ (KHÔNG commit).
+
+### 10.3. Recovery nếu Step 2 deploy lỗi
+
+- Roll back env về **chỉ** old key (xóa cả `_PREVIOUS` và đặt
+  `AI_CONFIG_MASTER_KEY=<old key>`).
+- `docker compose up -d app` — DB chưa bị động vào, app trở lại
+  bình thường.
+- Điều tra nguyên nhân (key sai format? đặt nhầm key cũ vào current?),
+  fix, thử lại.
+
+### 10.4. Rotation cho proxyUrl (one-off, chạy 1 lần khi 0044 lên prod)
+
+Bản 0044 lần đầu chuyển `zalo_accounts.proxy_url` từ plaintext sang
+cipher. Khi deploy 0044 lần đầu (chỉ duy nhất 1 lần):
+
+```bash
+# Backup DB trước. Sau đó:
+docker exec -it zalo-crm-app sh -c "cd /app/backend && pnpm migrate-encrypt-proxy-url --dry-run"
+# Nếu số liệu hợp lý:
+docker exec -it zalo-crm-app sh -c "cd /app/backend && pnpm migrate-encrypt-proxy-url"
+```
+
+Script idempotent. Sau khi xong, cột `proxy_url` plaintext bị DROP.
+Từ đây trở đi quy trình rotation 10.2 cover cả 3 bảng.
+
+## 11. Tham khảo nhanh
 
 - Settings: `.env` (KHÔNG commit)
 - Schema: `backend/prisma/schema.prisma`
