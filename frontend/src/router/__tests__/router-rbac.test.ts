@@ -14,9 +14,10 @@
 import { describe, it, expect } from 'vitest';
 import { routes } from '@/router/index';
 
-// The 10 admin-only menu paths from feature 0047 + the duplicate-groups
-// child route (which the SPEC explicitly includes because it renders
-// the same data as the parent).
+// Admin-only menu paths after feature 0048c tightening. Includes the
+// original 10 (feature 0047 adminOnly flags) + /duplicate-groups/:id
+// child route + the 4 paths 0048c moved from open → admin-only:
+// /quick-replies, /keyword-rules, /zalo-accounts, /settings.
 const ADMIN_PATHS = [
   '/duplicate-groups',
   '/duplicate-groups/:id',
@@ -24,29 +25,29 @@ const ADMIN_PATHS = [
   '/kpi',
   '/analytics',
   '/activity',
+  '/settings',
   '/settings/tags',
   '/settings/lead-score',
   '/settings/workflows',
   '/settings/ai-config',
   '/settings/integrations',
+  '/quick-replies',
+  '/keyword-rules',
+  '/zalo-accounts',
 ];
 
-// Paths the menu marks open to members (no `adminOnly`). These MUST NOT
-// carry requiresAdmin or we'd lock out members from pages they should see.
+// Paths still open to members (no `adminOnly`). MUST NOT carry
+// requiresAdmin or we'd lock out members from pages they need.
 const NON_ADMIN_PATHS = [
   '/',
   '/chat',
   '/search',
   '/contacts',
-  '/zalo-accounts',
   '/appointments',
   '/orders',
   '/reports',
   '/friends',
   '/friendship-attempts',
-  '/keyword-rules',
-  '/settings',
-  '/quick-replies',
   '/api-settings',
 ];
 
