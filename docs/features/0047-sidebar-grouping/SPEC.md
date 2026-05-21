@@ -18,19 +18,31 @@ thức mà không ép thêm click.
 
 - **BR-0001 — Thứ tự nhóm theo tần suất sử dụng.** Trò chuyện (most-used)
   ngay sau Dashboard. Hệ thống / Settings xuống cuối cùng.
-- **BR-0002 — Non-collapsible headers.** Dùng `v-list-subheader`, không
-  dùng `v-list-group`. Lý do: tất cả điểm đến luôn 1 click; collapsible
-  nhóm sẽ ẩn affordance.
-- **BR-0003 — Ẩn header trong rail mode.** Khi sidebar collapsed
-  (`rail = true`), chỉ hiển thị icon — subheader không hiện vì sẽ vỡ
-  layout 56px.
-- **BR-0004 — Drop empty groups.** Nếu sau khi lọc `adminOnly` một nhóm
-  còn 0 mục (ví dụ một staff role có 0 quyền vào nhóm Marketing), drop
-  cả header để tránh orphan subheader.
-- **BR-0005 — Giữ nguyên tất cả paths.** Không feature này KHÔNG thêm /
-  bớt / đổi route. Pure UI restructure.
-- **BR-0006 — Giữ nguyên admin gating.** `adminOnly` field tiếp tục
+- **BR-0002 — Collapsible accordion, single-expand.** Dùng `v-list-group`
+  với `v-model:opened` cap ở 1 phần tử. Click vào header thứ hai sẽ
+  đóng header đang mở (accordion behavior).
+- **BR-0003 — Auto-open nhóm chứa route active.** Khi user navigate vào
+  `/chat`, nhóm `Trò chuyện` tự mở. Watch `route.path` và update
+  `openedGroups` immediate trên mount + mỗi navigation.
+- **BR-0004 — Auto-open KHÔNG kèm auto-close.** Nếu user mở thủ công một
+  nhóm khác (ví dụ đang ở `/chat` nhưng mở `Hệ thống` để xem các mục),
+  giữ nguyên cho đến khi user navigate vào nhóm khác.
+- **BR-0005 — Ungrouped row (Dashboard) render flat.** `label: null` =
+  bypass `v-list-group`, render trực tiếp `v-list-item`.
+- **BR-0006 — Drop empty groups.** Nếu sau khi lọc `adminOnly` một nhóm
+  còn 0 mục, drop cả header để tránh orphan.
+- **BR-0007 — Giữ nguyên tất cả paths.** Feature này KHÔNG thêm / bớt /
+  đổi route. Pure UI restructure.
+- **BR-0008 — Giữ nguyên admin gating.** `adminOnly` field tiếp tục
   filter ở client; backend role check không đổi.
+- **BR-0009 — Prefix-match cho child routes.** `groupIdForPath` duyệt
+  qua các nhóm theo thứ tự declaration và match item nào có path ===
+  current path HOẶC current path bắt đầu bằng `item.path + '/'`. Nhờ
+  vậy `/contacts/:id` vẫn auto-open nhóm Khách hàng. Đặc biệt:
+  `/settings/workflows` được khai báo trong nhóm Marketing TRƯỚC khi
+  `/settings` xuất hiện ở nhóm Hệ thống, nên các route con của settings
+  (workflows / ai-config / integrations / tags / lead-score) auto-open
+  đúng nhóm chứa chúng — không bị nhầm về Hệ thống.
 
 ## 4. Input / Output
 
@@ -56,19 +68,24 @@ thức mà không ép thêm click.
       Trò chuyện → Khách hàng → Marketing & Automation → Báo cáo →
       Hệ thống.
 - [ ] AC-0002: Tất cả 24 paths gốc còn nguyên — không có 404 mới.
-- [ ] AC-0003: Non-admin user không thấy header của nhóm nếu toàn bộ
-      items trong nhóm đó là `adminOnly` (currently không xảy ra với
-      grouping hiện tại, nhưng logic phải đúng).
-- [ ] AC-0004: Rail mode (sidebar collapsed) hiển thị icon-only,
-      không có subheader text.
-- [ ] AC-0005: Subheaders đọc quiet, không tranh attention với
-      list-items (font-size 11px, opacity 0.55, uppercase, letter-
-      spacing tăng).
-- [ ] AC-0006: Build frontend (`npm run build`) pass clean —
+- [ ] AC-0003: Mỗi nhóm là collapsible (click vào header → mở/đóng).
+      Tại bất kỳ thời điểm, tối đa 1 nhóm đang mở.
+- [ ] AC-0004: Khi user navigate vào một route, nhóm chứa route đó
+      tự mở. Ví dụ: `/chat` → mở nhóm Trò chuyện. `/settings/workflows`
+      → mở nhóm Marketing (không phải Hệ thống).
+- [ ] AC-0005: Click vào header thứ hai sẽ đóng header đang mở
+      (accordion behavior, không phải multi-select).
+- [ ] AC-0006: Dashboard (ungrouped) luôn hiển thị flat ở trên cùng,
+      không nằm trong nhóm nào.
+- [ ] AC-0007: Non-admin user không thấy header của nhóm nếu toàn bộ
+      items trong nhóm đó là `adminOnly`.
+- [ ] AC-0008: Build frontend (`npm run build`) pass clean —
       không có template/type error.
-- [ ] AC-0007: Tin nhắn mẫu (path `/quick-replies`) nằm trong nhóm
+- [ ] AC-0009: Tin nhắn mẫu (path `/quick-replies`) nằm trong nhóm
       Trò chuyện (đã sửa từ cuối list lên đúng nhóm — đây chính là
       pain-point gốc của user).
+- [ ] AC-0010: Child routes của các item trong menu (ví dụ
+      `/contacts/:id`) auto-open đúng nhóm cha (Khách hàng).
 
 ## 7. Dependencies
 
