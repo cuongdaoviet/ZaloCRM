@@ -47,6 +47,14 @@
           >
             <v-icon>mdi-message-reply-text-outline</v-icon>
           </v-btn>
+          <v-btn
+            v-if="authStore.isAdmin"
+            icon size="small" color="indigo"
+            @click="openProxyDialog(item)"
+            title="Cấu hình proxy (HTTP/SOCKS5)"
+          >
+            <v-icon>mdi-shield-link-variant-outline</v-icon>
+          </v-btn>
           <v-btn v-if="item.liveStatus !== 'connected'" icon size="small" color="primary" @click="loginAccount(item.id)" title="Đăng nhập QR">
             <v-icon>mdi-qrcode</v-icon>
           </v-btn>
@@ -128,6 +136,70 @@
       :account-name="autoReplyTarget?.displayName ?? autoReplyTarget?.id ?? ''"
     />
 
+    <!-- Feature 0035 — Proxy config dialog (Admin/Owner only) -->
+    <v-dialog v-model="showProxyDialog" max-width="520">
+      <v-card>
+        <v-card-title>Cấu hình Proxy</v-card-title>
+        <v-card-subtitle v-if="proxyTarget">
+          Tài khoản: <strong>{{ proxyTarget.displayName || proxyTarget.id }}</strong>
+        </v-card-subtitle>
+        <v-card-text>
+          <v-text-field
+            v-model="proxyInput"
+            label="Proxy URL"
+            placeholder="socks5://user:pass@host:1080 (để trống = trực tiếp)"
+            density="compact"
+            variant="outlined"
+            :error-messages="proxyError ? [proxyError] : []"
+            hide-details="auto"
+            class="mb-2"
+          />
+          <p class="text-caption text-grey">
+            Hỗ trợ <code>http://</code>, <code>https://</code>, <code>socks5://</code>.
+            Để trống = kết nối trực tiếp.
+          </p>
+          <p v-if="proxyTarget?.proxyUrl" class="text-caption mt-2">
+            Hiện tại:
+            <code>{{ maskProxyUrlForDisplay(proxyTarget.proxyUrl) }}</code>
+          </p>
+
+          <v-alert
+            v-if="proxyRequiresReconnect"
+            type="warning"
+            density="compact"
+            class="mt-3"
+            icon="mdi-refresh-alert"
+          >
+            <div class="d-flex align-center justify-space-between">
+              <span>Đã đổi proxy — cần reconnect để áp dụng.</span>
+              <v-btn
+                size="small"
+                color="warning"
+                variant="tonal"
+                :loading="proxyReconnecting"
+                @click="reconnectFromProxyDialog"
+              >Reconnect</v-btn>
+            </div>
+          </v-alert>
+          <v-alert
+            v-if="proxyServerError"
+            type="error"
+            density="compact"
+            class="mt-3"
+          >{{ proxyServerError }}</v-alert>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn @click="showProxyDialog = false">Đóng</v-btn>
+          <v-btn
+            color="primary"
+            :loading="proxySaving"
+            @click="saveProxy"
+          >Lưu</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- Sync group history dialog -->
     <v-dialog v-model="showHistoryDialog" max-width="480">
       <v-card>
@@ -185,7 +257,12 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { useZaloAccounts, type ZaloAccount } from '@/composables/use-zalo-accounts';
+import {
+  useZaloAccounts,
+  type ZaloAccount,
+  PROXY_URL_REGEX,
+  maskProxyUrlForDisplay,
+} from '@/composables/use-zalo-accounts';
 import { useFriendStats } from '@/composables/use-friend-stats';
 import { useAuthStore } from '@/stores/auth';
 import ZaloAccessDialog from '@/components/settings/ZaloAccessDialog.vue';
@@ -197,6 +274,7 @@ const {
   showQRDialog, qrImage, qrScanned, scannedName, qrError,
   statusColor, statusText,
   fetchAccounts, addAccount, loginAccount, reconnectAccount, deleteAccount,
+  updateProxy,
   cancelQR, setupSocket,
 } = useZaloAccounts();
 
@@ -228,6 +306,68 @@ const historyResult = ref<
   | { success: false; error: string }
   | null
 >(null);
+
+// Feature 0035 — proxy dialog state.
+const showProxyDialog = ref(false);
+const proxyTarget = ref<ZaloAccount | null>(null);
+const proxyInput = ref('');
+const proxyError = ref<string | null>(null);
+const proxyServerError = ref<string | null>(null);
+const proxySaving = ref(false);
+const proxyRequiresReconnect = ref(false);
+const proxyReconnecting = ref(false);
+
+function openProxyDialog(account: ZaloAccount) {
+  proxyTarget.value = account;
+  // Plain in edit input per SPEC; masking is only for display.
+  proxyInput.value = account.proxyUrl ?? '';
+  proxyError.value = null;
+  proxyServerError.value = null;
+  proxyRequiresReconnect.value = false;
+  showProxyDialog.value = true;
+}
+
+async function saveProxy() {
+  if (!proxyTarget.value) return;
+  proxyError.value = null;
+  proxyServerError.value = null;
+  const raw = proxyInput.value.trim();
+  if (raw !== '' && !PROXY_URL_REGEX.test(raw)) {
+    proxyError.value = 'Định dạng không hợp lệ. Ví dụ: socks5://user:pass@host:1080';
+    return;
+  }
+  proxySaving.value = true;
+  try {
+    const res = await updateProxy(proxyTarget.value.id, raw === '' ? null : raw);
+    proxyRequiresReconnect.value = !!res.requiresReconnect;
+    // Update local copy so the dialog reflects the normalized value (eg. socks→socks5).
+    proxyTarget.value = { ...proxyTarget.value, proxyUrl: res.proxyUrl };
+    await fetchAccounts();
+  } catch (err: any) {
+    const code = err?.response?.data?.code;
+    if (code === 'invalid_proxy_format') {
+      proxyError.value = 'Định dạng không hợp lệ. Backend từ chối URL này.';
+    } else if (err?.response?.status === 403) {
+      proxyServerError.value = 'Bạn không có quyền cấu hình proxy.';
+    } else {
+      proxyServerError.value =
+        err?.response?.data?.error || err?.message || 'Không thể lưu proxy';
+    }
+  } finally {
+    proxySaving.value = false;
+  }
+}
+
+async function reconnectFromProxyDialog() {
+  if (!proxyTarget.value) return;
+  proxyReconnecting.value = true;
+  try {
+    await reconnectAccount(proxyTarget.value.id);
+    proxyRequiresReconnect.value = false;
+  } finally {
+    proxyReconnecting.value = false;
+  }
+}
 
 const headers = [
   { title: 'Tên', key: 'displayName', sortable: true },

@@ -94,6 +94,10 @@ model ZaloAccount {
   phone           String?
   status          String    @default("disconnected") // connected, disconnected, qr_pending
   sessionData     Json?     @map("session_data")
+  // Feature 0035 — Per-account proxy config.
+  // NULL = no proxy (direct connect). Accepted schemes: http, https, socks, socks5.
+  // Stored normalized (socks→socks5, trailing slash stripped).
+  proxyUrl        String?   @map("proxy_url")
   lastConnectedAt DateTime? @map("last_connected_at")
   createdAt       DateTime  @default(now()) @map("created_at")
 
