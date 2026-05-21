@@ -1,5 +1,10 @@
 <template>
-  <div>
+  <!-- Feature 0039 BR-0006 / AC-0005 — render the mobile card-list flavor
+       on xs+sm viewports. MobileContactView handles its own search, chip
+       filters, bottom-sheet, and FAB; we early-return here so the table
+       toolbar + bulk-friend dialog only mount on desktop and tablet. -->
+  <MobileContactView v-if="smAndDown" />
+  <div v-else>
     <!-- Toolbar -->
     <div class="d-flex align-center mb-4 flex-wrap gap-2">
       <h1 class="text-h5 mr-4">Khách hàng</h1>
@@ -179,7 +184,9 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
+import { useDisplay } from 'vuetify';
 import ContactFilters from '@/components/contacts/ContactFilters.vue';
+import MobileContactView from '@/views/MobileContactView.vue';
 import ContactDetailDialog, {
   type ContactPrefill,
 } from '@/components/contacts/ContactDetailDialog.vue';
@@ -190,6 +197,10 @@ import { useFriendship, type BulkResult } from '@/composables/use-friendship';
 import { useZaloAccounts } from '@/composables/use-zalo-accounts';
 
 const route = useRoute();
+// Feature 0039 — Vuetify reactive breakpoint hook. `smAndDown` is true on
+// xs (< 600px) and sm (600-960px) viewports, matching BR-0002. Tablet
+// (md, 960-1264px) intentionally stays on the desktop layout.
+const { smAndDown } = useDisplay();
 
 const { contacts, total, loading, filters, pagination, fetchContacts } = useContacts();
 const { bulkEnqueue } = useFriendship();

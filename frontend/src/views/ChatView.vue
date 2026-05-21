@@ -2,7 +2,6 @@
   <div
     class="chat-container d-flex"
     :class="{ 'chat-container--mobile-thread': isMobile && hasSelection }"
-    style="height: calc(100vh - 64px);"
   >
     <!-- Conversation list — fixed 320px rail (BR-0001, AC-0001). On mobile
          (< 768px, EC-0003) the rail covers the full screen until a row is
@@ -349,6 +348,10 @@ watch(searchQuery, () => {
 .chat-container {
   margin: -12px;
   position: relative;
+  /* Default desktop: subtract the 64px top app bar. The mobile media
+     query below overrides this to account for the compact 48px app bar
+     + the bottom nav clearance MobileLayout adds via padding-bottom. */
+  height: calc(100vh - 64px);
 }
 
 /* Feature 0042 — fixed 320px rail (BR-0001 / AC-0001). */

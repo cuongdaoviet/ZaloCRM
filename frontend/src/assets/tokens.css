@@ -69,6 +69,41 @@
   --smax-badge-unread-bg: var(--smax-error);
   --smax-badge-unread-fg: #ffffff;
   --smax-badge-unread-size: 20px;
+
+  /* Feature 0039 — touch target floor (BR-0009).
+     iOS HIG / WCAG 2.5.5 both ask for at least 44×44 px. We expose it as
+     a token so component-level CSS can opt into the floor (`min-height:
+     var(--smax-touch-target-min)`). Stays a desktop default; the mobile
+     media query below upgrades dense row heights at the same time. */
+  --smax-touch-target-min: 44px;
+
+  /* Feature 0039 — mobile bottom nav height (BR-0003). 56px is the
+     Vuetify v-bottom-navigation default; we keep the variable so the
+     MobileLayout padding can reference it (the layout adds the safe-area
+     inset on top). */
+  --smax-bottom-nav-h: 56px;
+}
+
+/* Feature 0039 — mobile token overrides (BR-0009, AC-0008).
+   On phones we widen dense rows to 56px so a tap target on a v-list-item
+   or table row never falls below 44px. Desktop keeps the 40px row from
+   Feature 0042. */
+@media (max-width: 600px) {
+  :root {
+    --smax-row-height-dense: 56px;
+  }
+}
+
+/* Feature 0039 — safe-area inset helper (BR-0003).
+   Applied to fixed-position bottom bars so the iOS home indicator can't
+   eat the last row of buttons. `env()` falls back to 0 on Android or
+   desktop browsers, so the rule is harmless cross-platform. */
+.smax-safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.smax-touch-target {
+  min-height: var(--smax-touch-target-min);
+  min-width: var(--smax-touch-target-min);
 }
 
 /* ════════ Helper utility classes ════════ */

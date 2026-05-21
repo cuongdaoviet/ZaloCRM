@@ -81,7 +81,7 @@
         :key="i"
         cols="12"
         sm="6"
-        lg="4"
+        md="4"
       >
         <v-skeleton-loader type="card" />
       </v-col>
@@ -94,7 +94,7 @@
         :key="friend.id"
         cols="12"
         sm="6"
-        lg="4"
+        md="4"
       >
         <FriendCard
           :friend="friend"
