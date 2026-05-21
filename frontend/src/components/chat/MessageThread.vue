@@ -30,7 +30,16 @@
           <v-icon v-else icon="mdi-account" />
         </v-avatar>
         <div class="flex-grow-1">
-          <div class="font-weight-medium">{{ conversation.contact?.fullName || 'Unknown' }}</div>
+          <div class="d-flex align-center" style="gap: 6px;">
+            <span class="font-weight-medium">{{ conversation.contact?.fullName || 'Unknown' }}</span>
+            <!-- Feature 0024 — muted Zalo display name in chat header
+                 (BR-0005). Only renders when different from fullName. -->
+            <span
+              v-if="zaloSecondary !== null"
+              class="text-caption text-grey"
+              :title="zaloSecondary || ''"
+            >({{ zaloSecondary }})</span>
+          </div>
           <div class="text-caption text-grey">{{ conversation.zaloAccount?.displayName || 'Zalo' }}</div>
         </div>
         <v-btn
@@ -261,6 +270,7 @@ import { api } from '@/api/index';
 import QuickReplyPopover from './QuickReplyPopover.vue';
 import ReactionPicker from './ReactionPicker.vue';
 import ReactionChips from './ReactionChips.vue';
+import { secondaryZaloName } from '@/composables/use-contact-name';
 
 const props = defineProps<{
   conversation: Conversation | null;
@@ -291,6 +301,13 @@ const emit = defineEmits<{
 // ── Feature 0021 — reaction picker state ─────────────────────────────────────
 const openPickerMsgId = ref<string | null>(null);
 const canReact = computed(() => !!props.selfUserId);
+
+// Feature 0024 — muted Zalo display name shown next to the CRM name in the
+// chat header (BR-0005). Null when fullName/zaloDisplayName are the same
+// (case-insensitive) or zaloDisplayName is empty.
+const zaloSecondary = computed<string | null>(() =>
+  secondaryZaloName(props.conversation?.contact ?? null),
+);
 
 function togglePicker(messageId: string) {
   openPickerMsgId.value = openPickerMsgId.value === messageId ? null : messageId;

@@ -107,6 +107,14 @@
             <span class="text-truncate" :class="{ 'font-weight-bold': conv.unreadCount > 0 }">
               {{ conv.threadType === 'group' ? (conv.contact?.fullName || 'Nhóm') : (conv.contact?.fullName || 'Unknown') }}
             </span>
+            <!-- Feature 0024 — muted Zalo display name when it differs from
+                 the CRM fullName (BR-0005). Hidden when same / when no CRM
+                 name is set. -->
+            <span
+              v-if="zaloSecondary(conv) !== null"
+              class="text-caption text-grey ml-1 text-truncate zalo-secondary"
+              :title="zaloSecondary(conv) || ''"
+            >({{ zaloSecondary(conv) }})</span>
             <v-chip v-if="conv.threadType === 'group'" size="x-small" color="info" variant="tonal" class="ml-1">Nhóm</v-chip>
             <v-spacer />
             <span class="text-caption text-grey ml-1">{{ formatTime(conv.lastMessageAt) }}</span>
@@ -160,6 +168,12 @@
           <span class="text-truncate" :class="{ 'font-weight-bold': conv.unreadCount > 0 }">
             {{ conv.threadType === 'group' ? (conv.contact?.fullName || 'Nhóm') : (conv.contact?.fullName || 'Unknown') }}
           </span>
+          <!-- Feature 0024 — muted Zalo display name (BR-0005). -->
+          <span
+            v-if="zaloSecondary(conv) !== null"
+            class="text-caption text-grey ml-1 text-truncate zalo-secondary"
+            :title="zaloSecondary(conv) || ''"
+          >({{ zaloSecondary(conv) }})</span>
           <v-chip v-if="conv.threadType === 'group'" size="x-small" color="info" variant="tonal" class="ml-1">Nhóm</v-chip>
           <v-spacer />
           <span class="text-caption text-grey ml-1">{{ formatTime(conv.lastMessageAt) }}</span>
@@ -232,6 +246,7 @@ import type {
 } from '@/composables/use-chat';
 import ConversationFilters from '@/components/chat/ConversationFilters.vue';
 import { api } from '@/api/index';
+import { secondaryZaloName } from '@/composables/use-contact-name';
 
 const props = defineProps<{
   conversations: Conversation[];
@@ -351,6 +366,15 @@ onMounted(async () => {
   }
 });
 
+/**
+ * Feature 0024 — return the muted Zalo display name to render next to the
+ * conversation row's primary name, or null to hide it. See
+ * `use-contact-name.ts` for the underlying BR-0005 rule.
+ */
+function zaloSecondary(conv: Conversation): string | null {
+  return secondaryZaloName(conv.contact);
+}
+
 function lastMessagePreview(conv: Conversation): string {
   const msg = conv.messages?.[0];
   if (!msg) return '';
@@ -419,5 +443,10 @@ function formatTime(dateStr: string | null): string {
   font-size: 0.85rem;
   letter-spacing: 0;
   text-transform: none;
+}
+
+/* Feature 0024 — keep the muted Zalo name from blowing the row width. */
+.zalo-secondary {
+  max-width: 140px;
 }
 </style>
