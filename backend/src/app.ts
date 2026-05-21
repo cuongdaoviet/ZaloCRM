@@ -20,6 +20,7 @@ import { ensureBucket } from './shared/storage/minio-client.js';
 import { logger } from './shared/utils/logger.js';
 import { authRoutes } from './modules/auth/auth-routes.js';
 import { zaloRoutes } from './modules/zalo/zalo-routes.js';
+import { zaloUserRoutes } from './modules/zalo/zalo-user-routes.js';
 import { chatRoutes } from './modules/chat/chat-routes.js';
 import { contactRoutes } from './modules/contacts/contact-routes.js';
 import { crmTagRoutes } from './modules/crm-tags/crm-tag-routes.js';
@@ -137,6 +138,7 @@ async function bootstrap() {
 
   await app.register(authRoutes);
   await app.register(zaloRoutes);
+  await app.register(zaloUserRoutes);
   await app.register(chatRoutes);
   await app.register(contactRoutes);
   await app.register(crmTagRoutes);
