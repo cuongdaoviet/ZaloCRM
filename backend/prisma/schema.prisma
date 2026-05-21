@@ -45,6 +45,8 @@ model Organization {
   // Feature 0036 — AI reply suggestions (BYOK)
   aiConfig            AiConfig?
   aiSuggestionLogs    AiSuggestionLog[]
+  // Feature 0038 — Integration Hub (Sheets + Telegram)
+  integrations        Integration[]
 
   @@map("organizations")
 }
@@ -933,4 +935,59 @@ model AiSuggestionLog {
   // Per-user hourly soft cap (BR-0016).
   @@index([userId, createdAt])
   @@map("ai_suggestion_logs")
+}
+
+// ─── Feature 0038 — Integration Hub framework + Sheets + Telegram ──────────
+// Generic container model: `type` discriminates connector implementations
+// (google_sheets | telegram_bot), `configCipher` stores AES-256-GCM
+// encrypted JSON (refresh tokens, bot tokens, IDs). Secrets never leave the
+// database in plaintext — see shared/crypto/encrypt-config.ts.
+//
+// Sheets is scheduled (worker tick every 5 min); Telegram is event-driven
+// (tee'd from emitWebhook in webhook-service.ts). Each execution writes one
+// IntegrationRun row with success/failure + records processed.
+// ───────────────────────────────────────────────────────────────────────────
+model Integration {
+  id           String    @id @default(uuid())
+  orgId        String    @map("org_id")
+  // 'google_sheets' | 'telegram_bot' — drives connector dispatch.
+  type         String
+  // User-friendly label, e.g. "Sales daily dump", "Ops alerts channel".
+  name         String
+  // AES-256-GCM encrypted JSON. IV + auth tag stored in sibling columns so
+  // they round-trip cleanly. Never expose configCipher/Iv/Tag in API output.
+  configCipher String    @map("config_cipher")
+  configIv     String    @map("config_iv")
+  configTag    String    @map("config_tag")
+  enabled      Boolean   @default(true)
+  lastSyncedAt DateTime? @map("last_synced_at")
+  lastError    String?   @map("last_error")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  org  Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  runs IntegrationRun[]
+
+  // List integrations by org + type ("show me my Telegram bots").
+  @@index([orgId, type])
+  // Worker scan: "enabled, due for sync".
+  @@index([enabled, lastSyncedAt])
+  @@map("integrations")
+}
+
+model IntegrationRun {
+  id               String    @id @default(uuid())
+  integrationId    String    @map("integration_id")
+  startedAt        DateTime  @default(now()) @map("started_at")
+  completedAt      DateTime? @map("completed_at")
+  // 'running' | 'succeeded' | 'failed'
+  status           String    @default("running")
+  recordsProcessed Int       @default(0) @map("records_processed")
+  errorDetail      String?   @map("error_detail")
+
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  // Recent runs list: ORDER BY startedAt DESC LIMIT 20.
+  @@index([integrationId, startedAt(sort: Desc)])
+  @@map("integration_runs")
 }
