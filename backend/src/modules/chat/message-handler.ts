@@ -160,33 +160,47 @@ export async function handleIncomingMessage(
   }
 }
 
-// Upsert contact — handles both user and group conversations
+// Upsert contact — handles both user and group conversations.
+//
+// Feature 0024 — dual name display. `fullName` is the CRM-editable name owned
+// by the rep; `zaloDisplayName` is the Zalo display name auto-synced from
+// inbound messages. On contact CREATE we seed both with the Zalo name so the
+// rep sees something useful before they pick a CRM name. On UPDATE we only
+// refresh `zaloDisplayName` — never overwrite `fullName`, the rep owns it
+// (BR-0001 / BR-0002). Empty/null senderName never overwrites (EC-0001).
 async function upsertContact(msg: IncomingMessage, orgId: string): Promise<string | null> {
   // Group messages: create/update a "contact" record representing the group
   if (msg.threadType === 'group') {
     const groupUid = msg.threadId;
     let groupContact = await prisma.contact.findFirst({
       where: { zaloUid: groupUid, orgId },
-      select: { id: true, fullName: true },
+      select: { id: true, fullName: true, zaloDisplayName: true },
     });
 
     if (!groupContact) {
+      const initialName = msg.groupName || 'Nhóm';
       groupContact = await prisma.contact.create({
         data: {
           id: randomUUID(),
           orgId,
           zaloUid: groupUid,
-          fullName: msg.groupName || 'Nhóm',
+          fullName: initialName,
+          // BR-0002 — seed zaloDisplayName from groupName on create. Use null
+          // when groupName is empty so EC-0001 (no overwrite with empty) still
+          // applies on subsequent inbound updates.
+          zaloDisplayName: msg.groupName || null,
           metadata: { isGroup: true },
         },
-        select: { id: true, fullName: true },
+        select: { id: true, fullName: true, zaloDisplayName: true },
       });
       // Emit webhook for new contact created
       emitWebhook(orgId, 'contact.created', { contactId: groupContact.id, fullName: groupContact.fullName });
-    } else if (msg.groupName && groupContact.fullName !== msg.groupName) {
+    } else if (msg.groupName && groupContact.zaloDisplayName !== msg.groupName) {
+      // BR-0002 — refresh zaloDisplayName only when the group renamed.
+      // fullName is rep-owned now, do NOT touch it.
       await prisma.contact.update({
         where: { id: groupContact.id },
-        data: { fullName: msg.groupName },
+        data: { zaloDisplayName: msg.groupName },
       });
     }
     return groupContact.id;
@@ -197,25 +211,29 @@ async function upsertContact(msg: IncomingMessage, orgId: string): Promise<strin
 
   let contact = await prisma.contact.findFirst({
     where: { zaloUid: msg.senderUid, orgId },
-    select: { id: true, fullName: true },
+    select: { id: true, fullName: true, zaloDisplayName: true },
   });
 
   if (!contact) {
+    const initialName = msg.senderName || 'Unknown';
     contact = await prisma.contact.create({
       data: {
         id: randomUUID(),
         orgId,
         zaloUid: msg.senderUid,
-        fullName: msg.senderName || 'Unknown',
+        fullName: initialName,
+        // BR-0001 — seed zaloDisplayName from senderName on create.
+        zaloDisplayName: msg.senderName || null,
       },
-      select: { id: true, fullName: true },
+      select: { id: true, fullName: true, zaloDisplayName: true },
     });
     // Emit webhook for new contact created
     emitWebhook(orgId, 'contact.created', { contactId: contact.id, fullName: contact.fullName });
-  } else if (msg.senderName && contact.fullName !== msg.senderName) {
+  } else if (msg.senderName && contact.zaloDisplayName !== msg.senderName) {
+    // BR-0001 — refresh zaloDisplayName only. fullName is rep-owned.
     await prisma.contact.update({
       where: { id: contact.id },
-      data: { fullName: msg.senderName },
+      data: { zaloDisplayName: msg.senderName },
     });
   }
 

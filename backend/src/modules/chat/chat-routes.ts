@@ -124,7 +124,10 @@ export async function chatRoutes(app: FastifyInstance) {
       prisma.conversation.findMany({
         where,
         include: {
-          contact: { select: { id: true, fullName: true, phone: true, avatarUrl: true, zaloUid: true } },
+          // Feature 0024 — include zaloDisplayName so the conversation list
+          // can render the Zalo display name as muted secondary text when it
+          // differs from the rep-owned fullName.
+          contact: { select: { id: true, fullName: true, zaloDisplayName: true, phone: true, avatarUrl: true, zaloUid: true } },
           zaloAccount: { select: { id: true, displayName: true, zaloUid: true } },
           messages: {
             take: 1,
@@ -587,7 +590,8 @@ export async function chatRoutes(app: FastifyInstance) {
       const existing = await prisma.conversation.findFirst({
         where: { zaloAccountId: accountId, externalThreadId: contact.zaloUid },
         include: {
-          contact: { select: { id: true, fullName: true, phone: true, avatarUrl: true, zaloUid: true } },
+          // Feature 0024 — include zaloDisplayName for dual-name display.
+          contact: { select: { id: true, fullName: true, zaloDisplayName: true, phone: true, avatarUrl: true, zaloUid: true } },
           zaloAccount: { select: { id: true, displayName: true, zaloUid: true } },
         },
       });
@@ -606,7 +610,8 @@ export async function chatRoutes(app: FastifyInstance) {
           lastMessageAt: null,
         },
         include: {
-          contact: { select: { id: true, fullName: true, phone: true, avatarUrl: true, zaloUid: true } },
+          // Feature 0024 — include zaloDisplayName for dual-name display.
+          contact: { select: { id: true, fullName: true, zaloDisplayName: true, phone: true, avatarUrl: true, zaloUid: true } },
           zaloAccount: { select: { id: true, displayName: true, zaloUid: true } },
         },
       });
