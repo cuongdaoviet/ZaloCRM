@@ -5,6 +5,11 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
+import {
+  recordFailure as recordLoginFailure,
+  clear as clearLoginAttempts,
+} from '../../shared/security/login-attempt-tracker.js';
+import { logActivityAsync } from '../activity/activity-service.js';
 
 export interface JwtPayload {
   id: string;
@@ -59,13 +64,50 @@ export async function setup(
   };
 }
 
-// Verify credentials, return JWT payload
-export async function login(email: string, password: string): Promise<JwtPayload> {
+// Verify credentials, return JWT payload.
+//
+// Feature 0046 BR-0018/BR-0020:
+// - On failure (unknown user, inactive user, wrong password): record a
+//   failure in the in-memory tracker AND audit-log the attempt. The
+//   tracker drives the 429 path in the route handler.
+// - On success: clear the tracker entry so honest typos don't carry
+//   over.
+// `ipAddress` is optional so existing callers without a request
+// context (tests, scripts) keep working; the route handler passes
+// request.ip.
+export async function login(
+  email: string,
+  password: string,
+  ipAddress?: string | null,
+): Promise<JwtPayload> {
+  const normalizedEmail = email.toLowerCase().trim();
   const user = await prisma.user.findUnique({
-    where: { email: email.toLowerCase().trim() },
+    where: { email: normalizedEmail },
   });
 
   if (!user || !user.isActive) {
+    const state = recordLoginFailure(normalizedEmail);
+    // BR-0020 — log even when the user is unknown. We don't know orgId
+    // in that case; if the user exists we attach orgId for audit
+    // attribution. The activity_log row carries the email in details
+    // either way.
+    if (user) {
+      logActivityAsync({
+        orgId: user.orgId,
+        userId: user.id,
+        action: 'auth.login.failed',
+        details: {
+          email: normalizedEmail,
+          ip: ipAddress ?? null,
+          reason: !user.isActive ? 'inactive' : 'no_user',
+          attemptCount: state.count,
+        },
+      });
+    } else {
+      logger.warn(
+        `[auth] login.failed unknown-user email=${normalizedEmail} ip=${ipAddress ?? 'n/a'} attempt=${state.count}`,
+      );
+    }
     const err = new Error('Invalid email or password') as Error & { statusCode: number };
     err.statusCode = 401;
     throw err;
@@ -73,10 +115,26 @@ export async function login(email: string, password: string): Promise<JwtPayload
 
   const valid = await bcrypt.compare(password, user.passwordHash);
   if (!valid) {
+    const state = recordLoginFailure(normalizedEmail);
+    logActivityAsync({
+      orgId: user.orgId,
+      userId: user.id,
+      action: 'auth.login.failed',
+      details: {
+        email: normalizedEmail,
+        ip: ipAddress ?? null,
+        reason: 'bad_password',
+        attemptCount: state.count,
+      },
+    });
     const err = new Error('Invalid email or password') as Error & { statusCode: number };
     err.statusCode = 401;
     throw err;
   }
+
+  // Success — clear the failure window so the next honest typo doesn't
+  // count against a fresh budget.
+  clearLoginAttempts(normalizedEmail);
 
   return { id: user.id, email: user.email, role: user.role, orgId: user.orgId };
 }
