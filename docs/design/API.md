@@ -2515,3 +2515,307 @@ chosen `spreadsheetId` + `sheetName` + `eventTypes`) and POSTs to
 callback has no session, and the config needs admin choices that
 the OAuth flow itself doesn't capture (see SPEC §3 "Why OAuth
 callback returns to the FE").
+
+---
+
+## Feature 0040 — Lead scoring
+
+A 0–100 score computed from recency, engagement, pipeline status,
+and upcoming appointments. Per-org weights live on
+`Organization.leadScoreConfig` (JSON); scores are computed
+on-the-fly per request (not persisted). See
+[features/0040-lead-scoring/SPEC.md](../features/0040-lead-scoring/SPEC.md).
+
+### GET `/api/v1/settings/lead-score-config`
+
+Read the org's lead-score weights. The response includes the
+defaults so the FE can show a "still on defaults" hint.
+
+**Permission:** any authenticated user (the Settings page is
+admin-gated client-side, but reads are non-sensitive).
+
+**Response 200:**
+
+```json
+{
+  "config": {
+    "recencyBuckets": [
+      { "hours": 1, "points": 40 },
+      { "hours": 24, "points": 30 },
+      { "hours": 168, "points": 20 },
+      { "hours": 720, "points": 10 }
+    ],
+    "engagementCap": 30,
+    "statusPoints": {
+      "interested": 20, "contacted": 10, "new": 5,
+      "converted": 0, "lost": 0
+    },
+    "appointmentBuckets": [
+      { "daysWindow": 7,  "points": 10 },
+      { "daysWindow": 30, "points": 5 }
+    ]
+  },
+  "isCustom": false,
+  "defaults": { "...same shape as config..." }
+}
+```
+
+`isCustom` is `true` when the org has saved an override row,
+`false` when defaults are in effect. `defaults` is always echoed
+so the FE can offer "Khôi phục mặc định" without an extra round-trip.
+
+### PUT `/api/v1/settings/lead-score-config`
+
+Replace the org's config. The handler validates + normalises (sorts
+`recencyBuckets` ascending by `hours`, `appointmentBuckets`
+ascending by `daysWindow`) before persisting.
+
+**Permission:** owner/admin (AC-0008). Member → `403`.
+
+**Body:** same shape as the `config` field of the GET response.
+
+**Validation errors (400):**
+
+- `{ "error": "Config phải là một object JSON" }`.
+- `{ "error": "recencyBuckets phải là mảng không rỗng" }`.
+- `{ "error": "Mỗi recency bucket phải là object" }`.
+- `{ "error": "recency bucket.hours phải > 0" }`.
+- `{ "error": "recency bucket.points không được âm" }`.
+- `{ "error": "engagementCap không được âm" }`.
+- `{ "error": "statusPoints phải là object" }`.
+- `{ "error": "statusPoints['<key>'] không được âm" }`.
+- `{ "error": "appointmentBuckets phải là mảng" }`.
+- `{ "error": "Mỗi appointment bucket phải là object" }`.
+- `{ "error": "appointment bucket.daysWindow phải > 0" }`.
+- `{ "error": "appointment bucket.points không được âm" }`.
+
+**Response 200:** the normalised config alongside `isCustom: true`
+and the defaults.
+
+### DELETE `/api/v1/settings/lead-score-config`
+
+Restore the org to defaults by setting `Organization.leadScoreConfig
+= JsonNull`. Idempotent — calling it twice is fine.
+
+**Permission:** owner/admin.
+
+**Response 200:**
+
+```json
+{
+  "config": "{...defaults...}",
+  "isCustom": false,
+  "defaults": "{...defaults...}"
+}
+```
+
+### GET `/api/v1/contacts` — Cycle 2026-05 additions
+
+Each row in the existing `contacts` array is augmented with two new
+fields. The list endpoint computes scores for the returned slice
+via `computeLeadScoresBatch` (capped at 1000 rows per page —
+EC-0004).
+
+**New row fields:**
+
+| Field | Type | Notes |
+|---|---|---|
+| `leadScore` | integer (0..100) | Total score. `0` when nothing is known about the contact. |
+| `leadScoreBreakdown` | object | `{ recency, engagement, status, appointment }` — each component sums to `leadScore`. |
+
+**New query params:**
+
+| Name | Type | Notes |
+|---|---|---|
+| `sort` | `'leadScore'` (only honoured value) | When set, in-process sort is applied **after** batch compute (BR-0009). |
+| `order` | `'asc' \| 'desc'` | Default `desc`. |
+
+When `sort=leadScore` is set the page widens to up to 1000 rows
+(`Math.min(1000, Math.max(limit, page * limit))`) so the sort is
+deterministic across pages. Other sort modes use the regular
+DB `ORDER BY updatedAt DESC`.
+
+### GET `/api/v1/contacts/:id` — Cycle 2026-05 additions
+
+Same two new fields (`leadScore`, `leadScoreBreakdown`) are appended
+to the existing contact detail payload (AC-0003 in SPEC).
+
+```json
+{
+  "id": "uuid",
+  "fullName": "...",
+  "tags": [{ "id": "...", "name": "VIP", "color": "...", "emoji": "..." }],
+  "leadScore": 72,
+  "leadScoreBreakdown": {
+    "recency": 30, "engagement": 22, "status": 20, "appointment": 0
+  }
+}
+```
+
+---
+
+## Feature 0041 — Advanced analytics
+
+Two admin-only aggregate endpoints powering the Analytics dashboard.
+Cross-org isolation is enforced on every query via `orgId`. See
+[features/0041-advanced-analytics/SPEC.md](../features/0041-advanced-analytics/SPEC.md).
+
+### Shared query params
+
+Both endpoints accept the same date range:
+
+| Name | Type | Notes |
+|---|---|---|
+| `dateFrom` | ISO date | Required (or both omitted to default to last 30 days). |
+| `dateTo` | ISO date | Required when `dateFrom` is set. |
+
+**Validation errors (400):**
+
+- `{ "error": "dateFrom/dateTo phải là ISO date hợp lệ" }`.
+- `{ "error": "dateFrom phải <= dateTo" }`.
+- `{ "error": "phải cung cấp cả dateFrom và dateTo" }` — only one
+  of the two supplied.
+- `{ "error": "khoảng tối đa 365 ngày" }` — range cap.
+
+Defaults: when **both** params are absent the window is the trailing
+30 days (UTC). Every response echoes `period: { dateFrom, dateTo }`
+so the FE can label the chart.
+
+### GET `/api/v1/analytics/funnel`
+
+Snapshot funnel — counts contacts currently in each pipeline status
+whose `createdAt` falls in the window. Merged secondaries
+(`mergedIntoId IS NOT NULL`) are excluded so duplicates don't
+double-count.
+
+**Permission:** owner/admin (BR-0006).
+
+**Extra query params:**
+
+| Name | Type | Notes |
+|---|---|---|
+| `teamId` | UUID | Restrict to contacts assigned to users on this team. |
+| `assignedUserId` | UUID | Restrict to one rep. Overrides `teamId` if both supplied. |
+
+**Response 200:**
+
+```json
+{
+  "stages": [
+    { "name": "new",        "count": 120, "conversionRate": null },
+    { "name": "contacted",  "count":  84, "conversionRate": 70 },
+    { "name": "interested", "count":  42, "conversionRate": 50 },
+    { "name": "converted",  "count":  12, "conversionRate": 29 }
+  ],
+  "lost": { "count": 18 },
+  "totalContacts": 276,
+  "period": { "dateFrom": "...", "dateTo": "..." }
+}
+```
+
+- `conversionRate` is `Math.round(count(i) / count(i-1) * 100)`
+  clamped to `[0, 100]`. `null` for the first stage and when the
+  previous stage had `0` (avoids misleading "0%" labels — EC-0001).
+- `lost` is reported separately so the FE can render it as a side
+  note rather than a funnel bar.
+
+### GET `/api/v1/analytics/team-performance`
+
+Per-rep performance: response time, outbound volume, conversions,
+active conversations.
+
+**Permission:** owner/admin.
+
+**Extra query params:**
+
+| Name | Type | Notes |
+|---|---|---|
+| `teamId` | UUID | Restrict the roster to this team. |
+
+**Response 200:**
+
+```json
+{
+  "byUser": [
+    {
+      "userId": "uuid",
+      "fullName": "Nguyễn Văn A",
+      "avgResponseTimeMinutes": 4.2,
+      "outboundMessageCount": 187,
+      "convertedContactsCount": 9,
+      "activeConversationsCount": 23
+    }
+  ],
+  "totals": {
+    "outboundMessageCount": 1842,
+    "convertedContactsCount": 67
+  },
+  "period": { "dateFrom": "...", "dateTo": "..." }
+}
+```
+
+- `avgResponseTimeMinutes` is rounded to one decimal place. `null`
+  when the rep has no paired inbound→outbound messages in the window.
+- Convention: an inbound message pairs with the **next** outbound on
+  the same conversation, attributed to the user who sent it
+  (`Message.repliedByUserId`).
+- The empty-team short-circuit returns
+  `{ byUser: [], totals: { outboundMessageCount: 0, convertedContactsCount: 0 } }`
+  without running aggregate queries.
+
+---
+
+## Feature 0042 — UI refactor (Friends grid backend)
+
+Backend support for the new "Bạn bè" left-rail grid view. The
+ACL mirrors `/friends/stats` — members only see friends on
+ZaloAccounts they have a `ZaloAccountAccess` row for. See
+[features/0042-ui-refactor-smax/SPEC.md](../features/0042-ui-refactor-smax/SPEC.md).
+
+### GET `/api/v1/friends`
+
+Paginated list of friends across visible Zalo accounts.
+
+**Permission:** any authenticated user. Members are scoped to the
+union of their `ZaloAccountAccess` rows. When a member has zero
+access rows the endpoint returns an empty page rather than `403`.
+
+**Query params:**
+
+| Name | Type | Notes |
+|---|---|---|
+| `accountId` | UUID | Restrict to one Zalo account. Members who can't see this account get an empty page (no `403` to avoid leaking account existence). |
+| `search` | string | Case-insensitive partial match on `Friend.displayName` OR `Contact.fullName` OR `Contact.phone`. |
+| `page` | integer | Default 1. |
+| `perPage` | integer | Default 24, max 100. |
+
+**Response 200:**
+
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "zaloUid": "2347234782",
+      "displayName": "Lan Anh",
+      "avatarUrl": "https://...",
+      "createdAt": "...",
+      "zaloAccountId": "uuid",
+      "zaloAccountName": "Sale account #1",
+      "contactId": "uuid | null",
+      "contact": {
+        "id": "uuid",
+        "fullName": "Lê Lan Anh",
+        "phone": "0901234567",
+        "avatarUrl": "..."
+      }
+    }
+  ],
+  "pagination": { "page": 1, "perPage": 24, "total": 142, "totalPages": 6 }
+}
+```
+
+`contact` is `null` when the Zalo friend has not been linked to a
+CRM Contact yet — drives the FE's "Tạo Contact" button on each card.
+
+Ordering: `createdAt DESC` (newest friends first).
