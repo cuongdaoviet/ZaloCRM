@@ -12,12 +12,14 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const apiMock = {
+// vitest hoists vi.mock to the top of the file; apiMock must be hoisted too
+// so the factory closure can reference it without ReferenceError at hoist time.
+const apiMock = vi.hoisted(() => ({
   get: vi.fn(),
   post: vi.fn(),
   patch: vi.fn(),
   delete: vi.fn(),
-};
+}));
 
 vi.mock('@/api/index', () => ({ api: apiMock }));
 
