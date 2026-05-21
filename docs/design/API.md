@@ -20,6 +20,34 @@ inside the app.
 - **Pagination:** standard envelope `{ <items>, total, page, limit, totalPages }`
   where `page` is 1-indexed.
 
+## Feature index
+
+- [0012 — Activity log](#feature-0012--activity-log)
+- [0013 — Customer 360 overview](#feature-0013--customer-360-overview)
+- [0014 — Webhook debug](#feature-0014--webhook-debug)
+- [0015 — Pinned conversations](#feature-0015--pinned-conversations)
+- [0016 — User preferences](#feature-0016--user-preferences)
+- [0017 — Appointment parser](#feature-0017--appointment-parser)
+- [0018 — Duplicate detection + merge](#feature-0018--duplicate-detection--merge)
+- [0019 — CRM tags (Phase A)](#feature-0019--crm-tags-phase-a) ·
+  [Phase C](#feature-0019--crm-tags-phase-c-drop-legacy-column)
+- [0020 — Friendship lifecycle](#feature-0020--friendship-lifecycle)
+- [0021 — Message reactions](#feature-0021--message-reactions)
+- [0022 — Conversation filters](#feature-0022--conversation-filters)
+- [0023 — Hide / archive conversations (Tab "Khác")](#feature-0023--hide--archive-conversations-tab-khác)
+- [0026 — Mention rendering](#feature-0026--mention-rendering) *(2026-05)*
+- [0027 — MinIO/S3 attachment mirror](#feature-0027--minios3-attachment-mirror)
+- [0028 — Sticker support](#feature-0028--sticker-support) *(2026-05)*
+- [0030 — Zalo user info popup](#feature-0030--zalo-user-info-popup) *(2026-05)*
+- [0033 — Friend aggregates](#feature-0033--friend-aggregates) *(2026-05)*
+- [0035 — Per-account proxy + 0044 — Master-key rotation](#feature-0035--per-account-proxy--0044--master-key-rotation) *(2026-05)*
+- [0036 — AI reply suggestions](#feature-0036--ai-reply-suggestions) *(2026-05)*
+- [0037 — Workflow engine](#feature-0037--workflow-engine) *(2026-05)*
+- [0038 — Integration Hub](#feature-0038--integration-hub) *(2026-05)*
+- [0040 — Lead scoring](#feature-0040--lead-scoring) *(2026-05)*
+- [0041 — Advanced analytics](#feature-0041--advanced-analytics) *(2026-05)*
+- [0042 — UI refactor (Friends grid backend)](#feature-0042--ui-refactor-friends-grid-backend) *(2026-05)*
+
 ---
 
 ## Feature 0012 — Activity log
