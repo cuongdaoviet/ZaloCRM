@@ -51,6 +51,7 @@ import { orderRoutes } from './modules/orders/order-routes.js';
 import { quickReplyRoutes } from './modules/quick-replies/quick-reply-routes.js';
 import { autoReplyRoutes } from './modules/auto-reply/auto-reply-routes.js';
 import { kpiRoutes } from './modules/kpi/kpi-routes.js';
+import { analyticsRoutes } from './modules/analytics/analytics-routes.js';
 import { campaignRoutes } from './modules/campaigns/campaign-routes.js';
 import { startCampaignWorker } from './modules/campaigns/campaign-worker.js';
 import { friendshipRoutes } from './modules/friendship/friendship-routes.js';
@@ -169,6 +170,7 @@ async function bootstrap() {
   await app.register(quickReplyRoutes);
   await app.register(autoReplyRoutes);
   await app.register(kpiRoutes);
+  await app.register(analyticsRoutes);
   await app.register(campaignRoutes);
   await app.register(friendshipRoutes);
   await app.register(keywordRuleRoutes);
