@@ -26,4 +26,13 @@ export const config = {
   s3AccessKey: process.env.S3_ACCESS_KEY || 'minioadmin',
   s3SecretKey: process.env.S3_SECRET_KEY || 'minioadmin',
   s3Region: process.env.S3_REGION || 'us-east-1',
+
+  // Feature 0033 — friend aggregates.
+  // Window (in days) used by /api/v1/friends/stats to decide whether a friend
+  // counts as "actively chatting" (i.e. has an inbound message in the window).
+  // Default: 7. Increase if customers want a looser definition of active.
+  friendActiveWindowDays: Math.max(
+    1,
+    parseInt(process.env.FRIEND_ACTIVE_WINDOW_DAYS || '7', 10) || 7,
+  ),
 };
