@@ -1,7 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 
-const routes = [
+// Exported so feature 0048 router-rbac unit tests can introspect the meta
+// configuration. Internal callers should keep using the `router` export.
+export const routes = [
   {
     path: '/login',
     name: 'Login',
@@ -90,19 +92,19 @@ const routes = [
     path: '/kpi',
     name: 'Kpi',
     component: () => import('@/views/KpiView.vue'),
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
     path: '/analytics',
     name: 'Analytics',
     component: () => import('@/views/AnalyticsView.vue'),
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
     path: '/campaigns',
     name: 'Campaigns',
     component: () => import('@/views/CampaignsView.vue'),
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
     path: '/keyword-rules',
@@ -114,19 +116,19 @@ const routes = [
     path: '/activity',
     name: 'Activity',
     component: () => import('@/views/ActivityView.vue'),
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
     path: '/duplicate-groups',
     name: 'DuplicateGroups',
     component: () => import('@/views/DuplicateGroupsView.vue'),
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
     path: '/duplicate-groups/:id',
     name: 'DuplicateGroupDetail',
     component: () => import('@/views/DuplicateGroupDetailView.vue'),
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
     path: '/friends',
@@ -144,35 +146,35 @@ const routes = [
     path: '/settings/tags',
     name: 'SettingsTags',
     component: () => import('@/views/SettingsTagsView.vue'),
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
     // Feature 0040 — Lead score admin config page.
     path: '/settings/lead-score',
     name: 'SettingsLeadScore',
     component: () => import('@/views/SettingsLeadScoreView.vue'),
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
     // Feature 0037 — Workflow automation engine (phase 1).
     path: '/settings/workflows',
     name: 'SettingsWorkflows',
     component: () => import('@/views/SettingsWorkflowsView.vue'),
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
     // Feature 0036 — AI reply suggestions (BYOK) config page.
     path: '/settings/ai-config',
     name: 'SettingsAiConfig',
     component: () => import('@/views/SettingsAiConfigView.vue'),
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
     // Feature 0038 — Integration Hub (Google Sheets + Telegram).
     path: '/settings/integrations',
     name: 'SettingsIntegrations',
     component: () => import('@/views/SettingsIntegrationsView.vue'),
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
     path: '/:pathMatch(.*)*',
@@ -207,6 +209,14 @@ router.beforeEach(async (to, _from, next) => {
         return next('/login');
       }
     }
+  }
+
+  // Feature 0048 BR-0005: admin-only routes redirect non-admin members
+  // back to the Dashboard. Server still enforces role on every API call;
+  // this just stops the UI shell from rendering empty-state to members
+  // who pasted an admin URL into the address bar.
+  if (to.meta.requiresAdmin && !authStore.isAdmin) {
+    return next('/');
   }
 
   next();
