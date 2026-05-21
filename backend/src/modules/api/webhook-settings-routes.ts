@@ -7,6 +7,7 @@ import { prisma } from '../../shared/database/prisma-client.js';
 import { authMiddleware } from '../auth/auth-middleware.js';
 import { logger } from '../../shared/utils/logger.js';
 import { emitWebhook } from './webhook-service.js';
+import { hashApiKey } from '../../shared/crypto/hash-api-key.js';
 import crypto from 'node:crypto';
 
 export async function webhookSettingsRoutes(app: FastifyInstance): Promise<void> {
@@ -72,13 +73,21 @@ export async function webhookSettingsRoutes(app: FastifyInstance): Promise<void>
   });
 
   // POST /api/v1/settings/api-key/generate — generate new public API key
+  //
+  // Feature 0046 BR-0016: the plaintext key is returned to the caller
+  // ONCE (here, in the response). The DB row stores only its SHA-256
+  // hash so a future leak of `app_settings.value_plain` yields no
+  // working credentials.
   app.post('/api/v1/settings/api-key/generate', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { orgId } = request.user!;
 
       const newKey = `zcrm_${crypto.randomBytes(24).toString('hex')}`;
-      await upsertSetting(orgId, 'public_api_key', newKey);
+      // Store the hash, NEVER the plaintext.
+      await upsertSetting(orgId, 'public_api_key', hashApiKey(newKey));
 
+      // Return the plaintext to the caller — this is their only chance
+      // to see it. Caller is expected to copy it to their own secret store.
       return { key: newKey };
     } catch (err) {
       logger.error('[webhook-settings] Generate API key error:', err);
@@ -86,7 +95,12 @@ export async function webhookSettingsRoutes(app: FastifyInstance): Promise<void>
     }
   });
 
-  // GET /api/v1/settings/api-key — retrieve masked API key
+  // GET /api/v1/settings/api-key — retrieve masked API key indicator
+  //
+  // Feature 0046: the row now stores a SHA-256 hash (or legacy plaintext
+  // during the migration window). We can't reconstruct the original key
+  // from the hash, so the FE just gets a presence indicator + last 4
+  // hash chars to help operators see when the key has been rotated.
   app.get('/api/v1/settings/api-key', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { orgId } = request.user!;
@@ -95,7 +109,9 @@ export async function webhookSettingsRoutes(app: FastifyInstance): Promise<void>
       if (!setting?.valuePlain) return { key: null };
 
       const k = setting.valuePlain;
-      // Show prefix + first 8 chars + mask + last 4 chars
+      // Show prefix + mask + last 4 chars. Works for both hashed (64
+      // hex) and legacy-plaintext (~53 char) values until migration
+      // completes lazily on next use.
       const masked = k.length > 12 ? `${k.slice(0, 12)}${'*'.repeat(k.length - 16)}${k.slice(-4)}` : `${k.slice(0, 4)}****`;
       return { key: masked };
     } catch (err) {
