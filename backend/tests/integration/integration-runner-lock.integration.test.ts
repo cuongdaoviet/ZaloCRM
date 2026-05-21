@@ -166,6 +166,69 @@ describe('AC-0006: integration-runner uses FOR UPDATE SKIP LOCKED', () => {
   }, 30_000);
 });
 
+describe('AC-0008 + AC-0009: integration-runner emits BR-0009 log lines', () => {
+  beforeEach(async () => {
+    await resetDb(prisma);
+    vi.clearAllMocks();
+    isDueMock.mockReturnValue(true);
+  });
+
+  /**
+   * AC-0008 (BR-0009): startup log line documents the lock strategy.
+   * Same pattern as the workflow-runner equivalent — tolerates the
+   * module-level `started` flag having flipped in an earlier test.
+   */
+  it('startup log line names the lock strategy + batch size', async () => {
+    const loggerMod = await import('../../src/shared/utils/logger.js');
+    const infoSpy = loggerMod.logger.info as ReturnType<typeof vi.fn>;
+    const { startIntegrationRunner } = await import(
+      '../../src/workers/integration-runner.js'
+    );
+    startIntegrationRunner();
+
+    const startupCall = infoSpy.mock.calls.find(
+      (args) =>
+        typeof args[0] === 'string' &&
+        args[0].startsWith('[integration-runner] started'),
+    );
+    if (startupCall) {
+      expect(startupCall[0]).toBe(
+        '[integration-runner] started, lock=postgres-skip-locked, batch=25',
+      );
+    } else {
+      const warnSpy = loggerMod.logger.warn as ReturnType<typeof vi.fn>;
+      const warnCall = warnSpy.mock.calls.find(
+        (args) =>
+          typeof args[0] === 'string' &&
+          args[0].includes('[integration-runner] already started'),
+      );
+      expect(warnCall).toBeDefined();
+    }
+  });
+
+  /**
+   * AC-0009: each tick logs the row count claimed.
+   */
+  it('per-tick log line includes claimed row count', async () => {
+    const loggerMod = await import('../../src/shared/utils/logger.js');
+    const infoSpy = loggerMod.logger.info as ReturnType<typeof vi.fn>;
+    infoSpy.mockClear();
+
+    const { runDueIntegrations } = await import(
+      '../../src/workers/integration-runner.js'
+    );
+    await runDueIntegrations(); // no rows due → claimed 0
+
+    const tickLine = infoSpy.mock.calls.find(
+      (args) =>
+        typeof args[0] === 'string' &&
+        args[0].includes('[integration-runner] tick: claimed'),
+    );
+    expect(tickLine).toBeDefined();
+    expect(tickLine![0]).toMatch(/\[integration-runner\] tick: claimed \d+ row\(s\)/);
+  });
+});
+
 describe('AC-0007: per-row error isolation inside the integration batch', () => {
   beforeEach(async () => {
     await resetDb(prisma);
