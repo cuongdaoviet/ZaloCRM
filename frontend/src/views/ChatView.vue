@@ -59,6 +59,7 @@
         :self-user-id="selfUserId ?? null"
         :on-react="addOrToggleReaction"
         :group-members="selectedConv && selectedConv.id ? (groupMembersByConv[selectedConv.id] ?? []) : []"
+        :replying-to="replyingTo"
         @send="sendMessage"
         @send-attachment="onSendAttachment"
         @toggle-contact-panel="showContactPanel = !showContactPanel"
@@ -66,6 +67,8 @@
         @appointment-suggest="onAppointmentSuggest"
         @create-contact-from-zalo="onCreateContactFromZalo"
         @open-contact="onOpenContactFromZalo"
+        @reply-set="setReplyTarget"
+        @reply-clear="clearReplyTarget"
         :show-contact-panel="showContactPanel"
         style="flex: 1; min-width: 0;"
       />
@@ -137,6 +140,8 @@ const {
   onConversationHover, onConversationHoverLeave,
   // Feature 0026 — group member roster cache for mention render + composer picker
   groupMembersByConv,
+  // Feature 0031 — reply target state for hover Reply + composer banner.
+  replyingTo, setReplyTarget, clearReplyTarget,
 } = useChat();
 
 // Feature 0021 — feed auth identity into the chat composable so the

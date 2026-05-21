@@ -51,6 +51,25 @@ export interface Message {
   zaloMsgId: string | null;
   // Feature 0021 — reactions delivered inline on each Message
   reactions?: MessageReaction[];
+  // Feature 0031 — eager-loaded parent for the reply/quote bubble. Null when
+  // this message is not a reply, when the parent was deleted (SET NULL), OR
+  // when the inbound quote ref pointed outside our DB (FE then reads
+  // `quotedMeta` from `content` for fallback render — BR-0008).
+  replyToMessageId?: string | null;
+  replyToMessage?: ReplyToMessageProjection | null;
+}
+
+/**
+ * Feature 0031 — server projection of the parent message (BR-0007). Mirrors
+ * the `select` shape used by the chat-routes GET handler. `content` is
+ * truncated to 200 chars server-side; the FE renders it as-is.
+ */
+export interface ReplyToMessageProjection {
+  id: string;
+  content: string | null;
+  contentType: string;
+  senderType: string;
+  senderName: string | null;
 }
 
 /**
@@ -115,6 +134,21 @@ export function useChat() {
   // (selectConversation calls fetchGroupMembers). Backend already caches for
   // 5 minutes, so this FE map is mostly a render-time index.
   const groupMembersByConv = ref<Record<string, GroupMember[]>>({});
+
+  // Feature 0031 — currently-replied-to message. Set by MessageThread hover
+  // "Reply" action; consumed by the composer banner + sendMessage to pass
+  // `replyToMessageId` along with the POST body. Cleared on send + on
+  // conversation switch (per EC-0001 cleanliness — don't carry a stale
+  // reply target between threads).
+  const replyingTo = ref<Message | null>(null);
+
+  function setReplyTarget(msg: Message | null): void {
+    replyingTo.value = msg;
+  }
+
+  function clearReplyTarget(): void {
+    replyingTo.value = null;
+  }
 
   /**
    * Lookup helper for MessageThread render: returns the member map for the
@@ -262,6 +296,12 @@ export function useChat() {
         try { performance.mark('conv-click'); } catch { /* SSR / Safari edge */ }
       }
     }
+    // Feature 0031 — clear any reply target carried over from the previous
+    // conversation. EC-0002 — replying to a message in conv A then jumping to
+    // conv B must not persist the banner.
+    if (selectedConvId.value !== convId) {
+      replyingTo.value = null;
+    }
     selectedConvId.value = convId;
 
     // Feature 0043 — Strategy 1 (cache hit): render cached messages
@@ -327,14 +367,24 @@ export function useChat() {
   async function sendMessage(content: string) {
     if (!selectedConvId.value || !content.trim()) return;
     sendingMsg.value = true;
+    // Feature 0031 — snapshot the reply target BEFORE the network call so an
+    // in-flight cancel from the composer banner can't yank it. Clear the
+    // ref optimistically so the banner closes the moment the user hits send;
+    // on failure we restore it so they don't lose context.
+    const replyTarget = replyingTo.value;
+    if (replyTarget) replyingTo.value = null;
     try {
-      const res = await api.post(`/conversations/${selectedConvId.value}/messages`, { content });
+      const payload: { content: string; replyToMessageId?: string } = { content };
+      if (replyTarget) payload.replyToMessageId = replyTarget.id;
+      const res = await api.post(`/conversations/${selectedConvId.value}/messages`, payload);
       // Socket may race the HTTP response — dedup before pushing
       if (!messages.value.find((m) => m.id === res.data.id)) {
         messages.value.push(res.data);
       }
     } catch (err) {
       console.error('Failed to send message:', err);
+      // Restore the reply target so the rep can retry without re-selecting.
+      if (replyTarget) replyingTo.value = replyTarget;
     } finally {
       sendingMsg.value = false;
     }
@@ -555,5 +605,10 @@ export function useChat() {
     groupMembersByConv,
     selectedGroupMemberMap,
     fetchGroupMembers,
+    // Feature 0031 — reply target state. View layer drives both setters via
+    // MessageThread events; sendMessage consumes the value internally.
+    replyingTo,
+    setReplyTarget,
+    clearReplyTarget,
   };
 }

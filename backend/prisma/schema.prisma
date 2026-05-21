@@ -240,12 +240,20 @@ model Message {
   deletedAt       DateTime? @map("deleted_at")
   sentAt          DateTime  @map("sent_at")
   repliedByUserId String?   @map("replied_by_user_id")
+  // Feature 0031 — Reply / quote message. Self-reference FK; SET NULL when
+  // the referenced message is deleted (BR-0002) so existing replies are not
+  // cascaded but lose their link. quotedMeta JSON in `content` (out of band)
+  // handles inbound quotes whose target is not in our DB (BR-0006).
+  replyToMessageId String?  @map("reply_to_message_id")
   createdAt       DateTime  @default(now()) @map("created_at")
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   repliedBy    User?        @relation("RepliedMessages", fields: [repliedByUserId], references: [id])
   // Feature 0021 — emoji reactions persisted per (message, reactor)
   reactions    MessageReaction[]
+  // Feature 0031 — self-referencing reply chain
+  replyToMessage Message?   @relation("MessageReply", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies        Message[]  @relation("MessageReply")
 
   @@index([zaloMsgId])
   // Powers /search/messages: filter by conversation, sort by sentAt desc
@@ -257,6 +265,8 @@ model Message {
   // makes the inner join on conversations → messages an index-only scan
   // for inbound traffic in the active window.
   @@index([conversationId, senderType, sentAt(sort: Desc)])
+  // Feature 0031 — eager loading of reply chain in GET messages projection
+  @@index([replyToMessageId])
   @@map("messages")
 }
 

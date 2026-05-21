@@ -19,6 +19,19 @@ import type { Server } from 'socket.io';
 
 type QueryParams = Record<string, string>;
 
+// ── Feature 0031 — reply / quote message helpers ────────────────────────────
+// `replyToMessage.content` is truncated to this many characters when projected
+// into the GET conversation messages response (BR-0007). The cap keeps the
+// list payload bounded even for very long parent messages and matches the
+// preview length the FE bubble renders.
+const REPLY_PREVIEW_MAX_CHARS = 200;
+
+function truncateReplyPreview(content: string | null): string | null {
+  if (content === null) return null;
+  if (content.length <= REPLY_PREVIEW_MAX_CHARS) return content;
+  return content.slice(0, REPLY_PREVIEW_MAX_CHARS) + '…';
+}
+
 export async function chatRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authMiddleware);
 
@@ -346,6 +359,11 @@ export async function chatRoutes(app: FastifyInstance) {
   );
 
   // ── List messages for a conversation (paginated, newest first) ──────────
+  // Feature 0031 — `replyToMessage` projection is eager-loaded so the FE can
+  // render the nested quote bubble in a single round-trip (BR-0007). Content
+  // preview is truncated server-side to REPLY_PREVIEW_MAX_CHARS to keep the
+  // payload bounded — long messages (e.g. multi-paragraph quotes, JSON link
+  // cards) would otherwise balloon the GET response.
   app.get('/api/v1/conversations/:id/messages', { preHandler: requireZaloAccess('read') }, async (request: FastifyRequest, reply: FastifyReply) => {
     const user = request.user!;
     const { id } = request.params as { id: string };
@@ -363,6 +381,11 @@ export async function chatRoutes(app: FastifyInstance) {
         // Feature 0021 — reactions are returned inline so MessageThread
         // doesn't need a round-trip per message. Other relations stay
         // implicit (Prisma includes scalar fields by default).
+        // Feature 0031 — replyToMessage projection (BR-0007). `select` is used
+        // (instead of `include`) so we only ship the 5 fields the FE actually
+        // needs to render the quote bubble — keeping the payload small even
+        // for long threads. Truncation of `content` happens after the query
+        // (Prisma 7 still lacks a `LEFT(col, n)` projection).
         include: {
           reactions: {
             select: {
@@ -375,6 +398,15 @@ export async function chatRoutes(app: FastifyInstance) {
             },
             orderBy: { createdAt: 'asc' },
           },
+          replyToMessage: {
+            select: {
+              id: true,
+              content: true,
+              contentType: true,
+              senderType: true,
+              senderName: true,
+            },
+          },
         },
         orderBy: { sentAt: 'desc' },
         skip: (parseInt(page) - 1) * parseInt(limit),
@@ -383,14 +415,30 @@ export async function chatRoutes(app: FastifyInstance) {
       prisma.message.count({ where: { conversationId: id } }),
     ]);
 
-    return { messages: messages.reverse(), total, page: parseInt(page), limit: parseInt(limit) };
+    // Feature 0031 BR-0007 — clip the eager-loaded preview to 200 chars so
+    // long parent messages don't bloat the list response. The clipped text
+    // is appended with an ellipsis so the FE can render it as-is.
+    const projected = messages.map((m) => ({
+      ...m,
+      replyToMessage: m.replyToMessage
+        ? { ...m.replyToMessage, content: truncateReplyPreview(m.replyToMessage.content) }
+        : null,
+    }));
+
+    return { messages: projected.reverse(), total, page: parseInt(page), limit: parseInt(limit) };
   });
 
   // ── Send message ─────────────────────────────────────────────────────────
+  // Feature 0031 — accepts optional `replyToMessageId` (BR-0003). Backend
+  // validates the parent message belongs to the same conversation AND org
+  // before building the zca-js `quoted` arg. Cross-conv / non-existent /
+  // cross-org parents → 400 `reply_target_invalid` (no info leak).
   app.post('/api/v1/conversations/:id/messages', { preHandler: requireZaloAccess('chat') }, async (request: FastifyRequest, reply: FastifyReply) => {
     const user = request.user!;
     const { id } = request.params as { id: string };
-    const { content } = request.body as { content: string };
+    const body = (request.body ?? {}) as { content?: string; replyToMessageId?: string };
+    const content = body.content;
+    const replyToMessageId = body.replyToMessageId;
 
     if (!content?.trim()) return reply.status(400).send({ error: 'Content required' });
 
@@ -399,6 +447,46 @@ export async function chatRoutes(app: FastifyInstance) {
       include: { zaloAccount: true },
     });
     if (!conversation) return reply.status(404).send({ error: 'Conversation not found' });
+
+    // Feature 0031 — validate the reply target before we pay for the Zalo
+    // round-trip. BR-0003: parent must (a) exist, (b) belong to this
+    // conversation, (c) belong to the same org (defensive — conversation
+    // already has orgId, but we check the parent's conv → org chain to
+    // protect against a future shape where messages could be cross-conv).
+    let parentMessage:
+      | {
+          id: string;
+          zaloMsgId: string | null;
+          content: string | null;
+          senderUid: string | null;
+          sentAt: Date;
+          conversationId: string;
+          conversation: { orgId: string };
+        }
+      | null = null;
+    if (replyToMessageId) {
+      parentMessage = await prisma.message.findUnique({
+        where: { id: replyToMessageId },
+        select: {
+          id: true,
+          zaloMsgId: true,
+          content: true,
+          senderUid: true,
+          sentAt: true,
+          conversationId: true,
+          conversation: { select: { orgId: true } },
+        },
+      });
+      if (
+        !parentMessage ||
+        parentMessage.conversationId !== id ||
+        parentMessage.conversation.orgId !== user.orgId
+      ) {
+        return reply
+          .status(400)
+          .send({ error: 'Tin nhắn được trả lời không hợp lệ', code: 'reply_target_invalid' });
+      }
+    }
 
     const instance = zaloPool.getInstance(conversation.zaloAccountId);
     if (!instance?.api) return reply.status(400).send({ error: 'Zalo account not connected' });
@@ -415,7 +503,25 @@ export async function chatRoutes(app: FastifyInstance) {
       const threadType = conversation.threadType === 'group' ? 1 : 0;
 
       zaloRateLimiter.recordSend(conversation.zaloAccountId);
-      await instance.api.sendMessage({ msg: content }, threadId, threadType);
+
+      // Feature 0031 BR-0004 — build the zca-js `quoted` arg from the
+      // validated parent. zca-js shape is { msgId, content, senderId, ts };
+      // we coerce ts to a number-string (zca-js accepts both number and
+      // numeric string). Only pass `quoted` when parentMessage.zaloMsgId is
+      // present — Zalo's quote ref is keyed on Zalo's msgId, not ours.
+      const sendArg: Record<string, unknown> = { msg: content };
+      if (parentMessage?.zaloMsgId) {
+        sendArg.quote = {
+          msgId: parentMessage.zaloMsgId,
+          content: parentMessage.content ?? '',
+          senderId: parentMessage.senderUid ?? '',
+          ts: parentMessage.sentAt.getTime(),
+        };
+      }
+      // zca-js typings don't expose `quote` on the union arg; cast at the
+      // boundary so the rest of the handler stays strictly typed. The mock
+      // in tests verifies the shape we ship.
+      await instance.api.sendMessage(sendArg as any, threadId, threadType);
 
       const message = await prisma.message.create({
         data: {
@@ -428,8 +534,34 @@ export async function chatRoutes(app: FastifyInstance) {
           contentType: 'text',
           sentAt: new Date(),
           repliedByUserId: user.id,
+          // Feature 0031 BR-0005 — persist the FK so subsequent GETs eager-
+          // load the parent projection. `parentMessage` is non-null here
+          // only when validation passed above.
+          replyToMessageId: parentMessage?.id ?? null,
+        },
+        include: {
+          replyToMessage: {
+            select: {
+              id: true,
+              content: true,
+              contentType: true,
+              senderType: true,
+              senderName: true,
+            },
+          },
         },
       });
+
+      // Clip parent preview to match the GET projection (BR-0007).
+      const projected = {
+        ...message,
+        replyToMessage: message.replyToMessage
+          ? {
+              ...message.replyToMessage,
+              content: truncateReplyPreview(message.replyToMessage.content),
+            }
+          : null,
+      };
 
       await prisma.conversation.update({
         where: { id },
@@ -437,9 +569,9 @@ export async function chatRoutes(app: FastifyInstance) {
       });
 
       const io = (app as any).io as Server;
-      io?.emit('chat:message', { accountId: conversation.zaloAccountId, message, conversationId: id });
+      io?.emit('chat:message', { accountId: conversation.zaloAccountId, message: projected, conversationId: id });
 
-      return message;
+      return projected;
     } catch (err) {
       logger.error('[chat] Send message error:', err);
       return reply.status(500).send({ error: 'Failed to send message' });
