@@ -111,7 +111,14 @@ model ZaloAccount {
   // Feature 0035 — Per-account proxy config.
   // NULL = no proxy (direct connect). Accepted schemes: http, https, socks, socks5.
   // Stored normalized (socks→socks5, trailing slash stripped).
-  proxyUrl        String?   @map("proxy_url")
+  //
+  // Feature 0044 — encryption-at-rest. Proxy URLs commonly embed
+  // credentials (user:pass@host) and now sit under the same master key as
+  // AI/Integration secrets. Three columns hold the AES-256-GCM blob; see
+  // shared/crypto/encrypt-config.ts. NULL across all three = no proxy.
+  proxyUrlCipher  String?   @map("proxy_url_cipher")
+  proxyUrlIv      String?   @map("proxy_url_iv")
+  proxyUrlTag     String?   @map("proxy_url_tag")
   lastConnectedAt DateTime? @map("last_connected_at")
   createdAt       DateTime  @default(now()) @map("created_at")
 

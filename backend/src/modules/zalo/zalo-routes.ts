@@ -13,6 +13,10 @@ import {
   maskProxyUrl,
 } from '../../shared/network/proxy-agent.js';
 import { logger } from '../../shared/utils/logger.js';
+import {
+  encryptProxyUrl,
+  decryptProxyUrl,
+} from '../../shared/crypto/encrypt-proxy-url.js';
 
 export async function zaloRoutes(app: FastifyInstance): Promise<void> {
   // All routes in this plugin require auth
@@ -20,12 +24,15 @@ export async function zaloRoutes(app: FastifyInstance): Promise<void> {
 
   // GET /api/v1/zalo-accounts — list accounts with live status from pool.
   // Feature 0035 BR-0005: include `proxyUrl` only for owner/admin callers.
+  // Feature 0044 BR-0013: proxyUrl is now stored encrypted; decrypt on the
+  // fly via the dual-key helper and return plaintext only to admin callers.
   app.get('/api/v1/zalo-accounts', async (request) => {
     const user = request.user!;
     const accounts = await prisma.zaloAccount.findMany({
       where: { orgId: user.orgId },
       select: {
         id: true,
+        orgId: true,
         zaloUid: true,
         displayName: true,
         avatarUrl: true,
@@ -33,7 +40,9 @@ export async function zaloRoutes(app: FastifyInstance): Promise<void> {
         status: true,
         lastConnectedAt: true,
         createdAt: true,
-        proxyUrl: true,
+        proxyUrlCipher: true,
+        proxyUrlIv: true,
+        proxyUrlTag: true,
         owner: { select: { id: true, fullName: true, email: true } },
       },
       orderBy: { createdAt: 'asc' },
@@ -41,11 +50,32 @@ export async function zaloRoutes(app: FastifyInstance): Promise<void> {
 
     const isAdmin = isAdminRole(user.role);
     return accounts.map((a) => {
-      // Strip proxyUrl for non-admin (BR-0005).
-      const { proxyUrl, ...rest } = a;
+      const {
+        orgId: _orgId,
+        proxyUrlCipher,
+        proxyUrlIv,
+        proxyUrlTag,
+        ...rest
+      } = a;
+      let proxyUrlPlain: string | null = null;
+      if (isAdmin) {
+        try {
+          proxyUrlPlain = decryptProxyUrl(a.orgId, {
+            proxyUrlCipher,
+            proxyUrlIv,
+            proxyUrlTag,
+          });
+        } catch (err) {
+          // Don't fail the list call over one undecryptable row — log it.
+          logger.warn(
+            `[zalo:${a.id}] proxyUrl decrypt failed in list response:`,
+            err instanceof Error ? err.message : err,
+          );
+        }
+      }
       return {
         ...rest,
-        ...(isAdmin ? { proxyUrl } : {}),
+        ...(isAdmin ? { proxyUrl: proxyUrlPlain } : {}),
         liveStatus: zaloPool.getStatus(a.id),
       };
     });
@@ -178,6 +208,7 @@ export async function zaloRoutes(app: FastifyInstance): Promise<void> {
         where: { id, orgId: user.orgId },
         select: {
           id: true,
+          orgId: true,
           zaloUid: true,
           displayName: true,
           avatarUrl: true,
@@ -185,7 +216,9 @@ export async function zaloRoutes(app: FastifyInstance): Promise<void> {
           status: true,
           lastConnectedAt: true,
           createdAt: true,
-          proxyUrl: true,
+          proxyUrlCipher: true,
+          proxyUrlIv: true,
+          proxyUrlTag: true,
           owner: { select: { id: true, fullName: true, email: true } },
         },
       });
@@ -193,10 +226,31 @@ export async function zaloRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Account not found' });
       }
 
-      const { proxyUrl, ...rest } = account;
+      const {
+        orgId: _orgId,
+        proxyUrlCipher,
+        proxyUrlIv,
+        proxyUrlTag,
+        ...rest
+      } = account;
+      let proxyUrlPlain: string | null = null;
+      if (isAdmin) {
+        try {
+          proxyUrlPlain = decryptProxyUrl(account.orgId, {
+            proxyUrlCipher,
+            proxyUrlIv,
+            proxyUrlTag,
+          });
+        } catch (err) {
+          logger.warn(
+            `[zalo:${id}] proxyUrl decrypt failed in single response:`,
+            err instanceof Error ? err.message : err,
+          );
+        }
+      }
       return {
         ...rest,
-        ...(isAdmin ? { proxyUrl } : {}),
+        ...(isAdmin ? { proxyUrl: proxyUrlPlain } : {}),
         liveStatus: zaloPool.getStatus(id),
       };
     },
@@ -220,13 +274,44 @@ export async function zaloRoutes(app: FastifyInstance): Promise<void> {
 
       const account = await prisma.zaloAccount.findFirst({
         where: { id, orgId: user.orgId },
-        select: { id: true, status: true, proxyUrl: true, displayName: true },
+        select: {
+          id: true,
+          orgId: true,
+          status: true,
+          displayName: true,
+          proxyUrlCipher: true,
+          proxyUrlIv: true,
+          proxyUrlTag: true,
+        },
       });
       if (!account) {
         return reply.status(404).send({ error: 'Account not found' });
       }
 
-      const updateData: { proxyUrl?: string | null; displayName?: string | null } = {};
+      // Decrypt current proxyUrl so we can detect a real change.
+      let currentProxyPlain: string | null = null;
+      try {
+        currentProxyPlain = decryptProxyUrl(account.orgId, {
+          proxyUrlCipher: account.proxyUrlCipher,
+          proxyUrlIv: account.proxyUrlIv,
+          proxyUrlTag: account.proxyUrlTag,
+        });
+      } catch (err) {
+        // Treat as "no proxy" for change-detection purposes; the PUT below
+        // will rewrite the row (re-encrypt with the current key).
+        logger.warn(
+          `[zalo:${id}] PUT: existing proxyUrl decrypt failed:`,
+          err instanceof Error ? err.message : err,
+        );
+        currentProxyPlain = null;
+      }
+
+      const updateData: {
+        displayName?: string | null;
+        proxyUrlCipher?: string | null;
+        proxyUrlIv?: string | null;
+        proxyUrlTag?: string | null;
+      } = {};
       let proxyUrlChanged = false;
       let newProxyUrl: string | null | undefined = undefined;
 
@@ -239,9 +324,12 @@ export async function zaloRoutes(app: FastifyInstance): Promise<void> {
           });
         }
         newProxyUrl = result.normalized ?? null;
-        if (newProxyUrl !== account.proxyUrl) {
+        if (newProxyUrl !== currentProxyPlain) {
           proxyUrlChanged = true;
-          updateData.proxyUrl = newProxyUrl;
+          const cipherFields = encryptProxyUrl(account.orgId, newProxyUrl);
+          updateData.proxyUrlCipher = cipherFields.proxyUrlCipher;
+          updateData.proxyUrlIv = cipherFields.proxyUrlIv;
+          updateData.proxyUrlTag = cipherFields.proxyUrlTag;
         }
       }
 
@@ -260,17 +348,19 @@ export async function zaloRoutes(app: FastifyInstance): Promise<void> {
       const liveStatus = zaloPool.getStatus(id);
       const isConnected = liveStatus === 'connected';
 
-      let updated = account;
+      let finalDisplayName = account.displayName;
+      let finalProxyPlain = currentProxyPlain;
       if (Object.keys(updateData).length > 0) {
-        updated = await prisma.zaloAccount.update({
+        const updated = await prisma.zaloAccount.update({
           where: { id },
           data: updateData,
-          select: { id: true, status: true, proxyUrl: true, displayName: true },
+          select: { id: true, status: true, displayName: true },
         });
-
+        finalDisplayName = updated.displayName;
         if (proxyUrlChanged) {
+          finalProxyPlain = newProxyUrl ?? null;
           logger.info(
-            `[zalo:${id}] proxy updated to ${maskProxyUrl(updated.proxyUrl)} by user ${user.id}`,
+            `[zalo:${id}] proxy updated to ${maskProxyUrl(finalProxyPlain)} by user ${user.id}`,
           );
         }
       }
@@ -278,7 +368,10 @@ export async function zaloRoutes(app: FastifyInstance): Promise<void> {
       const requiresReconnect = proxyUrlChanged && isConnected;
 
       return {
-        ...updated,
+        id: account.id,
+        status: account.status,
+        displayName: finalDisplayName,
+        proxyUrl: finalProxyPlain,
         liveStatus,
         requiresReconnect,
       };
