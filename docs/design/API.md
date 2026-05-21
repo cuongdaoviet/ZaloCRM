@@ -1535,3 +1535,196 @@ Backend reads six env vars (`backend/src/config/index.ts`):
 anonymous-download policy. Backend calls `ensureBucket()` at startup
 and refuses to start if it fails — failing loud is better than
 silently accepting uploads that vanish (EC-0001).
+
+---
+
+## Feature 0026 — Mention rendering
+
+Backend endpoint that powers the `@mention` chip rendering and composer
+auto-complete inside group conversations. See
+[features/0026-mention-rendering/SPEC.md](../features/0026-mention-rendering/SPEC.md).
+
+### GET `/api/v1/conversations/:id/members`
+
+List the members of a group conversation so the FE can render
+`@<uid>` chips and feed the composer's auto-complete picker.
+
+**Path params:** `id` — conversation UUID.
+
+**Permission:** `requireZaloAccess('chat')` — owner/admin bypass;
+members need `chat` or `admin` on the underlying Zalo account.
+
+**Response 200:**
+
+```json
+{
+  "members": [
+    { "uid": "2347234782", "displayName": "Lan Anh", "avatarUrl": "https://..." },
+    { "uid": "9988776655", "displayName": "Minh",    "avatarUrl": "" }
+  ]
+}
+```
+
+`avatarUrl` may be an empty string when the Zalo profile has no avatar.
+
+**Behaviour:**
+
+- Source of truth is `api.getGroupInfo(<externalThreadId>)` from
+  zca-js. The first call hits Zalo; subsequent calls within 5 minutes
+  are served from an in-process Map keyed by `conversationId`
+  (SPEC §3 BR-0009).
+- **BR-0010 graceful degradation** — when the underlying Zalo
+  account is offline (no `instance.api`) the endpoint still returns
+  `200` with `members: []` so the UI can disable auto-complete
+  without showing an error toast.
+- Same shape is returned if `api.getGroupInfo` throws (privacy or
+  network error) — the FE simply works without auto-complete.
+
+**Errors:**
+
+| Status | When |
+|---|---|
+| 400 | Conversation is not a group — `{ "error": "not_a_group" }` (BR-0003 of SPEC §3). |
+| 403 | Caller lacks `chat` ACL on the Zalo account. |
+| 404 | Cross-org or unknown conversation id — `{ "error": "Conversation not found" }`. |
+
+---
+
+## Feature 0028 — Sticker support
+
+Sticker send + render. The backend proxies zca-js's sticker APIs so
+the FE never has to talk to Zalo CDN directly (CORS-safe). See
+[features/0028-sticker-support/SPEC.md](../features/0028-sticker-support/SPEC.md).
+
+### POST `/api/v1/conversations/:id/stickers`
+
+Send a sticker into a conversation. The handler persists a
+`Message` row with `contentType='sticker'` and `content` set to a
+JSON envelope `{ stickerId, catId, type, cdnUrl }`, then emits the
+usual `chat:message` Socket.IO event.
+
+**Path params:** `id` — conversation UUID.
+
+**Permission:** `requireZaloAccess('chat')` — owner/admin bypass;
+members need `chat` or `admin` on the Zalo account.
+
+**Body:**
+
+```json
+{ "stickerId": 2125, "catId": 50, "type": 1, "cdnUrl": "https://..." }
+```
+
+`cdnUrl` is optional — when omitted the backend looks it up via
+`api.getStickersDetail` so the persisted Message carries a renderable
+URL (BR-0003 of SPEC §3).
+
+**Validation errors (400):**
+
+- `{ "error": "stickerId, catId, type là bắt buộc", "code": "invalid_body" }`
+  — any of the three IDs is missing or not a finite number.
+
+**Other errors:**
+
+| Status | `code` | When |
+|---|---|---|
+| 400 | _(none)_ | Zalo account not connected for that conversation. |
+| 404 | _(none)_ | Cross-org or unknown conversation id. |
+| 429 | _(none)_ | Per-account send rate limit hit (existing `zaloRateLimiter`). |
+| 502 | `sticker_unsupported` | The pooled zca-js instance has no `sendSticker()` method. |
+| 502 | `zalo_send_failed` | zca-js `sendSticker` threw — no Message persisted. |
+
+**Response 200:** the freshly-persisted `Message` row plus the
+sticker envelope. Frontend renders by reading
+`JSON.parse(message.content)`.
+
+```json
+{
+  "messageId": "uuid",
+  "sticker": { "stickerId": 2125, "catId": 50, "type": 1, "cdnUrl": "https://..." }
+}
+```
+
+Side effect: emits Socket.IO `chat:message` with the Message row
+(payload identical to `POST /messages`).
+
+### GET `/api/v1/zalo/stickers/:stickerId`
+
+Resolve a sticker id to its CDN URL via zca-js
+`api.getStickersDetail([stickerId])`. Used by the FE when the
+incoming sticker message lacks an embedded `cdnUrl` (e.g. legacy
+inbound rows persisted before this feature).
+
+**Path params:** `stickerId` — numeric Zalo sticker id.
+
+**Query params:**
+
+| Name | Type | Required | Notes |
+|---|---|---|---|
+| `accountId` | UUID | yes | Which Zalo account to call the SDK on. |
+| `catId` | number | no | Category hint; falls back to the value returned by the SDK. |
+
+**Permission:** caller must be owner/admin OR have a
+`ZaloAccountAccess` row with `chat`/`admin` on `accountId`. The
+endpoint resolves the ACL inline (mirrors `requireZaloAccess('chat')`
+but reads `accountId` from the query string instead of params).
+
+**Validation errors (400):**
+
+- `{ "error": "stickerId không hợp lệ" }` — non-numeric path param.
+- `{ "error": "accountId là bắt buộc", "code": "missing_account" }` — missing query.
+
+**Other errors:**
+
+| Status | `code` | When |
+|---|---|---|
+| 403 | _(none)_ | Caller lacks `chat` access on the account — `{ "error": "Không có quyền truy cập tài khoản Zalo này" }`. |
+| 404 | _(none)_ | Cross-org or unknown `accountId`. |
+| 503 | `account_offline` | Zalo account not connected. |
+| 502 | `sticker_lookup_failed` | zca-js returned no entry for that stickerId. |
+
+**Response 200:**
+
+```json
+{
+  "stickerId": 2125,
+  "catId": 50,
+  "type": 1,
+  "cdnUrl": "https://zalocdn/.../2125.png",
+  "animationType": "static"
+}
+```
+
+Entries are cached in-process for 24h (BR-0008) — repeated FE calls
+for the same `stickerId` don't re-hit zca-js.
+
+### GET `/api/v1/zalo/sticker-catalogues`
+
+Return the sticker pack list used by the `StickerPicker` component.
+
+**Query params:**
+
+| Name | Type | Required | Notes |
+|---|---|---|---|
+| `accountId` | UUID | yes | Same ACL pattern as the detail endpoint. |
+
+**Permission:** same as `GET /stickers/:stickerId` — `chat` or
+higher on the account.
+
+**Response 200:**
+
+```json
+{
+  "catalogues": [
+    {
+      "id": "default",
+      "name": "Default",
+      "stickers": [
+        { "stickerId": 2125, "catId": 50, "type": 1, "cdnUrl": "https://..." }
+      ]
+    }
+  ]
+}
+```
+
+Phase 1 returns a hardcoded default catalogue (BR-0009) — Phase 2
+will hit Zalo's real catalogue API.
