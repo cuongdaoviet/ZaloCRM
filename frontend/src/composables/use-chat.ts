@@ -5,6 +5,7 @@ import type { Contact } from '@/composables/use-contacts';
 import { useReactions, type MessageReaction } from '@/composables/use-reactions';
 import { useUserPreferences } from '@/composables/use-user-preferences';
 import { useConversationPrefetch } from '@/composables/use-conversation-prefetch';
+import type { GroupMember } from '@/composables/use-mentions';
 
 interface ZaloAccount {
   id: string;
@@ -108,6 +109,57 @@ export function useChat() {
   // Feature 0023 — per-tab unread counts power the badge on each tab header.
   const mainUnread = ref(0);
   const otherUnread = ref(0);
+
+  // Feature 0026 — group member cache for mention render + composer picker.
+  // Keyed by conversationId. Fetched once when a group conversation is opened
+  // (selectConversation calls fetchGroupMembers). Backend already caches for
+  // 5 minutes, so this FE map is mostly a render-time index.
+  const groupMembersByConv = ref<Record<string, GroupMember[]>>({});
+
+  /**
+   * Lookup helper for MessageThread render: returns the member map for the
+   * currently-selected group conversation (empty Map for user-to-user or
+   * before the fetch completes). Always a fresh Map so Vue reactivity
+   * triggers when the underlying array reference changes.
+   */
+  const selectedGroupMemberMap = computed<Map<string, GroupMember>>(() => {
+    const cid = selectedConvId.value;
+    if (!cid) return new Map();
+    const list = groupMembersByConv.value[cid];
+    if (!list || list.length === 0) return new Map();
+    return new Map(list.map((m) => [m.uid, m]));
+  });
+
+  /**
+   * Fetch group member list from the backend. No-op for non-group conversations
+   * (BR-0003) and for conversations whose member list was already fetched in
+   * this session. Backend handles the 5-minute SDK cache.
+   */
+  async function fetchGroupMembers(convId: string): Promise<void> {
+    if (!convId) return;
+    const conv = conversations.value.find((c) => c.id === convId);
+    // BR-0003 — only group conversations have a member roster.
+    if (conv?.threadType !== 'group') return;
+    // Already loaded → skip (refetch happens via reload of the view).
+    if (groupMembersByConv.value[convId]?.length) return;
+    try {
+      const res = await api.get(`/conversations/${convId}/members`);
+      const members = Array.isArray(res.data?.members)
+        ? (res.data.members as GroupMember[])
+        : [];
+      groupMembersByConv.value = {
+        ...groupMembersByConv.value,
+        [convId]: members,
+      };
+    } catch (err) {
+      // Non-fatal — UI degrades to raw uid render + disabled picker.
+      console.warn('[use-chat] failed to fetch group members:', err);
+      groupMembersByConv.value = {
+        ...groupMembersByConv.value,
+        [convId]: [],
+      };
+    }
+  }
 
   /** True if any filter chip is active. Used to show "Xóa bộ lọc" link. */
   const hasActiveFilters = computed<boolean>(
@@ -235,6 +287,9 @@ export function useChat() {
     } catch {
       // Non-critical — panel will show partial data from list
     }
+    // Feature 0026 — pre-fetch group members for chip render + composer picker.
+    // Fire-and-forget: render falls back to raw uid until the list lands.
+    void fetchGroupMembers(convId);
     // Mark as read
     try {
       await api.post(`/conversations/${convId}/mark-read`);
@@ -496,5 +551,9 @@ export function useChat() {
     // composable handles debounce + cache + dedupe internally.
     onConversationHover: prefetch.onHover,
     onConversationHoverLeave: prefetch.onHoverLeave,
+    // Feature 0026 — group member map for mention chip render + picker.
+    groupMembersByConv,
+    selectedGroupMemberMap,
+    fetchGroupMembers,
   };
 }
