@@ -42,6 +42,8 @@ export interface Message {
   contentType: string;
   senderType: string;
   senderName: string | null;
+  /** Feature 0030 — Zalo UID of the sender (used by the user-info popover). */
+  senderUid: string | null;
   sentAt: string;
   isDeleted: boolean;
   zaloMsgId: string | null;
