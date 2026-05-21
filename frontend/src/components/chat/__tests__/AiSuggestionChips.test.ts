@@ -15,14 +15,18 @@ import { api } from '@/api/index';
 
 const apiPost = api.post as unknown as ReturnType<typeof vi.fn>;
 
+// Stubs render plain native elements. We rely on Vue 3's fallthrough attribute
+// behavior to wire the parent's @click listener to the root <button> — manually
+// emitting a 'click' on top of that would fire the parent's handler twice
+// because Vue Test Utils' click trigger dispatches a real DOM event.
 const STUBS = {
   'v-icon': { template: '<i><slot /></i>' },
   'v-chip': {
     props: ['size', 'variant', 'color'],
-    template: '<button class="v-chip-stub" @click="$emit(\'click\', $event)"><slot /></button>',
+    template: '<button class="v-chip-stub"><slot /></button>',
   },
   'v-btn': {
-    template: '<button class="v-btn-stub" @click="$emit(\'click\', $event)"><slot /></button>',
+    template: '<button class="v-btn-stub"><slot /></button>',
   },
   'v-skeleton-loader': { template: '<span class="sk-stub" />' },
 };
