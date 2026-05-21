@@ -24,6 +24,28 @@ export interface IncomingMessage {
   // Feature 0034 — canonical Zalo identifier resolved from `getUserInfo`.
   // Optional: older zca-js payloads and self messages may not carry this.
   senderGlobalId?: string | null;
+  // Feature 0031 — reply / quote ref extracted upstream from
+  // `message.data.quote` (or `quoted`). When the referenced Zalo msgId
+  // matches an existing local Message we set the FK; otherwise we persist
+  // the metadata into the content envelope so the FE can still render the
+  // quote bubble (no scroll-to-source).
+  quoteRef?: IncomingQuoteRef | null;
+}
+
+/**
+ * Feature 0031 — minimal projection of a zca-js quote/reply ref. We capture
+ * the four fields the FE needs to render a fallback bubble when the parent
+ * message isn't in our DB (BR-0006 / BR-0008).
+ */
+export interface IncomingQuoteRef {
+  /** Zalo's msgId of the message being replied to. */
+  msgId: string;
+  /** Quoted preview text (may already be a JSON envelope for media). */
+  content: string;
+  /** UID of the quoted message's sender. */
+  senderUid: string;
+  /** Sent timestamp of the quoted message (epoch ms). */
+  ts: number;
 }
 
 export interface HandleMessageResult {
@@ -42,6 +64,8 @@ export interface HandleMessageResult {
     sentAt: Date;
     repliedByUserId: string | null;
     createdAt: Date;
+    // Feature 0031 — set when we matched the quote ref to a local message.
+    replyToMessageId?: string | null;
   };
   conversationId: string;
   orgId: string;
@@ -77,6 +101,40 @@ export async function handleIncomingMessage(
     const conversation = await findOrCreateConversation(msg, account.orgId, contactId);
 
     const sentAt = new Date(msg.timestamp);
+
+    // Feature 0031 BR-0006 — resolve the quote ref to a local FK when the
+    // referenced Zalo msgId matches an existing message in OUR conversation
+    // (we scope the lookup so we never link to a row from a different
+    // conversation). If the ref doesn't match anything in DB we fall back to
+    // embedding a `quotedMeta` envelope into `content` so the FE can still
+    // render a fallback bubble without a scroll target.
+    let replyToMessageId: string | null = null;
+    let persistedContent: string = msg.content || '';
+    const quoteRef = msg.quoteRef ?? null;
+    if (quoteRef?.msgId) {
+      const parent = await prisma.message.findFirst({
+        where: { zaloMsgId: quoteRef.msgId, conversationId: conversation.id },
+        select: { id: true },
+      });
+      if (parent) {
+        replyToMessageId = parent.id;
+      } else {
+        // BR-0006 fallback — embed quote metadata in content. We keep the
+        // user's text intact and tuck the meta into a JSON envelope so the
+        // FE's existing parsers can detect it via `quotedMeta` key. EC-0006:
+        // FE renders the preview but disables scroll-to-source.
+        persistedContent = JSON.stringify({
+          text: msg.content || '',
+          quotedMeta: {
+            msgId: quoteRef.msgId,
+            content: truncateInboundQuotePreview(quoteRef.content),
+            senderUid: quoteRef.senderUid,
+            ts: quoteRef.ts,
+          },
+        });
+      }
+    }
+
     const message = await prisma.message.create({
       data: {
         id: randomUUID(),
@@ -85,10 +143,11 @@ export async function handleIncomingMessage(
         senderType: msg.isSelf ? 'self' : 'contact',
         senderUid: msg.senderUid,
         senderName: msg.senderName || null,
-        content: msg.content || '',
+        content: persistedContent,
         contentType: msg.contentType || 'text',
         attachments: msg.attachments ?? [],
         sentAt,
+        replyToMessageId,
       },
     });
 
@@ -429,6 +488,18 @@ function extractFilenameFromParams(params: unknown): string | null {
     // Ignore — params is sometimes a free-form string.
   }
   return null;
+}
+
+/**
+ * Feature 0031 — clip the inbound quote preview before persisting it inside
+ * `content.quotedMeta`. Mirrors the GET list endpoint's truncation cap so the
+ * FE bubble width stays bounded regardless of which path produced the data.
+ */
+const INBOUND_QUOTE_PREVIEW_MAX_CHARS = 200;
+
+function truncateInboundQuotePreview(content: string): string {
+  if (content.length <= INBOUND_QUOTE_PREVIEW_MAX_CHARS) return content;
+  return content.slice(0, INBOUND_QUOTE_PREVIEW_MAX_CHARS) + '…';
 }
 
 // Soft-delete a message by its Zalo message ID

@@ -88,12 +88,36 @@
           data-testid="virtual-message-list"
         >
           <template #default="{ item: msg }">
-            <div class="mb-2 d-flex message-row" :class="msg.senderType === 'self' ? 'justify-end' : 'justify-start'">
+            <div class="mb-2 d-flex message-row" :class="msg.senderType === 'self' ? 'justify-end' : 'justify-start'" :data-message-id="msg.id">
               <div style="max-width: 70%;">
                 <div v-if="conversation.threadType === 'group' && msg.senderType !== 'self'" class="text-caption text-primary font-weight-medium mb-1">
                   {{ msg.senderName || 'Unknown' }}
                 </div>
-                <div class="bubble-wrapper" :class="msg.senderType === 'self' ? 'bubble-wrapper--self' : 'bubble-wrapper--contact'">
+                <!-- Feature 0031 — nested quote bubble (virtualized path
+                     mirror of the v-for branch). -->
+                <button
+                  v-if="hasQuoteBubble(msg)"
+                  type="button"
+                  class="quote-bubble"
+                  :class="[
+                    msg.senderType === 'self' ? 'quote-bubble--self' : 'quote-bubble--contact',
+                    { 'quote-bubble--scrollable': quoteScrollable(msg) },
+                    { 'quote-bubble--unavailable': !msg.replyToMessage && !extractQuotedMeta(msg) },
+                  ]"
+                  :disabled="!quoteScrollable(msg)"
+                  data-testid="quote-bubble"
+                  @click.stop="onQuoteClick(msg)"
+                >
+                  <div v-if="quoteBubbleAuthor(msg)" class="quote-bubble__author">{{ quoteBubbleAuthor(msg) }}</div>
+                  <div class="quote-bubble__text">{{ quoteBubbleText(msg) }}</div>
+                </button>
+                <div
+                  class="bubble-wrapper"
+                  :class="[
+                    msg.senderType === 'self' ? 'bubble-wrapper--self' : 'bubble-wrapper--contact',
+                    { 'bubble-wrapper--highlight': highlightedMessageIds.has(msg.id) },
+                  ]"
+                >
                   <div class="message-bubble pa-2 px-3 rounded-lg" :class="msg.senderType === 'self' ? 'bg-primary text-white' : 'bg-white'" style="word-wrap: break-word;">
                     <div v-if="msg.isDeleted" class="text-decoration-line-through font-italic" style="opacity: 0.6;">
                       {{ msg.content || '(tin nhắn)' }}<span class="text-caption"> (đã thu hồi)</span>
@@ -187,7 +211,7 @@
         </v-virtual-scroll>
 
         <!-- Short thread → original v-for path -->
-        <div v-else v-for="msg in messages" :key="msg.id" class="mb-2 d-flex message-row" :class="msg.senderType === 'self' ? 'justify-end' : 'justify-start'">
+        <div v-else v-for="msg in messages" :key="msg.id" class="mb-2 d-flex message-row" :class="msg.senderType === 'self' ? 'justify-end' : 'justify-start'" :data-message-id="msg.id">
           <div style="max-width: 70%;">
             <div
               v-if="conversation.threadType === 'group' && msg.senderType !== 'self'"
@@ -207,8 +231,34 @@
                 {{ msg.senderName || 'Unknown' }}
               </span>
             </div>
+            <!-- Feature 0031 — nested quote bubble. Renders above the main
+                 bubble for replies; click scrolls to the source message
+                 (when in DB), 1s highlight ring. Out-of-DB inbound quotes
+                 (quotedMeta) render the preview but are unclickable. -->
+            <button
+              v-if="hasQuoteBubble(msg)"
+              type="button"
+              class="quote-bubble"
+              :class="[
+                msg.senderType === 'self' ? 'quote-bubble--self' : 'quote-bubble--contact',
+                { 'quote-bubble--scrollable': quoteScrollable(msg) },
+                { 'quote-bubble--unavailable': !msg.replyToMessage && !extractQuotedMeta(msg) },
+              ]"
+              :disabled="!quoteScrollable(msg)"
+              data-testid="quote-bubble"
+              @click.stop="onQuoteClick(msg)"
+            >
+              <div v-if="quoteBubbleAuthor(msg)" class="quote-bubble__author">{{ quoteBubbleAuthor(msg) }}</div>
+              <div class="quote-bubble__text">{{ quoteBubbleText(msg) }}</div>
+            </button>
             <!-- Bubble + hover reaction trigger -->
-            <div class="bubble-wrapper" :class="msg.senderType === 'self' ? 'bubble-wrapper--self' : 'bubble-wrapper--contact'">
+            <div
+              class="bubble-wrapper"
+              :class="[
+                msg.senderType === 'self' ? 'bubble-wrapper--self' : 'bubble-wrapper--contact',
+                { 'bubble-wrapper--highlight': highlightedMessageIds.has(msg.id) },
+              ]"
+            >
               <div class="message-bubble pa-2 px-3 rounded-lg" :class="msg.senderType === 'self' ? 'bg-primary text-white' : 'bg-white'" style="word-wrap: break-word;">
                 <!-- Deleted -->
                 <div v-if="msg.isDeleted" class="text-decoration-line-through font-italic" style="opacity: 0.6;">
@@ -302,6 +352,19 @@
                 class="reaction-trigger"
                 :class="msg.senderType === 'self' ? 'reaction-trigger--self' : 'reaction-trigger--contact'"
               >
+                <!-- Feature 0031 — hover Reply action. Lives alongside the
+                     existing reaction trigger so the two affordances share
+                     the same visibility lifecycle (fade in on row hover). -->
+                <button
+                  type="button"
+                  class="reaction-trigger-btn reply-trigger-btn"
+                  :aria-label="'Trả lời tin nhắn'"
+                  title="Trả lời"
+                  data-testid="reply-action"
+                  @click.stop="onReplyClick(msg)"
+                >
+                  <v-icon size="16">mdi-reply</v-icon>
+                </button>
                 <button
                   type="button"
                   class="reaction-trigger-btn"
@@ -354,6 +417,31 @@
             Tạo
           </v-btn>
         </v-chip>
+      </div>
+
+      <!-- Feature 0031 — composer reply preview banner. Renders just above
+           the input when `replyingTo` is set. Click ✕ → emits reply-clear so
+           the parent (use-chat) clears the target without sending. -->
+      <div v-if="replyingTo" class="pa-2 pb-0" data-testid="reply-banner">
+        <v-card variant="outlined" class="reply-banner pa-2 d-flex align-center">
+          <v-icon size="18" color="primary" class="mr-2">mdi-reply</v-icon>
+          <div class="flex-grow-1" style="min-width: 0;">
+            <div class="text-caption text-primary font-weight-medium">
+              Trả lời {{ replyBannerAuthor }}
+            </div>
+            <div class="text-body-2 text-truncate reply-banner__preview">
+              {{ replyBannerPreview || '[Tin nhắn]' }}
+            </div>
+          </div>
+          <v-btn
+            icon size="x-small" variant="text"
+            data-testid="reply-banner-clear"
+            :title="'Bỏ trả lời'"
+            @click="onCancelReply"
+          >
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card>
       </div>
 
       <!-- Pending attachment preview -->
@@ -452,7 +540,7 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, computed, onMounted, onBeforeUnmount } from 'vue';
-import type { Conversation, Message } from '@/composables/use-chat';
+import type { Conversation, Message, ReplyToMessageProjection } from '@/composables/use-chat';
 import {
   useQuickReplies,
   substitutePlaceholders,
@@ -510,6 +598,13 @@ const props = defineProps<{
    * and renders raw uid fallback for any @<uid> tokens in messages.
    */
   groupMembers?: GroupMember[];
+  /**
+   * Feature 0031 — currently-replied-to message (composer banner + outgoing
+   * `replyToMessageId`). Owned by use-chat in the parent; MessageThread
+   * surfaces UI for setting/clearing and emits events; v-model-style two-way
+   * binding is unnecessary because the parent already owns the ref.
+   */
+  replyingTo?: Message | null;
 }>();
 
 const emit = defineEmits<{
@@ -523,6 +618,10 @@ const emit = defineEmits<{
   'create-contact-from-zalo': [payload: CreateContactPayload];
   /** Feature 0030 — user clicked "Xem trong CRM" inside the popover. */
   'open-contact': [contactId: string];
+  /** Feature 0031 — user clicked "Reply" on a message hover action. */
+  'reply-set': [message: Message];
+  /** Feature 0031 — user clicked the ✕ on the composer reply preview banner. */
+  'reply-clear': [];
 }>();
 
 // ── Feature 0030 — Zalo user info popover state ─────────────────────────────
@@ -922,12 +1021,206 @@ function parseDisplayContent(content: string | null): string {
   if (!content.startsWith('{')) return content;
   try {
     const p = JSON.parse(content);
+    // Feature 0031 — inbound quote fallback (BR-0006). The handler embeds
+    // the user's original text under `text` and stows the quote metadata in
+    // `quotedMeta`. Render just the text part — the quote bubble draws the
+    // metadata separately above the bubble.
+    if (typeof p.text === 'string' && p.quotedMeta) return p.text;
     if (p.title && p.href) return `🔗 ${p.title}`;
     if (p.title) return p.title;
     if (p.href) return `🔗 ${p.description || p.href}`;
     return content;
   } catch { return content; }
 }
+
+// ── Feature 0031 — reply / quote message helpers ────────────────────────────
+
+/**
+ * Per-message preview text the quote bubble renders. Mirrors the legacy
+ * parseDisplayContent shape so JSON link-card content is rendered as a
+ * `🔗 title` chip instead of dumping raw JSON into the bubble. Media
+ * content types degrade to a fixed marker — "[Hình ảnh]" / "[Tệp]" etc.
+ * Returns "" when nothing renders.
+ */
+function previewForQuote(msg: { content: string | null; contentType: string }): string {
+  if (msg.contentType === 'image') return '[Hình ảnh]';
+  if (msg.contentType === 'file') return '[Tệp đính kèm]';
+  if (msg.contentType === 'sticker') return '[Sticker]';
+  if (msg.contentType === 'video') return '[Video]';
+  if (msg.contentType === 'voice') return '[Tin nhắn thoại]';
+  if (msg.contentType === 'gif') return '[GIF]';
+  if (msg.contentType === 'zinstant') return '[Thông tin Zalo]';
+  return parseDisplayContent(msg.content);
+}
+
+/**
+ * Feature 0031 EC-0006 — inbound quote fallback metadata embedded in
+ * `content`. Returns null when the message either has a proper
+ * `replyToMessage` projection (normal path) or no quote at all. When
+ * present the quote bubble renders the preview but the click handler is a
+ * no-op (no scroll target).
+ */
+interface QuotedMeta {
+  msgId: string;
+  content: string;
+  senderUid: string;
+  ts: number;
+}
+function extractQuotedMeta(msg: Message): QuotedMeta | null {
+  // The eager-loaded projection takes precedence — we never fall back to
+  // the envelope when a real FK is in the row.
+  if (msg.replyToMessage) return null;
+  if (!msg.content || !msg.content.startsWith('{')) return null;
+  try {
+    const p = JSON.parse(msg.content);
+    if (!p.quotedMeta || typeof p.quotedMeta !== 'object') return null;
+    const meta = p.quotedMeta as Record<string, unknown>;
+    return {
+      msgId: String(meta.msgId ?? ''),
+      content: typeof meta.content === 'string' ? meta.content : '',
+      senderUid: String(meta.senderUid ?? ''),
+      ts: typeof meta.ts === 'number' ? meta.ts : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Truthy when this message renders a quote bubble at all — either it has a
+ * server-projected parent OR fallback metadata in content.
+ */
+function hasQuoteBubble(msg: Message): boolean {
+  if (msg.replyToMessage) return true;
+  // FK present but no projection → parent was deleted (SET NULL) → render
+  // the "Tin nhắn không khả dụng" muted fallback per BR-0008.
+  if (msg.replyToMessageId) return true;
+  return extractQuotedMeta(msg) !== null;
+}
+
+/**
+ * Render-time text for the quote bubble. Priority order:
+ *   1. Server projection (replyToMessage) — full preview.
+ *   2. quotedMeta in content (inbound out-of-DB ref).
+ *   3. FK but no projection → "Tin nhắn không khả dụng" muted fallback.
+ */
+function quoteBubbleText(msg: Message): string {
+  if (msg.replyToMessage) {
+    return previewForQuote(msg.replyToMessage);
+  }
+  const meta = extractQuotedMeta(msg);
+  if (meta) return meta.content || '[Tin nhắn]';
+  return 'Tin nhắn không khả dụng';
+}
+
+function quoteBubbleAuthor(msg: Message): string {
+  if (msg.replyToMessage) {
+    if (msg.replyToMessage.senderType === 'self') return 'Bạn';
+    return msg.replyToMessage.senderName || 'Khách hàng';
+  }
+  // Out-of-DB metadata has no resolved name; the FE only has the Zalo uid
+  // — show a generic label rather than a meaningless string.
+  if (extractQuotedMeta(msg)) return 'Tin nhắn cũ';
+  return '';
+}
+
+/** True when clicking the quote bubble should scroll to the source. */
+function quoteScrollable(msg: Message): boolean {
+  return msg.replyToMessage !== null && msg.replyToMessage !== undefined;
+}
+
+// Set of message ids currently flashing the highlight class. Cleared 1s
+// after each scroll-to. Using a Set so we can highlight a different source
+// concurrently if the user spams clicks without races.
+const highlightedMessageIds = ref<Set<string>>(new Set());
+
+/**
+ * Scroll to a parent message in the thread. Adds a 1-second highlight class
+ * to draw the eye. No-op when the target isn't in the visible window (long
+ * threads past the virtualization threshold may not have the row mounted).
+ */
+async function scrollToMessage(targetId: string): Promise<void> {
+  await nextTick();
+  const container = messagesContainer.value;
+  if (!container) return;
+  // Target the bubble wrapper by data attribute; both render paths set it.
+  const target = container.querySelector<HTMLElement>(
+    `[data-message-id="${cssEscape(targetId)}"]`,
+  );
+  if (!target) {
+    // Virtualized path — try scrolling via scrollToIndex first. The user
+    // may need to click again once the row is mounted (acceptable UX).
+    if (useVirtual.value && virtualScrollRef.value) {
+      const idx = props.messages.findIndex((m) => m.id === targetId);
+      if (idx >= 0) virtualScrollRef.value.scrollToIndex(idx);
+    }
+    return;
+  }
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // Highlight ring for 1 second.
+  const next = new Set(highlightedMessageIds.value);
+  next.add(targetId);
+  highlightedMessageIds.value = next;
+  setTimeout(() => {
+    const after = new Set(highlightedMessageIds.value);
+    after.delete(targetId);
+    highlightedMessageIds.value = after;
+  }, 1000);
+}
+
+/** Small wrapper around CSS.escape for older test envs that lack it. */
+function cssEscape(value: string): string {
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+    return CSS.escape(value);
+  }
+  // Conservative fallback — escape ASCII non-alphanum.
+  return value.replace(/[^a-zA-Z0-9_-]/g, (c) => `\\${c}`);
+}
+
+/** Quote bubble click handler — scrolls to the source when possible. */
+function onQuoteClick(msg: Message): void {
+  if (!quoteScrollable(msg)) return;
+  const target = msg.replyToMessage?.id;
+  if (!target) return;
+  void scrollToMessage(target);
+}
+
+/** Hover Reply action — emit to parent which sets `replyingTo` in use-chat. */
+function onReplyClick(msg: Message): void {
+  if (msg.isDeleted) return;
+  emit('reply-set', msg);
+}
+
+function onCancelReply(): void {
+  emit('reply-clear');
+}
+
+/**
+ * Header / preview text rendered inside the composer reply banner. Mirrors
+ * the in-thread quote bubble's preview rules so the banner and the resulting
+ * message look the same.
+ */
+const replyBannerPreview = computed<string>(() => {
+  const target = props.replyingTo;
+  if (!target) return '';
+  return previewForQuote({
+    content: target.content,
+    contentType: target.contentType,
+  });
+});
+
+const replyBannerAuthor = computed<string>(() => {
+  const target = props.replyingTo;
+  if (!target) return '';
+  if (target.senderType === 'self') return 'Bạn';
+  return target.senderName || 'Khách hàng';
+});
+
+/** Projection passed down to nested QuoteBubble renders (DRY across paths). */
+function projectedReplyTo(msg: Message): ReplyToMessageProjection | null {
+  return msg.replyToMessage ?? null;
+}
+void projectedReplyTo; // keep referenced for future render-pure helpers
 
 // ── Feature 0026 — mention chip render ───────────────────────────────────
 /**
@@ -1328,5 +1621,92 @@ function emitAppointmentSuggest() {
 .bg-primary .mention-chip--unknown {
   background: rgba(255, 255, 255, 0.15);
   color: rgba(255, 255, 255, 0.75);
+}
+
+/* ── Feature 0031 — reply / quote bubble + composer banner ───────────────── */
+.quote-bubble {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  border-left: 3px solid rgb(var(--v-theme-primary));
+  border-radius: 6px;
+  background: rgba(0, 242, 255, 0.08);
+  color: inherit;
+  cursor: default;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.quote-bubble--scrollable {
+  cursor: pointer;
+}
+.quote-bubble--scrollable:hover {
+  background: rgba(0, 242, 255, 0.16);
+}
+.quote-bubble--unavailable {
+  border-left-color: rgba(0, 0, 0, 0.18);
+  background: rgba(0, 0, 0, 0.04);
+  font-style: italic;
+  opacity: 0.75;
+}
+.quote-bubble--self {
+  /* Self-side replies render above the primary bubble — keep tint subtle so
+     it doesn't compete visually with the coloured bubble below. */
+  margin-left: auto;
+}
+.quote-bubble__author {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgb(var(--v-theme-primary));
+  margin-bottom: 2px;
+}
+.quote-bubble--unavailable .quote-bubble__author {
+  color: rgba(0, 0, 0, 0.55);
+}
+.quote-bubble__text {
+  font-size: 0.8rem;
+  color: rgba(0, 0, 0, 0.7);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Clamp to two lines so very long previews don't take over the layout. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  word-break: break-word;
+}
+
+/* Reply hover action — visually distinct from the reaction trigger so the
+   two buttons don't read as the same affordance. */
+.reply-trigger-btn {
+  margin-right: 4px;
+}
+
+/* 1-second highlight applied to the bubble wrapper after the user clicks a
+   quote bubble and we scrollIntoView'd the source. Honors reduced-motion. */
+.bubble-wrapper--highlight .message-bubble {
+  animation: reply-flash 1s ease-out;
+  box-shadow: 0 0 0 3px rgba(0, 242, 255, 0.55);
+}
+@keyframes reply-flash {
+  0%   { box-shadow: 0 0 0 3px rgba(0, 242, 255, 0.85); }
+  100% { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bubble-wrapper--highlight .message-bubble {
+    animation: none;
+  }
+}
+
+/* Composer reply preview banner — sits between the chip row and the input. */
+.reply-banner {
+  border-left: 3px solid rgb(var(--v-theme-primary));
+  background: rgba(0, 242, 255, 0.06);
+}
+.reply-banner__preview {
+  max-width: 100%;
+  color: rgba(0, 0, 0, 0.7);
 }
 </style>

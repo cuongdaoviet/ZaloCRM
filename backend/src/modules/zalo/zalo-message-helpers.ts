@@ -3,7 +3,11 @@
  * Detects content type from msgType and updates contact avatars fire-and-forget.
  */
 import { prisma } from '../../shared/database/prisma-client.js';
-import { handleIncomingMessage, type HandleMessageResult } from '../chat/message-handler.js';
+import {
+  handleIncomingMessage,
+  type HandleMessageResult,
+  type IncomingQuoteRef,
+} from '../chat/message-handler.js';
 
 /**
  * Shared cache entry for user-info lookups.
@@ -123,6 +127,11 @@ export async function processZaloMessage(opts: {
     typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent || '');
   const contentType = detectContentType(message.data?.msgType, rawContent);
 
+  // Feature 0031 — zca-js delivers reply/quote refs under either
+  // `data.quote` or `data.quoted`. The shape varies slightly across versions;
+  // extractQuoteRef tolerates both and returns null when no ref is present.
+  const quoteRef = extractQuoteRef(message.data);
+
   return handleIncomingMessage({
     accountId,
     senderUid,
@@ -138,7 +147,56 @@ export async function processZaloMessage(opts: {
     attachments: [],
     // Feature 0034 — propagated through to upsertContact for BR-0002.
     senderGlobalId,
+    // Feature 0031 — propagated through to the FK resolution in
+    // handleIncomingMessage (BR-0006 / BR-0008 fallback).
+    quoteRef,
   });
+}
+
+/**
+ * Feature 0031 — pull a quote ref out of a zca-js message payload. We accept
+ * both `data.quote` and `data.quoted` (zca-js versions disagree). The shape
+ * we look for is roughly:
+ *   { msgId | globalMsgId, content | msg, senderId | uidFrom, ts }
+ *
+ * Returns null when no usable ref is found; we don't want a partial ref (no
+ * msgId) to short-circuit the FK lookup downstream.
+ */
+export function extractQuoteRef(data: unknown): IncomingQuoteRef | null {
+  if (!data || typeof data !== 'object') return null;
+  const root = data as Record<string, unknown>;
+  const raw =
+    (root.quote as Record<string, unknown> | undefined) ||
+    (root.quoted as Record<string, unknown> | undefined) ||
+    null;
+  if (!raw || typeof raw !== 'object') return null;
+
+  // zca-js variants: `msgId`, `globalMsgId`, `cliMsgId`. Prefer the
+  // platform-wide msgId which is what our DB uses for dedupe.
+  const msgIdRaw =
+    raw.msgId ?? raw.globalMsgId ?? raw.cliMsgId ?? raw.msg_id ?? null;
+  if (msgIdRaw == null || String(msgIdRaw).trim() === '') return null;
+
+  // `content` may be a string OR an object (image/file envelopes). Stringify
+  // objects so the downstream FE can JSON.parse if it cares about media.
+  const rawContent = raw.content ?? raw.msg ?? raw.message ?? '';
+  const content =
+    typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent ?? '');
+
+  const senderUid = String(raw.senderId ?? raw.uidFrom ?? raw.fromUid ?? '');
+
+  // `ts` may be a number or a numeric string; coerce to number, default to 0
+  // when malformed.
+  const tsRaw = raw.ts ?? raw.cliMsgId ?? null;
+  const tsParsed = typeof tsRaw === 'number' ? tsRaw : parseInt(String(tsRaw ?? '0'));
+  const ts = Number.isFinite(tsParsed) ? tsParsed : 0;
+
+  return {
+    msgId: String(msgIdRaw),
+    content,
+    senderUid,
+    ts,
+  };
 }
 
 /**
