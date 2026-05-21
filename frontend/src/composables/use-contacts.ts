@@ -37,6 +37,16 @@ export interface Contact {
   assignedUser?: { fullName: string } | null;
   createdAt?: string;
   firstContactDate?: string | null;
+  // Feature 0040 — Lead scoring. Both fields are populated on every
+  // GET /contacts response item by the backend; on stale shapes they
+  // default to 0/empty in the UI helpers.
+  leadScore?: number;
+  leadScoreBreakdown?: {
+    recency: number;
+    engagement: number;
+    status: number;
+    appointment: number;
+  };
 }
 
 export interface ContactFilters {
