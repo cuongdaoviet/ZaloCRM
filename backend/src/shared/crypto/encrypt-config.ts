@@ -152,6 +152,20 @@ export function maskApiKey(key: string): string {
   return `${prefix}***${tail}`;
 }
 
+/**
+ * Feature 0038 — alias of `maskApiKey` for non-API-key secrets (Telegram bot
+ * tokens, OAuth refresh tokens). Same masking strategy applies: keep enough
+ * prefix to correlate, scrub the middle, keep last 4 chars.
+ *
+ *   1234567890:ABCDEF…xyz → 123456***xyz
+ *   undefined / empty     → <empty>
+ *   short (≤ 8 chars)     → ***
+ */
+export function maskSecret(secret: string | null | undefined): string {
+  if (secret === undefined || secret === null || secret === '') return '<empty>';
+  return maskApiKey(secret);
+}
+
 // ─── Feature 0038 — Integration Hub config encryption shims ──────────────────
 // Same primitive (AES-256-GCM via HKDF-derived per-org key), but with the
 // `{configCipher,configIv,configTag}` field naming the `Integration` model uses
