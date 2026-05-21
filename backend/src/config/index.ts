@@ -27,6 +27,16 @@ export const config = {
   s3SecretKey: process.env.S3_SECRET_KEY || 'minioadmin',
   s3Region: process.env.S3_REGION || 'us-east-1',
 
+  // Feature 0032 — outbound attachment storage policy.
+  //   - `true` (default): upload to MinIO first; on MinIO failure return
+  //     502 `storage_failed` (Feature 0027 BR-0005 — never persist with a
+  //     Zalo CDN URL we couldn't mirror).
+  //   - `false`: env explicitly opts out of MinIO. Outbound attachments
+  //     skip the mirror and go straight to the Zalo CDN fallback path
+  //     (uploadAttachment first → validate hdUrl → sendMessage).
+  // Set `MINIO_ENABLED=false` for deployments without MinIO/S3 wired in.
+  minioEnabled: process.env.MINIO_ENABLED !== 'false',
+
   // Feature 0033 — friend aggregates.
   // Window (in days) used by /api/v1/friends/stats to decide whether a friend
   // counts as "actively chatting" (i.e. has an inbound message in the window).
