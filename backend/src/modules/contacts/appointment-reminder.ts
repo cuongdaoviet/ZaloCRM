@@ -7,6 +7,7 @@ import cron from 'node-cron';
 import type { Server } from 'socket.io';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
+import { emitWebhook } from '../api/webhook-service.js';
 
 export function startAppointmentReminder(io: Server): void {
   // 01:00 UTC = 08:00 Vietnam time (UTC+7)
@@ -26,7 +27,7 @@ export function startAppointmentReminder(io: Server): void {
           reminderSent: false,
         },
         include: {
-          contact: { select: { fullName: true, phone: true } },
+          contact: { select: { orgId: true, fullName: true, phone: true } },
           assignedUser: { select: { id: true, fullName: true } },
         },
       });
@@ -41,6 +42,17 @@ export function startAppointmentReminder(io: Server): void {
           type: apt.type,
           assignedUserId: apt.assignedUserId,
           assignedUserName: apt.assignedUser?.fullName,
+        });
+
+        // Feature 0038 — tee reminder into Integration Hub so Telegram bots
+        // subscribed to `appointment.reminder` push the alert to ops chat.
+        void emitWebhook(apt.contact.orgId, 'appointment.reminder', {
+          appointmentId: apt.id,
+          contactName: apt.contact.fullName,
+          contactPhone: apt.contact.phone,
+          time: apt.appointmentTime ?? apt.appointmentDate.toISOString(),
+          appointmentDate: apt.appointmentDate.toISOString(),
+          assignedUserName: apt.assignedUser?.fullName ?? null,
         });
 
         await prisma.appointment.update({

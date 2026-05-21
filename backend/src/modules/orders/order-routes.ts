@@ -5,6 +5,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { authMiddleware } from '../auth/auth-middleware.js';
+import { emitWebhook } from '../api/webhook-service.js';
 import { randomUUID } from 'node:crypto';
 
 export async function orderRoutes(app: FastifyInstance) {
@@ -79,6 +80,19 @@ export async function orderRoutes(app: FastifyInstance) {
         contact: { select: { id: true, fullName: true, phone: true } },
         createdBy: { select: { id: true, fullName: true } },
       },
+    });
+
+    // Feature 0038 — fire-and-forget so Telegram integrations get notified.
+    // `emitWebhook` tees into the Integration Hub even when no generic
+    // webhook URL is configured, so this is the production wiring for
+    // BR-0012 (`order.created`).
+    void emitWebhook(user.orgId, 'order.created', {
+      id: order.id,
+      orderNumber: order.orderCode,
+      amount: Number(order.totalAmount),
+      fullName: order.contact?.fullName ?? null,
+      contactId: order.contactId,
+      status: order.status,
     });
 
     return order;
