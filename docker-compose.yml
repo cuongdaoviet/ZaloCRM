@@ -102,7 +102,10 @@ services:
     ports:
       - "8080:8080"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      # 127.0.0.1 not 'localhost': in nginx:alpine, /etc/hosts maps localhost
+      # to ::1 first, but nginx listens IPv4-only on 0.0.0.0:8080 → IPv6
+      # lookup gets ECONNREFUSED. Force IPv4 explicitly.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
