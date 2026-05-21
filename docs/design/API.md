@@ -20,6 +20,34 @@ inside the app.
 - **Pagination:** standard envelope `{ <items>, total, page, limit, totalPages }`
   where `page` is 1-indexed.
 
+## Feature index
+
+- [0012 — Activity log](#feature-0012--activity-log)
+- [0013 — Customer 360 overview](#feature-0013--customer-360-overview)
+- [0014 — Webhook debug](#feature-0014--webhook-debug)
+- [0015 — Pinned conversations](#feature-0015--pinned-conversations)
+- [0016 — User preferences](#feature-0016--user-preferences)
+- [0017 — Appointment parser](#feature-0017--appointment-parser)
+- [0018 — Duplicate detection + merge](#feature-0018--duplicate-detection--merge)
+- [0019 — CRM tags (Phase A)](#feature-0019--crm-tags-phase-a) ·
+  [Phase C](#feature-0019--crm-tags-phase-c-drop-legacy-column)
+- [0020 — Friendship lifecycle](#feature-0020--friendship-lifecycle)
+- [0021 — Message reactions](#feature-0021--message-reactions)
+- [0022 — Conversation filters](#feature-0022--conversation-filters)
+- [0023 — Hide / archive conversations (Tab "Khác")](#feature-0023--hide--archive-conversations-tab-khác)
+- [0026 — Mention rendering](#feature-0026--mention-rendering) *(2026-05)*
+- [0027 — MinIO/S3 attachment mirror](#feature-0027--minios3-attachment-mirror)
+- [0028 — Sticker support](#feature-0028--sticker-support) *(2026-05)*
+- [0030 — Zalo user info popup](#feature-0030--zalo-user-info-popup) *(2026-05)*
+- [0033 — Friend aggregates](#feature-0033--friend-aggregates) *(2026-05)*
+- [0035 — Per-account proxy + 0044 — Master-key rotation](#feature-0035--per-account-proxy--0044--master-key-rotation) *(2026-05)*
+- [0036 — AI reply suggestions](#feature-0036--ai-reply-suggestions) *(2026-05)*
+- [0037 — Workflow engine](#feature-0037--workflow-engine) *(2026-05)*
+- [0038 — Integration Hub](#feature-0038--integration-hub) *(2026-05)*
+- [0040 — Lead scoring](#feature-0040--lead-scoring) *(2026-05)*
+- [0041 — Advanced analytics](#feature-0041--advanced-analytics) *(2026-05)*
+- [0042 — UI refactor (Friends grid backend)](#feature-0042--ui-refactor-friends-grid-backend) *(2026-05)*
+
 ---
 
 ## Feature 0012 — Activity log
@@ -1535,3 +1563,1287 @@ Backend reads six env vars (`backend/src/config/index.ts`):
 anonymous-download policy. Backend calls `ensureBucket()` at startup
 and refuses to start if it fails — failing loud is better than
 silently accepting uploads that vanish (EC-0001).
+
+---
+
+## Feature 0026 — Mention rendering
+
+Backend endpoint that powers the `@mention` chip rendering and composer
+auto-complete inside group conversations. See
+[features/0026-mention-rendering/SPEC.md](../features/0026-mention-rendering/SPEC.md).
+
+### GET `/api/v1/conversations/:id/members`
+
+List the members of a group conversation so the FE can render
+`@<uid>` chips and feed the composer's auto-complete picker.
+
+**Path params:** `id` — conversation UUID.
+
+**Permission:** `requireZaloAccess('chat')` — owner/admin bypass;
+members need `chat` or `admin` on the underlying Zalo account.
+
+**Response 200:**
+
+```json
+{
+  "members": [
+    { "uid": "2347234782", "displayName": "Lan Anh", "avatarUrl": "https://..." },
+    { "uid": "9988776655", "displayName": "Minh",    "avatarUrl": "" }
+  ]
+}
+```
+
+`avatarUrl` may be an empty string when the Zalo profile has no avatar.
+
+**Behaviour:**
+
+- Source of truth is `api.getGroupInfo(<externalThreadId>)` from
+  zca-js. The first call hits Zalo; subsequent calls within 5 minutes
+  are served from an in-process Map keyed by `conversationId`
+  (SPEC §3 BR-0009).
+- **BR-0010 graceful degradation** — when the underlying Zalo
+  account is offline (no `instance.api`) the endpoint still returns
+  `200` with `members: []` so the UI can disable auto-complete
+  without showing an error toast.
+- Same shape is returned if `api.getGroupInfo` throws (privacy or
+  network error) — the FE simply works without auto-complete.
+
+**Errors:**
+
+| Status | When |
+|---|---|
+| 400 | Conversation is not a group — `{ "error": "not_a_group" }` (BR-0003 of SPEC §3). |
+| 403 | Caller lacks `chat` ACL on the Zalo account. |
+| 404 | Cross-org or unknown conversation id — `{ "error": "Conversation not found" }`. |
+
+---
+
+## Feature 0028 — Sticker support
+
+Sticker send + render. The backend proxies zca-js's sticker APIs so
+the FE never has to talk to Zalo CDN directly (CORS-safe). See
+[features/0028-sticker-support/SPEC.md](../features/0028-sticker-support/SPEC.md).
+
+### POST `/api/v1/conversations/:id/stickers`
+
+Send a sticker into a conversation. The handler persists a
+`Message` row with `contentType='sticker'` and `content` set to a
+JSON envelope `{ stickerId, catId, type, cdnUrl }`, then emits the
+usual `chat:message` Socket.IO event.
+
+**Path params:** `id` — conversation UUID.
+
+**Permission:** `requireZaloAccess('chat')` — owner/admin bypass;
+members need `chat` or `admin` on the Zalo account.
+
+**Body:**
+
+```json
+{ "stickerId": 2125, "catId": 50, "type": 1, "cdnUrl": "https://..." }
+```
+
+`cdnUrl` is optional — when omitted the backend looks it up via
+`api.getStickersDetail` so the persisted Message carries a renderable
+URL (BR-0003 of SPEC §3).
+
+**Validation errors (400):**
+
+- `{ "error": "stickerId, catId, type là bắt buộc", "code": "invalid_body" }`
+  — any of the three IDs is missing or not a finite number.
+
+**Other errors:**
+
+| Status | `code` | When |
+|---|---|---|
+| 400 | _(none)_ | Zalo account not connected for that conversation. |
+| 404 | _(none)_ | Cross-org or unknown conversation id. |
+| 429 | _(none)_ | Per-account send rate limit hit (existing `zaloRateLimiter`). |
+| 502 | `sticker_unsupported` | The pooled zca-js instance has no `sendSticker()` method. |
+| 502 | `zalo_send_failed` | zca-js `sendSticker` threw — no Message persisted. |
+
+**Response 200:** the freshly-persisted `Message` row plus the
+sticker envelope. Frontend renders by reading
+`JSON.parse(message.content)`.
+
+```json
+{
+  "messageId": "uuid",
+  "sticker": { "stickerId": 2125, "catId": 50, "type": 1, "cdnUrl": "https://..." }
+}
+```
+
+Side effect: emits Socket.IO `chat:message` with the Message row
+(payload identical to `POST /messages`).
+
+### GET `/api/v1/zalo/stickers/:stickerId`
+
+Resolve a sticker id to its CDN URL via zca-js
+`api.getStickersDetail([stickerId])`. Used by the FE when the
+incoming sticker message lacks an embedded `cdnUrl` (e.g. legacy
+inbound rows persisted before this feature).
+
+**Path params:** `stickerId` — numeric Zalo sticker id.
+
+**Query params:**
+
+| Name | Type | Required | Notes |
+|---|---|---|---|
+| `accountId` | UUID | yes | Which Zalo account to call the SDK on. |
+| `catId` | number | no | Category hint; falls back to the value returned by the SDK. |
+
+**Permission:** caller must be owner/admin OR have a
+`ZaloAccountAccess` row with `chat`/`admin` on `accountId`. The
+endpoint resolves the ACL inline (mirrors `requireZaloAccess('chat')`
+but reads `accountId` from the query string instead of params).
+
+**Validation errors (400):**
+
+- `{ "error": "stickerId không hợp lệ" }` — non-numeric path param.
+- `{ "error": "accountId là bắt buộc", "code": "missing_account" }` — missing query.
+
+**Other errors:**
+
+| Status | `code` | When |
+|---|---|---|
+| 403 | _(none)_ | Caller lacks `chat` access on the account — `{ "error": "Không có quyền truy cập tài khoản Zalo này" }`. |
+| 404 | _(none)_ | Cross-org or unknown `accountId`. |
+| 503 | `account_offline` | Zalo account not connected. |
+| 502 | `sticker_lookup_failed` | zca-js returned no entry for that stickerId. |
+
+**Response 200:**
+
+```json
+{
+  "stickerId": 2125,
+  "catId": 50,
+  "type": 1,
+  "cdnUrl": "https://zalocdn/.../2125.png",
+  "animationType": "static"
+}
+```
+
+Entries are cached in-process for 24h (BR-0008) — repeated FE calls
+for the same `stickerId` don't re-hit zca-js.
+
+### GET `/api/v1/zalo/sticker-catalogues`
+
+Return the sticker pack list used by the `StickerPicker` component.
+
+**Query params:**
+
+| Name | Type | Required | Notes |
+|---|---|---|---|
+| `accountId` | UUID | yes | Same ACL pattern as the detail endpoint. |
+
+**Permission:** same as `GET /stickers/:stickerId` — `chat` or
+higher on the account.
+
+**Response 200:**
+
+```json
+{
+  "catalogues": [
+    {
+      "id": "default",
+      "name": "Default",
+      "stickers": [
+        { "stickerId": 2125, "catId": 50, "type": 1, "cdnUrl": "https://..." }
+      ]
+    }
+  ]
+}
+```
+
+Phase 1 returns a hardcoded default catalogue (BR-0009) — Phase 2
+will hit Zalo's real catalogue API.
+
+---
+
+## Feature 0030 — Zalo user info popup
+
+One-shot lookup that backs the avatar-hover popover. Crosses Zalo
+identity data (`api.getUserInfo`) with the org's `Contact` table so
+the FE can show "Tạo Contact" or "Xem trong CRM". See
+[features/0030-zalo-user-popup/SPEC.md](../features/0030-zalo-user-popup/SPEC.md).
+
+### GET `/api/v1/zalo/users/:uid`
+
+**Path params:** `uid` — numeric Zalo uid.
+
+**Query params:**
+
+| Name | Type | Required | Notes |
+|---|---|---|---|
+| `accountId` | UUID | yes | Which Zalo account to call `getUserInfo` on. |
+
+**Permission:** owner/admin bypass; member must have `chat` or
+`admin` on `accountId`. The middleware is inlined because
+`requireZaloAccess` reads `accountId` from path params, not query.
+
+**Validation errors (400):**
+
+- `{ "error": "missing_account_id" }` — `accountId` not provided.
+- `{ "error": "invalid_uid" }` — `uid` is empty or not all digits.
+
+**Other errors:**
+
+| Status | When |
+|---|---|
+| 403 | Member without `chat` access on `accountId` — `{ "error": "Không có quyền truy cập tài khoản Zalo này" }` (or `"Không đủ quyền"` for `read`-only). |
+| 404 | Cross-org or unknown `accountId` — `{ "error": "Account not found" }`. |
+
+**Response 200:**
+
+```json
+{
+  "uid": "2347234782",
+  "displayName": "Lan Anh",
+  "avatarUrl": "https://...",
+  "gender": "female",
+  "phone": "0901234567",
+  "contactId": "uuid | null",
+  "online": true,
+  "cached": false
+}
+```
+
+- `contactId` is the org's `Contact.id` if a row with this `zaloUid`
+  exists, else `null` — drives the popover's "Tạo Contact" vs "Xem
+  trong CRM" CTA (BR-0007 in SPEC §3).
+- `online` is `false` when the underlying Zalo account isn't
+  connected; the payload either echoes a cached entry or returns a
+  `displayName: "Unknown"` stub (EC-0003).
+- `cached: true` when the value came from the in-process 10-minute
+  cache. Cache key is `${accountId}:${uid}`.
+
+**Degraded responses (still 200):**
+
+- zca-js throws (privacy, network) → `displayName: "Unknown"`,
+  empty avatar/gender/phone, `online: true` (EC-0001 in SPEC §5).
+  The FE still renders a useful popover.
+- Account offline → see above.
+
+---
+
+## Feature 0033 — Friend aggregates
+
+Read-only aggregate of the org's Zalo friend list, used by the
+dashboard's "Friend stats" widget and the unified Friends grid (which
+also feeds Feature 0042's left-rail counter). See
+[features/0033-friend-aggregates/SPEC.md](../features/0033-friend-aggregates/SPEC.md).
+
+### GET `/api/v1/friends/stats`
+
+Per-Zalo-account aggregate plus org-wide totals.
+
+**Permission:** any authenticated user. Owner/admin sees every
+`ZaloAccount` in the org; members are restricted to accounts they
+have a `ZaloAccountAccess` row for.
+
+**Response 200:**
+
+```json
+{
+  "byAccount": [
+    {
+      "zaloAccountId": "uuid",
+      "displayName": "Sale account #1",
+      "acceptedNicksCount": 142,
+      "chattingNicksCount": 38
+    }
+  ],
+  "totals": {
+    "acceptedNicksCount": 142,
+    "chattingNicksCount": 38
+  },
+  "windowDays": 7
+}
+```
+
+- `acceptedNicksCount` — total friends on the account.
+- `chattingNicksCount` — friends with at least one inbound message
+  within `windowDays` (configurable; default 7).
+- `windowDays` — comes from `config.friendChatWindowDays`.
+
+**Caching:** 60-second in-memory cache keyed by `(orgId, userId)`
+(BR-0007). Friend rows and message activity drift slowly enough that
+brief staleness beats re-aggregating on every dashboard reload.
+
+**Errors:** none in normal operation — an empty org returns
+`{ byAccount: [], totals: { 0, 0 }, windowDays }`.
+
+---
+
+## Feature 0035 — Per-account proxy + 0044 — Master-key rotation
+
+Allows owners/admins to route each `ZaloAccount` through a different
+HTTP(S)/SOCKS5 proxy and rotates the master encryption key that
+protects sensitive at-rest data (proxy URLs, AI API keys, integration
+configs). See
+[features/0035-per-account-proxy/SPEC.md](../features/0035-per-account-proxy/SPEC.md)
+and
+[features/0044-master-key-rotation/SPEC.md](../features/0044-master-key-rotation/SPEC.md).
+
+### PUT `/api/v1/zalo-accounts/:id` — Cycle 2026-05 additions
+
+Existing endpoint (Owner/Admin only) is extended with `proxyUrl` and
+the response gains a `requiresReconnect` flag.
+
+**New body fields:**
+
+| Field | Type | Notes |
+|---|---|---|
+| `proxyUrl` | string \| null | Proxy URL or `null`/empty string to clear. |
+| `displayName` | string \| null | Existing field — empty string treated as `null`. |
+
+**Accepted proxy schemes** (BR-0002 of SPEC §3):
+
+- `http://[user:pass@]host:port`
+- `https://[user:pass@]host:port`
+- `socks5://[user:pass@]host:port`
+- `socks://...` — normalised to `socks5://` before persisting.
+
+Trailing `/` is stripped. Empty string or `null` clears the proxy.
+
+**Validation errors (400):**
+
+- `{ "error": "Định dạng proxy không hợp lệ", "code": "invalid_proxy_format" }`
+  — scheme not in the allow-list or URL fails Zod's `.url()` check
+  (BR-0003).
+
+**Permission:** `requireRole('owner', 'admin')`. Members hitting
+the endpoint receive `403` from the role middleware before they ever
+see the body.
+
+**Response 200:**
+
+```json
+{
+  "id": "uuid",
+  "status": "connected",
+  "displayName": "Sale account #1",
+  "proxyUrl": "socks5://user:pass@10.0.0.1:1080",
+  "liveStatus": "connected",
+  "requiresReconnect": true
+}
+```
+
+- `requiresReconnect: true` when the new `proxyUrl` differs from the
+  previous value AND `zaloPool.getStatus(id)` is `connected`
+  (BR-0007). The FE prompts the admin to reconnect manually — the
+  backend never auto-reconnects, to avoid race conditions.
+- `proxyUrl` reflects the **post-update** plaintext value (decrypted
+  in-process before serialising). It is never logged in full — see
+  `maskProxyUrl()` for the redacted form (`socks5://***@host:port`,
+  BR-0010).
+
+**At-rest encryption (Feature 0044):** `proxyUrl` is stored as a
+triplet (`proxyUrlCipher`, `proxyUrlIv`, `proxyUrlTag`) using
+AES-256-GCM keyed by the org's derived key. The plaintext is only
+materialised in memory while serving GET/PUT. If decryption fails
+(typically post-rotation with a stale row) the response treats the
+account as having no proxy and a warn-level log line is emitted.
+
+### GET `/api/v1/zalo-accounts` — Cycle 2026-05 additions
+
+**Field visibility changes** (BR-0005 of Feature 0035 SPEC):
+
+- Owner/admin callers: each account object includes `proxyUrl`
+  (decrypted, or `null` when unset / decryption failed).
+- Non-admin callers: `proxyUrl` is omitted from the row entirely —
+  it never appears in `/conversations` or other non-Settings endpoints
+  either.
+
+Existing fields (`id`, `status`, `displayName`, etc.) are unchanged.
+No new query params.
+
+### Master-key rotation (operator-facing)
+
+Master-key rotation is **not** an HTTP endpoint — it ships as a
+backend CLI (`backend/scripts/0044-rotate-master-key.ts`) and is
+documented separately in the SPEC. The HTTP contract above is the
+**only** observable change for API callers:
+
+- Encrypted columns (`proxyUrlCipher/Iv/Tag`,
+  `AiConfig.apiKeyCipher/Iv/Tag`, `Integration.configCipher/...`)
+  are re-encrypted in-place during rotation.
+- Wire shapes stay identical — the FE never sees ciphertext.
+- A failed decrypt during a GET request returns the row with the
+  affected plaintext field set to `null` rather than 500-ing, so a
+  partially-rotated org never fully breaks.
+
+---
+
+## Feature 0036 — AI reply suggestions
+
+"Bring-your-own-key" reply assistant. The admin configures a
+provider + API key (Anthropic, OpenAI-compatible, Gemini, Ollama).
+Sales staff hit a per-conversation endpoint that returns 3 reply
+drafts. Content is never persisted — only counts and token metrics
+go into `AiSuggestionLog`. See
+[features/0036-ai-reply-suggestions/SPEC.md](../features/0036-ai-reply-suggestions/SPEC.md).
+
+### GET `/api/v1/settings/ai-providers`
+
+Static catalogue used by the Settings dropdown.
+
+**Permission:** any authenticated user.
+
+**Response 200:**
+
+```json
+{
+  "providers": [
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "models": [{ "value": "claude-haiku-4-5", "label": "Claude Haiku 4.5" }],
+      "requiresApiKey": true,
+      "supportsCustomEndpoint": false
+    }
+  ]
+}
+```
+
+### GET `/api/v1/settings/ai-config`
+
+Read the org's current AI config. The API key is **never** echoed
+back — only an `apiKeyConfigured` boolean.
+
+**Permission:** `requireRole('owner', 'admin')`. Member → `403`.
+
+**Response 200** (configured):
+
+```json
+{
+  "id": "uuid",
+  "provider": "anthropic",
+  "apiKeyConfigured": true,
+  "apiKeyHint": "***",
+  "apiEndpoint": null,
+  "model": "claude-haiku-4-5",
+  "systemPrompt": "Bạn là CSKH...",
+  "enabled": true,
+  "maxSuggestionsPerDay": 1000,
+  "updatedAt": "2026-05-15T10:00:00.000Z"
+}
+```
+
+When no row exists yet the endpoint returns the same shape with
+`id: null`, `apiKeyConfigured: false`, sensible defaults, and
+`enabled: false` so the Settings form can render as an empty draft.
+
+### PUT `/api/v1/settings/ai-config`
+
+Upsert config. The handler runs a one-token test request against
+the provider before persisting (BR-0012) — bad keys never reach
+the DB.
+
+**Permission:** owner/admin only.
+
+**Body:**
+
+| Field | Type | Notes |
+|---|---|---|
+| `provider` | string | Must match a known provider id (`anthropic`, `openai`, `gemini`, `ollama`, ...). Default `anthropic`. |
+| `apiKey` | string \| null \| undefined | `string` → encrypt + replace; `null` → clear key + force `enabled=false`; `undefined` → keep existing cipher. |
+| `apiEndpoint` | string \| null | Custom base URL (OpenAI-compat / self-hosted Ollama). `undefined` keeps existing. |
+| `model` | string | Defaults to the provider's first model. |
+| `systemPrompt` | string \| null | Optional system prompt, max **2000** chars. |
+| `enabled` | boolean | Defaults to the existing value, or `false` for new rows. |
+| `maxSuggestionsPerDay` | integer | Org cap. Default `1000`. Range `[1, 1_000_000]`. |
+| `skipTest` | boolean | Internal: skip the test-connect step (used by migrations). |
+
+**Validation errors (400):**
+
+- `{ "error": "Unknown provider: <id>" }`.
+- `{ "error": "Model is required" }`.
+- `{ "error": "maxSuggestionsPerDay must be an integer in [1, 1_000_000]" }`.
+- `{ "error": "systemPrompt must be ≤ 2000 characters" }`.
+- `{ "error": "API key required to enable this provider" }` — caller
+  flipped `enabled: true` on a provider that needs a key without
+  ever supplying one.
+- `{ "error": "Provider test failed: <upstream message>" }` — the
+  one-token test request rejected the key. Key fragments
+  (`sk-...`) are scrubbed before bubbling the message.
+
+**Response 200:** the serialised config (same shape as `GET`),
+including a refreshed `updatedAt`.
+
+### DELETE `/api/v1/settings/ai-config`
+
+Soft-delete — disables AI and clears the encrypted key, but leaves
+the rest of the config row intact so admins can re-enable by adding
+a new key.
+
+**Permission:** owner/admin only.
+
+**Response:** `204 No Content` (also when nothing existed to delete).
+
+### GET `/api/v1/settings/ai-usage`
+
+Aggregated counters from `AiSuggestionLog`. Privacy-safe by
+construction — only counts, tokens, costs, and userIds are stored.
+
+**Permission:** owner/admin only.
+
+**Query params:**
+
+| Name | Type | Notes |
+|---|---|---|
+| `from` | ISO date | Inclusive lower bound on `createdAt`. Optional. |
+| `to` | ISO date | Inclusive upper bound. Optional. |
+
+**Response 200:**
+
+```json
+{
+  "total": 248,
+  "totalTokensIn": 84210,
+  "totalTokensOut": 9120,
+  "totalCost": 0.43,
+  "errorCount": 4,
+  "topUsers":   [{ "userId": "uuid", "count": 87 }],
+  "byProvider": [{ "provider": "anthropic", "count": 248 }]
+}
+```
+
+**Errors:**
+
+- `500` — `{ "error": "Failed to compute usage" }` if the aggregate
+  query fails (logged server-side).
+
+### POST `/api/v1/conversations/:id/ai-suggestions`
+
+Generate 3 reply drafts for a conversation. Triggered by the
+"Gợi ý phản hồi (AI)" button in the chat composer.
+
+**Path params:** `id` — conversation UUID.
+
+**Permission:** `requireZaloAccess('chat')` — owner/admin bypass,
+members need `chat` or `admin` on the Zalo account (BR-0003).
+
+**Body:** none — the service reads the recent message thread
+server-side.
+
+**Response 200:**
+
+```json
+{
+  "suggestions": [
+    "Cảm ơn anh, em gửi ngay báo giá qua đây nhé.",
+    "Dạ vâng, mình có size M anh nhé.",
+    "Em kiểm tra hàng rồi báo lại sớm nhất ạ."
+  ],
+  "fromCache": false,
+  "cachedUntil": "2026-05-15T10:05:00.000Z",
+  "provider": "anthropic",
+  "model": "claude-haiku-4-5"
+}
+```
+
+- Repeat calls on the same `triggerMsgId` are served from a
+  per-conversation cache (`fromCache: true`) until `cachedUntil`.
+
+**Error codes (handler-mapped):**
+
+| Status | `error` | Meaning |
+|---|---|---|
+| 400 | `no_context` / `no_inbound` | Conversation has no messages, or the latest message is outbound (nothing to reply to). |
+| 412 | `ai_disabled` | Org disabled the feature in Settings. |
+| 412 | `provider_unconfigured` | No API key on file. |
+| 412 | `unknown_provider` | Stored provider id is no longer in the registry. |
+| 429 | `rate_limit_org` | Org hit `maxSuggestionsPerDay`. Includes `retryAfter` (seconds) in the body and a `Retry-After` header. |
+| 429 | `rate_limit_user` | Per-user/per-minute throttle. Same headers. |
+| 502 | `provider_401` | Provider rejected the API key. The config is auto-disabled by the service. |
+| 503 | `provider_5xx` / `provider_timeout` / `provider_other` | Upstream provider failure — message: `"AI provider unavailable"`. |
+| 500 | `internal_error` / `unknown` | Unhandled error. |
+
+Error body shape:
+
+```json
+{ "error": "rate_limit_org", "message": "...", "retryAfter": 42 }
+```
+
+`retryAfter` is only present on 429 responses.
+
+---
+
+## Feature 0037 — Workflow engine
+
+Lightweight CRM automation. Admins define a `WorkflowDefinition`
+(trigger + sequential steps); the engine spawns
+`WorkflowExecution` rows when an inbound message matches and a
+cron worker advances them step-by-step. See
+[features/0037-workflow-engine/SPEC.md](../features/0037-workflow-engine/SPEC.md).
+
+### GET `/api/v1/workflows`
+
+List all workflows in the caller's org.
+
+**Permission:** owner/admin (BR-0008). Phase 1 lists are admin-only.
+
+**Response 200:**
+
+```json
+{
+  "workflows": [
+    {
+      "id": "uuid",
+      "orgId": "uuid",
+      "name": "Welcome new leads",
+      "description": "Send greeting + tag",
+      "isActive": true,
+      "trigger": { "type": "inbound_message", "isFirstInbound": true },
+      "steps": [
+        { "type": "send_message", "content": "Chào {{contactName}}!", "delayMinutes": 0 },
+        { "type": "add_tag", "tag": "Lead", "delayMinutes": 0 }
+      ],
+      "createdAt": "...",
+      "updatedAt": "...",
+      "_count": { "executions": 12 }
+    }
+  ]
+}
+```
+
+### GET `/api/v1/workflows/:id`
+
+Detail. Returns the raw `WorkflowDefinition` row.
+
+**Permission:** owner/admin.
+
+**Errors:** `404` `{ "error": "Không tồn tại" }`.
+
+### POST `/api/v1/workflows`
+
+Create. Body is validated by `validateWorkflowInput` — invalid input
+returns `400` with a Vietnamese reason.
+
+**Permission:** owner/admin.
+
+**Body:**
+
+```json
+{
+  "name": "Welcome new leads",
+  "description": "...",
+  "isActive": true,
+  "trigger": {
+    "type": "inbound_message",
+    "messageMatch": "(?i)báo giá",
+    "contactStatus": ["new", "contacted"],
+    "isFirstInbound": false
+  },
+  "steps": [
+    { "type": "send_message", "content": "Cảm ơn anh/chị {{contactName}}", "delayMinutes": 0 },
+    { "type": "wait",         "delayMinutes": 60 },
+    { "type": "assign_user",  "userId": "uuid", "delayMinutes": 0 }
+  ]
+}
+```
+
+**Validation errors (400)** — sampled from `workflow-helpers.ts`:
+
+- `Body không hợp lệ`
+- `name phải dài 1-200 ký tự`
+- `trigger phải là object`
+- `trigger.type chỉ hỗ trợ "inbound_message" (phase 1)`
+- `trigger.messageMatch phải là string`
+- `trigger.messageMatch không quá 200 ký tự`
+- `steps phải là mảng`
+- `steps không được rỗng` / `steps không quá 50 phần tử (phase 1)`
+- `steps[<i>].type không hợp lệ (chấp nhận: send_message, add_tag, assign_user, wait)`
+- `steps[<i>].delayMinutes phải là số >= 0` / `không quá 30 ngày`
+- `steps[<i>].content phải dài 1-2000 ký tự`
+- `steps[<i>].tag phải dài 1-64 ký tự`
+- `steps[<i>].userId bắt buộc`
+- `assign_user.userId không thuộc tổ chức: <id>` — the route
+  cross-checks the user lives in the same org before persisting.
+
+**Response 201:** the freshly-created `WorkflowDefinition` row.
+
+### PUT `/api/v1/workflows/:id`
+
+Replace the workflow. Same validation as `POST`.
+
+**Permission:** owner/admin.
+
+**Errors:** `404` if the id doesn't belong to the caller's org;
+`400` for the same validation messages as `POST`.
+
+**Response 200:** the updated row.
+
+### DELETE `/api/v1/workflows/:id`
+
+Hard-delete the definition. Cascade FK removes its executions.
+
+**Permission:** owner/admin.
+
+**Response:** `204 No Content`. `404` if it doesn't exist.
+
+### GET `/api/v1/workflows/:id/executions`
+
+List executions of one workflow with pagination.
+
+**Permission:** owner/admin (Phase 1 — Members see executions only
+through the contact-scoped endpoint below).
+
+**Query params:**
+
+| Name | Type | Notes |
+|---|---|---|
+| `page` | integer | Default 1. |
+| `perPage` | integer | Default 20, max 100. |
+
+**Response 200:**
+
+```json
+{
+  "executions": [
+    {
+      "id": "uuid",
+      "workflowId": "uuid",
+      "contact": { "id": "uuid", "fullName": "...", "zaloUid": "..." },
+      "status": "running",
+      "currentStepIdx": 1,
+      "nextStepDueAt": "...",
+      "stepLog": [{ "idx": 0, "status": "completed", "ranAt": "...", "error": null }],
+      "startedAt": "...",
+      "completedAt": null
+    }
+  ],
+  "pagination": { "page": 1, "perPage": 20, "total": 7, "totalPages": 1 }
+}
+```
+
+`status` ∈ `running | completed | failed | cancelled`.
+
+**Errors:** `404` `{ "error": "Không tồn tại" }`.
+
+### GET `/api/v1/contacts/:id/workflow-executions`
+
+List executions touching one contact. Used by the Customer 360 page.
+
+**Permission:** any authenticated user; cross-org isolation enforced
+by `contact.orgId === user.orgId`.
+
+**Response 200:**
+
+```json
+{
+  "executions": [
+    {
+      "id": "uuid",
+      "status": "completed",
+      "workflow": { "id": "uuid", "name": "Welcome new leads" },
+      "startedAt": "...",
+      "completedAt": "..."
+    }
+  ]
+}
+```
+
+Capped at 50 most recent rows by `startedAt DESC`.
+
+**Errors:** `404` if the contact doesn't belong to the caller's org.
+
+---
+
+## Feature 0038 — Integration Hub
+
+Outbound bridge to third-party tools (Google Sheets, Telegram bot,
+...). Each `Integration` row stores a per-org encrypted `config`
+blob. A manual or scheduled sync enqueues an `IntegrationRun`. See
+[features/0038-integration-hub/SPEC.md](../features/0038-integration-hub/SPEC.md).
+
+### Permissions
+
+Everything under `/api/v1/integrations/*` requires
+`requireRole('owner', 'admin')` (BR-0017). Members → `403`. The
+single **exception** is the OAuth callback (see bottom of section) —
+it's a redirect endpoint that arrives without an auth header.
+
+### GET `/api/v1/integrations`
+
+List the org's integrations. Cipher / token fields are stripped by
+`toSummary()` — only `id`, `type`, `name`, `enabled`, `createdAt`,
+`updatedAt`, plus a non-secret summary of `config` (e.g. spreadsheet
+title, bot username) come back.
+
+**Response 200:**
+
+```json
+{
+  "integrations": [
+    {
+      "id": "uuid",
+      "type": "google_sheets",
+      "name": "Sales pipeline",
+      "enabled": true,
+      "createdAt": "...",
+      "updatedAt": "...",
+      "summary": { "spreadsheetId": "1ABC...", "sheetName": "Leads" }
+    }
+  ]
+}
+```
+
+### POST `/api/v1/integrations`
+
+Create + test connection + encrypt.
+
+**Body:**
+
+```json
+{
+  "type": "google_sheets",
+  "name": "Sales pipeline",
+  "config": {
+    "spreadsheetId": "1ABC...",
+    "sheetName": "Leads",
+    "eventTypes": ["contact.created", "contact.status_changed"],
+    "refreshToken": "<from OAuth callback>"
+  }
+}
+```
+
+**Validation errors (400):**
+
+- `{ "error": "type, name, config are required" }`.
+- `{ "error": "<connector-specific>" }` — the connector's `validate`
+  + test-connect hooks bubble their own messages (e.g. invalid sheet
+  id, OAuth refresh token rejected by Google).
+
+**Response 201:** same shape as a list row.
+
+### PATCH `/api/v1/integrations/:id`
+
+Partial update. Any of `name`, `enabled`, `config` may be omitted.
+A `config` patch re-runs the connector's `validate` step.
+
+**Errors:**
+
+- `404` `{ "error": "Integration not found" }`.
+- `400` `{ "error": "<reason>" }` — connector validation failed.
+
+**Response 200:** the updated row summary.
+
+### DELETE `/api/v1/integrations/:id`
+
+Soft-delete — disables the integration and zeroes out
+`configCipher` so the row stays in audit logs without leaking
+secrets at rest.
+
+**Response:** `204 No Content`. `404` if not in caller's org.
+
+### POST `/api/v1/integrations/:id/sync`
+
+Trigger a manual sync. The run is opened synchronously (`202` +
+`runId`) but executes asynchronously via `trackBackground()`.
+
+**Errors:**
+
+| Status | When |
+|---|---|
+| 404 | Unknown integration. |
+| 409 | Integration is disabled — `{ "error": "Integration is disabled" }`. |
+| 409 | Integration has no config (typically because of a prior delete) — `{ "error": "Integration has no config" }`. |
+| 500 | Failed to open the run — message bubbled (truncated to 300 chars). |
+
+**Response 202:**
+
+```json
+{ "runId": "uuid" }
+```
+
+Poll `GET /:id/runs` to watch the result.
+
+### GET `/api/v1/integrations/:id/runs`
+
+Recent `IntegrationRun` rows for this integration, newest first.
+
+**Query params:**
+
+| Name | Type | Notes |
+|---|---|---|
+| `limit` | integer | Default 20, range [1, 100]. |
+
+**Response 200:**
+
+```json
+{
+  "runs": [
+    {
+      "id": "uuid",
+      "integrationId": "uuid",
+      "status": "succeeded",
+      "rowCount": 12,
+      "startedAt": "...",
+      "finishedAt": "...",
+      "error": null
+    }
+  ]
+}
+```
+
+`status` ∈ `running | succeeded | failed`.
+
+### GET `/api/v1/integrations/oauth/google/url`
+
+Build a signed Google OAuth consent URL. The signed `state` carries
+`orgId + nonce + 10-minute expiry` so the callback can verify the
+request wasn't forged.
+
+**Permission:** owner/admin.
+
+**Errors:**
+
+- `503` `{ "error": "Google OAuth not configured on server" }` —
+  `GOOGLE_OAUTH_CLIENT_ID` not set.
+
+**Response 200:**
+
+```json
+{ "url": "https://accounts.google.com/o/oauth2/v2/auth?..." }
+```
+
+### GET `/api/v1/integrations/oauth/google/callback`
+
+The endpoint Google redirects the admin's browser to after consent.
+**Unauthenticated** — the signed `state` (HMAC of
+`orgId.nonce.expiry`) is the CSRF guard.
+
+**Query params:**
+
+| Name | Type | Notes |
+|---|---|---|
+| `code` | string | Authorization code from Google. |
+| `state` | string | The `orgId.nonce.exp.sig` blob from `/oauth/google/url`. |
+| `error` | string | Set when the user denied consent. |
+
+**Errors (400):**
+
+- `{ "error": "OAuth provider error: <code>" }` — Google returned
+  `?error=`.
+- `{ "error": "Missing code or state" }`.
+- `{ "error": "Malformed state" }` / `"State signature mismatch"` /
+  `"State expired"`.
+- `{ "error": "<google-error>" }` — `exchangeCode` rejected.
+
+**Response 200:**
+
+```json
+{ "orgId": "uuid", "refreshToken": "1//..." }
+```
+
+The FE then composes the full `config` (refresh token + admin's
+chosen `spreadsheetId` + `sheetName` + `eventTypes`) and POSTs to
+`/api/v1/integrations` to persist it. Why the indirection? The
+callback has no session, and the config needs admin choices that
+the OAuth flow itself doesn't capture (see SPEC §3 "Why OAuth
+callback returns to the FE").
+
+---
+
+## Feature 0040 — Lead scoring
+
+A 0–100 score computed from recency, engagement, pipeline status,
+and upcoming appointments. Per-org weights live on
+`Organization.leadScoreConfig` (JSON); scores are computed
+on-the-fly per request (not persisted). See
+[features/0040-lead-scoring/SPEC.md](../features/0040-lead-scoring/SPEC.md).
+
+### GET `/api/v1/settings/lead-score-config`
+
+Read the org's lead-score weights. The response includes the
+defaults so the FE can show a "still on defaults" hint.
+
+**Permission:** any authenticated user (the Settings page is
+admin-gated client-side, but reads are non-sensitive).
+
+**Response 200:**
+
+```json
+{
+  "config": {
+    "recencyBuckets": [
+      { "hours": 1, "points": 40 },
+      { "hours": 24, "points": 30 },
+      { "hours": 168, "points": 20 },
+      { "hours": 720, "points": 10 }
+    ],
+    "engagementCap": 30,
+    "statusPoints": {
+      "interested": 20, "contacted": 10, "new": 5,
+      "converted": 0, "lost": 0
+    },
+    "appointmentBuckets": [
+      { "daysWindow": 7,  "points": 10 },
+      { "daysWindow": 30, "points": 5 }
+    ]
+  },
+  "isCustom": false,
+  "defaults": { "...same shape as config..." }
+}
+```
+
+`isCustom` is `true` when the org has saved an override row,
+`false` when defaults are in effect. `defaults` is always echoed
+so the FE can offer "Khôi phục mặc định" without an extra round-trip.
+
+### PUT `/api/v1/settings/lead-score-config`
+
+Replace the org's config. The handler validates + normalises (sorts
+`recencyBuckets` ascending by `hours`, `appointmentBuckets`
+ascending by `daysWindow`) before persisting.
+
+**Permission:** owner/admin (AC-0008). Member → `403`.
+
+**Body:** same shape as the `config` field of the GET response.
+
+**Validation errors (400):**
+
+- `{ "error": "Config phải là một object JSON" }`.
+- `{ "error": "recencyBuckets phải là mảng không rỗng" }`.
+- `{ "error": "Mỗi recency bucket phải là object" }`.
+- `{ "error": "recency bucket.hours phải > 0" }`.
+- `{ "error": "recency bucket.points không được âm" }`.
+- `{ "error": "engagementCap không được âm" }`.
+- `{ "error": "statusPoints phải là object" }`.
+- `{ "error": "statusPoints['<key>'] không được âm" }`.
+- `{ "error": "appointmentBuckets phải là mảng" }`.
+- `{ "error": "Mỗi appointment bucket phải là object" }`.
+- `{ "error": "appointment bucket.daysWindow phải > 0" }`.
+- `{ "error": "appointment bucket.points không được âm" }`.
+
+**Response 200:** the normalised config alongside `isCustom: true`
+and the defaults.
+
+### DELETE `/api/v1/settings/lead-score-config`
+
+Restore the org to defaults by setting `Organization.leadScoreConfig
+= JsonNull`. Idempotent — calling it twice is fine.
+
+**Permission:** owner/admin.
+
+**Response 200:**
+
+```json
+{
+  "config": "{...defaults...}",
+  "isCustom": false,
+  "defaults": "{...defaults...}"
+}
+```
+
+### GET `/api/v1/contacts` — Cycle 2026-05 additions
+
+Each row in the existing `contacts` array is augmented with two new
+fields. The list endpoint computes scores for the returned slice
+via `computeLeadScoresBatch` (capped at 1000 rows per page —
+EC-0004).
+
+**New row fields:**
+
+| Field | Type | Notes |
+|---|---|---|
+| `leadScore` | integer (0..100) | Total score. `0` when nothing is known about the contact. |
+| `leadScoreBreakdown` | object | `{ recency, engagement, status, appointment }` — each component sums to `leadScore`. |
+
+**New query params:**
+
+| Name | Type | Notes |
+|---|---|---|
+| `sort` | `'leadScore'` (only honoured value) | When set, in-process sort is applied **after** batch compute (BR-0009). |
+| `order` | `'asc' \| 'desc'` | Default `desc`. |
+
+When `sort=leadScore` is set the page widens to up to 1000 rows
+(`Math.min(1000, Math.max(limit, page * limit))`) so the sort is
+deterministic across pages. Other sort modes use the regular
+DB `ORDER BY updatedAt DESC`.
+
+### GET `/api/v1/contacts/:id` — Cycle 2026-05 additions
+
+Same two new fields (`leadScore`, `leadScoreBreakdown`) are appended
+to the existing contact detail payload (AC-0003 in SPEC).
+
+```json
+{
+  "id": "uuid",
+  "fullName": "...",
+  "tags": [{ "id": "...", "name": "VIP", "color": "...", "emoji": "..." }],
+  "leadScore": 72,
+  "leadScoreBreakdown": {
+    "recency": 30, "engagement": 22, "status": 20, "appointment": 0
+  }
+}
+```
+
+---
+
+## Feature 0041 — Advanced analytics
+
+Two admin-only aggregate endpoints powering the Analytics dashboard.
+Cross-org isolation is enforced on every query via `orgId`. See
+[features/0041-advanced-analytics/SPEC.md](../features/0041-advanced-analytics/SPEC.md).
+
+### Shared query params
+
+Both endpoints accept the same date range:
+
+| Name | Type | Notes |
+|---|---|---|
+| `dateFrom` | ISO date | Required (or both omitted to default to last 30 days). |
+| `dateTo` | ISO date | Required when `dateFrom` is set. |
+
+**Validation errors (400):**
+
+- `{ "error": "dateFrom/dateTo phải là ISO date hợp lệ" }`.
+- `{ "error": "dateFrom phải <= dateTo" }`.
+- `{ "error": "phải cung cấp cả dateFrom và dateTo" }` — only one
+  of the two supplied.
+- `{ "error": "khoảng tối đa 365 ngày" }` — range cap.
+
+Defaults: when **both** params are absent the window is the trailing
+30 days (UTC). Every response echoes `period: { dateFrom, dateTo }`
+so the FE can label the chart.
+
+### GET `/api/v1/analytics/funnel`
+
+Snapshot funnel — counts contacts currently in each pipeline status
+whose `createdAt` falls in the window. Merged secondaries
+(`mergedIntoId IS NOT NULL`) are excluded so duplicates don't
+double-count.
+
+**Permission:** owner/admin (BR-0006).
+
+**Extra query params:**
+
+| Name | Type | Notes |
+|---|---|---|
+| `teamId` | UUID | Restrict to contacts assigned to users on this team. |
+| `assignedUserId` | UUID | Restrict to one rep. Overrides `teamId` if both supplied. |
+
+**Response 200:**
+
+```json
+{
+  "stages": [
+    { "name": "new",        "count": 120, "conversionRate": null },
+    { "name": "contacted",  "count":  84, "conversionRate": 70 },
+    { "name": "interested", "count":  42, "conversionRate": 50 },
+    { "name": "converted",  "count":  12, "conversionRate": 29 }
+  ],
+  "lost": { "count": 18 },
+  "totalContacts": 276,
+  "period": { "dateFrom": "...", "dateTo": "..." }
+}
+```
+
+- `conversionRate` is `Math.round(count(i) / count(i-1) * 100)`
+  clamped to `[0, 100]`. `null` for the first stage and when the
+  previous stage had `0` (avoids misleading "0%" labels — EC-0001).
+- `lost` is reported separately so the FE can render it as a side
+  note rather than a funnel bar.
+
+### GET `/api/v1/analytics/team-performance`
+
+Per-rep performance: response time, outbound volume, conversions,
+active conversations.
+
+**Permission:** owner/admin.
+
+**Extra query params:**
+
+| Name | Type | Notes |
+|---|---|---|
+| `teamId` | UUID | Restrict the roster to this team. |
+
+**Response 200:**
+
+```json
+{
+  "byUser": [
+    {
+      "userId": "uuid",
+      "fullName": "Nguyễn Văn A",
+      "avgResponseTimeMinutes": 4.2,
+      "outboundMessageCount": 187,
+      "convertedContactsCount": 9,
+      "activeConversationsCount": 23
+    }
+  ],
+  "totals": {
+    "outboundMessageCount": 1842,
+    "convertedContactsCount": 67
+  },
+  "period": { "dateFrom": "...", "dateTo": "..." }
+}
+```
+
+- `avgResponseTimeMinutes` is rounded to one decimal place. `null`
+  when the rep has no paired inbound→outbound messages in the window.
+- Convention: an inbound message pairs with the **next** outbound on
+  the same conversation, attributed to the user who sent it
+  (`Message.repliedByUserId`).
+- The empty-team short-circuit returns
+  `{ byUser: [], totals: { outboundMessageCount: 0, convertedContactsCount: 0 } }`
+  without running aggregate queries.
+
+---
+
+## Feature 0042 — UI refactor (Friends grid backend)
+
+Backend support for the new "Bạn bè" left-rail grid view. The
+ACL mirrors `/friends/stats` — members only see friends on
+ZaloAccounts they have a `ZaloAccountAccess` row for. See
+[features/0042-ui-refactor-smax/SPEC.md](../features/0042-ui-refactor-smax/SPEC.md).
+
+### GET `/api/v1/friends`
+
+Paginated list of friends across visible Zalo accounts.
+
+**Permission:** any authenticated user. Members are scoped to the
+union of their `ZaloAccountAccess` rows. When a member has zero
+access rows the endpoint returns an empty page rather than `403`.
+
+**Query params:**
+
+| Name | Type | Notes |
+|---|---|---|
+| `accountId` | UUID | Restrict to one Zalo account. Members who can't see this account get an empty page (no `403` to avoid leaking account existence). |
+| `search` | string | Case-insensitive partial match on `Friend.displayName` OR `Contact.fullName` OR `Contact.phone`. |
+| `page` | integer | Default 1. |
+| `perPage` | integer | Default 24, max 100. |
+
+**Response 200:**
+
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "zaloUid": "2347234782",
+      "displayName": "Lan Anh",
+      "avatarUrl": "https://...",
+      "createdAt": "...",
+      "zaloAccountId": "uuid",
+      "zaloAccountName": "Sale account #1",
+      "contactId": "uuid | null",
+      "contact": {
+        "id": "uuid",
+        "fullName": "Lê Lan Anh",
+        "phone": "0901234567",
+        "avatarUrl": "..."
+      }
+    }
+  ],
+  "pagination": { "page": 1, "perPage": 24, "total": 142, "totalPages": 6 }
+}
+```
+
+`contact` is `null` when the Zalo friend has not been linked to a
+CRM Contact yet — drives the FE's "Tạo Contact" button on each card.
+
+Ordering: `createdAt DESC` (newest friends first).
