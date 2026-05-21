@@ -15,19 +15,23 @@ Status legend:
 
 ## Status summary (updated 2026-05-21)
 
-**Shipped this cycle:** 16 features — 0022, 0023, 0024, 0025, 0026, 0027,
-0028, 0029, 0030, 0031, 0032, 0033, 0034, 0035, 0037, 0040, 0041, 0042,
-0043 (plus 0024/0027 SPECs that landed earlier).
+**Queue complete.** All 19 features in this backlog shipped: 0022,
+0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030, 0031, 0032, 0033, 0034,
+0035, 0036, 0037, 0038, 0039, 0040, 0041, 0042, 0043.
 
-**Held pending product call:**
-- **0036** — AI reply suggestions. Recurring API cost (~$0.75/day/org at
-  Sonnet 4.5 baseline) and provider strategy.
-- **0038** — Integration Hub framework. Each connector is its own auth/
-  permissions surface.
-- **0039** — Mobile PWA. ~4–6 week rewrite of chat + contacts views.
+**Product calls resolved during the cycle:**
+- **0036** — BYOK (bring-your-own-key) per org, no recurring cost to us.
+  Anthropic + OpenAI + Gemini + Qwen + Kimi + Ollama.
+- **0038** — Phase 1 shipped Google Sheets one-way export + Telegram bot
+  notifications. Framework supports adding FB Messenger / Zapier / Slack
+  later as separate connectors.
+- **0039** — Phase 1 shipped responsive layout only. PWA shell + offline
+  queue + native app cut to phase 2/3 (PWA is a half-measure; native is
+  the right answer if mobile matters strategically).
 
 See [docs/operations/CHANGELOG.md](docs/operations/CHANGELOG.md) for the
-release-by-release narrative.
+release-by-release narrative and `docs/operations/2026-cycle-hardening.md`
+for the pre-release QA + EXPLAIN ANALYZE checklist.
 
 ---
 
@@ -207,17 +211,20 @@ preserve `disconnected` status (avoid clobbering session).
 
 ## P2 — moonshots / strategic
 
-### 0036 — AI reply suggestions (multi-provider)
-**Status:** ❌
-**Source:** v2.0 release notes — "AI Assistant: gợi ý trả lời", v3.0 —
-"Multi-Provider AI: Anthropic, OpenAI, Qwen, Kimi".
-**Why later:** Biggest WOW factor on the cherry-pick list. Adds external
-API dependency + recurring per-token cost (~$0.75/day/org with Sonnet
-4.5 at 500 suggestions/day × 500 tokens). Needs a product call on the
-budget before spec'ing.
-**Rough scope:** ~800 LOC backend (provider registry, prompt templates,
-`AiConfig` + `AiSuggestion` models). FE chip in chat input. Each
-provider is its own integration.
+### 0036 — AI reply suggestions (multi-provider, BYOK) ✅ SHIPPED
+**Status:** ✅ Shipped (PR #87) — see [SPEC](docs/features/0036-ai-reply-suggestions/SPEC.md).
+**Scope shipped:** Per-org BYOK config — 6 providers: Anthropic, OpenAI,
+Gemini, Qwen, Kimi (OpenAI-compat), Ollama. AES-256-GCM key encryption
+via HKDF-derived per-org sub-keys. Suggestion content NEVER persisted;
+only metadata logged in `AiSuggestionLog` (tokens, cost, latency).
+On-demand generation with 5min cache + transactional quota check
+(per-org daily + per-user hourly soft cap). Prompt-injection hardening
++ `escapeXmlBoundary` ported from 3.0. POST `/conversations/:id/ai-
+suggestions` returns 3 suggestions as JSON array. FE chip strip below
+composer + SettingsAiConfigView. **70 tests passing.** Did NOT replicate
+3.0's Anthropic dual-auth-header bug (use `x-api-key` only).
+**Phase 2 backlog:** tone presets, per-rep prompt override, streaming,
+suggestion ranking ML, voice transcription, image understanding.
 
 ### 0037 — Workflow automation engine ✅ SHIPPED (phase 1)
 **Status:** ✅ Shipped (PR #78) — see [SPEC](docs/features/0037-workflow-engine/SPEC.md).
@@ -231,23 +238,42 @@ FE `SettingsWorkflowsView.vue` + `WorkflowEditor.vue` with admin guard.
 **Phase 2 backlog:** branching, time-based triggers, more step types,
 `FOR UPDATE SKIP LOCKED` for multi-process worker.
 
-### 0038 — Integration Hub framework (Sheets / Telegram / FB / Zapier)
-**Status:** ❌
-**Source:** v2.0 release notes — "Integration Hub".
-**Why later:** Each connector is its own follow-up; framework is the
-entry ticket. Each integration also opens an auth/permissions surface.
-**Rough scope:** `Integration` model with type + config Json, OAuth
-flows per provider, sync workers. ~600 LOC framework + ~200 LOC per
-provider.
+### 0038 — Integration Hub framework + Sheets + Telegram ✅ SHIPPED (phase 1)
+**Status:** ✅ Shipped (PR #86) — see [SPEC](docs/features/0038-integration-hub/SPEC.md).
+**Scope shipped:** Generic `Integration` model + `IntegrationRun` audit
+log. AES-256-GCM encrypted config (reused 0036's helper via
+`encryptConfig/decryptConfig` shim). Connector interface (not switch-
+dispatcher per 3.0 critique). 2 connectors:
+- **Google Sheets**: OAuth 2.0 refresh-token flow, `googleapis@130`,
+  chunked write at 1000 rows/batch, schedule cron `daily | hourly | manual`.
+- **Telegram Bot**: token + chat ID + event subscriptions
+  (contact.created, order.created, appointment.reminder). SSRF guard
+  ported from 3.0's `zapier-webhook.ts:24-35` applied to apiEndpoint
+  override.
+Worker every 5 min with `tickRunning` singleton flag. Webhook event tee
+fan-out from `emitWebhook()` (3.0 missed this coupling). FE
+SettingsIntegrationsView + per-connector forms + composable. **All 12
+ACs + 19 backend integration tests passing.**
+**Phase 2 backlog:** Facebook Messenger, Zapier generic webhook, Slack,
+WhatsApp Business, two-way Sheets sync, custom event templates, cron-
+expression UI, couple with workflow engine (0037) actions.
 
-### 0039 — Mobile PWA (offline, responsive, installable)
-**Status:** ❌
-**Source:** v2.0 release notes — "Mobile PWA".
-**Why later:** Big rewrite of the chat + contacts views with mobile-
-first layout. Bottom nav, larger touch targets, gestures.
-**Rough scope:** Add manifest.json + service worker (workbox), rewrite
-ChatView + ContactsView mobile breakpoints, offline message queue. ~600
-LOC + PWA infrastructure decisions.
+### 0039 — Mobile responsive layout ✅ SHIPPED (phase 1, no PWA)
+**Status:** ✅ Shipped (PR #85) — see [SPEC](docs/features/0039-mobile-responsive/SPEC.md).
+**Scope shipped (scope-cut from original "Mobile PWA"):** Layout
+switcher in `App.vue` using Vuetify `useDisplay().smAndDown` (ported
+from 3.0 pattern, but swapped 3.0's custom `useMobile()` watcher for
+Vuetify's). New `MobileLayout.vue` slim wrapper + `MobileBottomNav.vue`
+(4 tabs: Chat / Khách / Bạn bè / Khác — kept Friends, dropped 3.0's
+Lịch hẹn into the More drawer). ContactsView card-list mode at xs/sm
+(ported 3.0's `MobileContactView.vue` markup — tonal cards + chip strip
++ debounced search + FAB at `bottom:88px`). 44px touch-target floor
+enforced via `@media (max-width: 600px)` tokens (3.0 didn't enforce).
+Safe-area-inset for iOS notch. Feature 0042's mobile chat pane switch
+preserved. **170 FE tests pass, 20 new.**
+**Phase 2/3 backlog:** PWA shell (manifest.json + service worker),
+offline mode, outbound message queue with conflict reconciliation, web
+push notifications, native iOS/Android app (separate product call).
 
 ### 0040 — Lead scoring + Contact Intelligence ✅ SHIPPED (rules-based)
 **Status:** ✅ Shipped (PR #72) — see [SPEC](docs/features/0040-lead-scoring/SPEC.md).

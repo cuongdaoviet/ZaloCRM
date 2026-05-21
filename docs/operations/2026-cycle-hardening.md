@@ -175,7 +175,95 @@ contacts + 1000 messages.
       `/zalo/users/:uid`, `/zalo/stickers/...`, `/conversations/:id/stickers`,
       `/analytics/funnel`, `/analytics/team-performance`,
       `/settings/lead-score-config`, `/workflows`, `/zalo-accounts/:id`
-      proxy PUT). Update API.md as a follow-up PR if missing.
+      proxy PUT, **`/conversations/:id/ai-suggestions`**,
+      **`/settings/ai-config`**, **`/settings/ai-usage`**,
+      **`/integrations`** + sub-routes, **`/integrations/oauth/google/callback`**).
+      Update API.md as a follow-up PR if missing.
+
+---
+
+## Part 4b — Cycle-2 features (0036 / 0038 / 0039)
+
+Three features shipped after the original cycle close. They share new
+load-bearing infrastructure that needs explicit verification:
+
+### Shared crypto helper (`encrypt-config.ts`)
+
+Both 0036 (AI keys) and 0038 (integration configs) encrypt secrets via
+the same AES-256-GCM helper with HKDF-derived per-org sub-keys. **Losing
+`AI_CONFIG_MASTER_KEY` = losing every BYOK key + every OAuth refresh
+token + every Telegram bot token.**
+
+- [ ] **Production env:** `AI_CONFIG_MASTER_KEY` is set to a real
+      64-char hex value (NOT the placeholder zeros). Verify with
+      `printenv AI_CONFIG_MASTER_KEY | wc -c` → 65.
+- [ ] **Backup location documented in RUNBOOK.** Master key rotation
+      strategy is captured as a phase-2 task (currently requires bulk
+      re-encrypt migration; no in-place rotation yet).
+- [ ] **Master key NOT in git.** Grep `git log -p -S "AI_CONFIG_MASTER_KEY"`
+      to confirm no plaintext value was ever committed.
+- [ ] **Logs don't leak keys.** Sample backend logs for `AI_CONFIG`,
+      `apiKeyCipher`, `configCipher` strings — should appear only in
+      `[***]` form or not at all.
+
+### 0036 — AI reply suggestions
+
+- [ ] **At least one provider tested end-to-end** in staging with real
+      key. Verify chip strip renders + click fills composer + send
+      works.
+- [ ] **Per-org daily quota enforced.** Configure low cap (e.g. 5), make
+      6 requests, observe 429 on the 6th.
+- [ ] **Per-user hourly soft cap enforced.** Same test pattern.
+- [ ] **Anthropic provider sends ONLY `x-api-key`.** Inspect outbound
+      request with `tcpdump` or proxy log on test env. Bug-not-reproduced
+      is the goal (3.0 sent both `x-api-key` AND `Authorization: Bearer`).
+- [ ] **No suggestion content in DB.** `SELECT * FROM ai_suggestion_logs
+      LIMIT 5` — confirm columns are metadata only (tokens, cost, error_code).
+- [ ] **Provider switch works.** Switch from Anthropic to OpenAI in
+      Settings, verify next suggestion fetch hits the new provider.
+- [ ] **Rate-limit gaming guard.** Disable + re-enable AI does NOT reset
+      the quota counter (it's by `(orgId, date)` in DB, not config).
+
+### 0038 — Integration Hub (Sheets + Telegram)
+
+- [ ] **Google Sheets OAuth flow** — admin authorizes, real Sheet is
+      exported with correct headers + filter applied.
+- [ ] **Sheets chunking at 1000 rows/batch** — seed > 2000 contacts,
+      observe two batched writes in the IntegrationRun log.
+- [ ] **Refresh token invalidation surfaced** — manually revoke the
+      Google grant, observe next sync writes `lastError` and FE banner
+      appears.
+- [ ] **Telegram bot test message** — admin pastes token + chat ID,
+      "test connection" button delivers a message to the channel.
+- [ ] **Webhook event tee** — create a contact via API, observe Telegram
+      channel receives `🆕 KH mới: <fullName>...` within 5 seconds.
+- [ ] **Event subscription filter** — uncheck `order.created` for the
+      integration, create an order, confirm NO Telegram message fires.
+- [ ] **SSRF guard active** — manually set Telegram apiEndpoint to
+      `http://127.0.0.1:8080` (or any private IP) → save should reject.
+- [ ] **Worker singleton** — start 2 backend processes, observe only one
+      tick proceeds per cycle (known phase-2 gap: process-level singleton,
+      not Postgres advisory lock).
+- [ ] **Disabled integration skipped** — toggle off, create contact,
+      confirm Telegram + Sheets sync skip.
+
+### 0039 — Mobile responsive
+
+- [ ] **Three viewports** (360 / 768 / 1280px) — chat send/receive,
+      contacts list (card mode at xs/sm), friends grid (1/2/3 cols).
+- [ ] **iOS Safari smoke** on real device — bottom nav clears notch,
+      tap targets feel right.
+- [ ] **Android Chrome smoke** on real device.
+- [ ] **Rotate device mid-session** — layout reflows cleanly, no frozen
+      state.
+- [ ] **44px touch-target audit** — DevTools "inspect" each bottom-nav
+      button, list row, and primary CTA at 360px viewport. Min hit area
+      ≥ 44×44 px.
+- [ ] **Feature 0042 chat pane switch** still works (tap conversation
+      → thread fills screen → back button visible).
+- [ ] **Settings flows on mobile** — open each Settings page at 360px,
+      forms readable, save buttons reachable (sticky at bottom on long
+      forms per EC-0005).
 
 ---
 
@@ -205,11 +293,30 @@ Each shipped feature has a "Phase 2" section in its SPEC. Highlights:
   actions.
 - **0043** — service-worker offline cache, persistent prefetch across
   reload, predictive prefetch.
+- **0036** — tone presets, per-rep prompt override, streaming responses,
+  suggestion ranking ML, voice transcription, image understanding,
+  master-key rotation tooling.
+- **0038** — Facebook Messenger, Zapier generic webhook, Slack,
+  WhatsApp Business, two-way Sheets sync, custom event templates,
+  cron-expression UI, couple workflow engine (0037) with integrations.
+- **0039** — PWA shell (manifest.json + service worker), offline mode +
+  outbound queue with conflict reconciliation, web push notifications,
+  native iOS/Android app (separate product call required).
+
+### Cross-cutting phase-2 work
+
+- **Master-key rotation** — `AI_CONFIG_MASTER_KEY` rotation requires
+  bulk re-encrypt migration today. Build tooling.
+- **Multi-process worker locks** — Features 0037 and 0038 both use
+  module-level `tickRunning` singleton flag. Migrate to Postgres
+  `SELECT FOR UPDATE SKIP LOCKED` when we scale to >1 backend process.
+- **API.md refresh** — many new endpoints from this cycle aren't in
+  the design doc yet.
 
 ---
 
 ## Sign-off
 
-Once Parts 1–4 pass on staging, tag the release. The 3 held items
-(0036/0038/0039) stay in the backlog with explicit "needs product call"
-notes — don't ship them blind.
+Once all parts pass on staging, tag the release. **All 19 features
+from the original audit are now shipped.** Phase 2 work above is the
+next prioritization conversation.
