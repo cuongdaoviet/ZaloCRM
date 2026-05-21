@@ -18,11 +18,24 @@
  * — subsequent steps do NOT run, admin can manual cancel/retry (phase 2).
  */
 import { randomUUID } from 'node:crypto';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
 import { zaloPool } from '../zalo/zalo-pool.js';
 import { logActivityAsync } from '../activity/activity-service.js';
 import { validateTagName } from '../crm-tags/crm-tag-helpers.js';
+
+/**
+ * Feature 0045 — the worker holds a row-level lock via FOR UPDATE SKIP
+ * LOCKED inside a Prisma `$transaction`. Step executor writes must go
+ * through that same `tx` so they're part of the locking transaction;
+ * otherwise the writes would race with another process re-claiming
+ * the row after lock release.
+ *
+ * For non-worker callers (`evaluateWorkflowTriggers` was always
+ * transaction-less), `tx ?? prisma` falls back to the global client.
+ */
+type Db = Prisma.TransactionClient | PrismaClient;
 import {
   appendStepLog,
   substituteTemplateVars,
@@ -174,16 +187,24 @@ export interface ExecutionLike {
  * Safe to call concurrently against different executions; same-row reentry
  * is prevented at the worker level by `FOR UPDATE SKIP LOCKED` (worker).
  */
-export async function processStep(exec: ExecutionLike): Promise<void> {
+export async function processStep(
+  exec: ExecutionLike,
+  tx?: Prisma.TransactionClient,
+): Promise<void> {
+  // Feature 0045: when called from the worker, `tx` is the locking
+  // transaction client. All reads + writes for this execution must
+  // route through `db` so the row-level lock continues to apply.
+  const db: Db = tx ?? prisma;
+
   // Re-read the workflow definition every tick so an admin disabling /
   // editing a workflow takes effect on subsequent steps. EC-0001 — we
   // continue execution even on disable (predictable behavior phase 1).
-  const wf = await prisma.workflowDefinition.findUnique({
+  const wf = await db.workflowDefinition.findUnique({
     where: { id: exec.workflowId },
   });
   if (!wf) {
     // Definition deleted mid-flight → cancel the execution gracefully.
-    await prisma.workflowExecution.update({
+    await db.workflowExecution.update({
       where: { id: exec.id },
       data: { status: 'cancelled', completedAt: new Date() },
     });
@@ -192,7 +213,7 @@ export async function processStep(exec: ExecutionLike): Promise<void> {
 
   const steps = wf.steps as unknown as WorkflowStep[];
   if (!Array.isArray(steps) || exec.currentStepIdx >= steps.length) {
-    await prisma.workflowExecution.update({
+    await db.workflowExecution.update({
       where: { id: exec.id },
       data: { status: 'completed', completedAt: new Date(), nextStepDueAt: null },
     });
@@ -200,7 +221,7 @@ export async function processStep(exec: ExecutionLike): Promise<void> {
   }
 
   const step = steps[exec.currentStepIdx];
-  const result = await runStep(step, exec);
+  const result = await runStep(step, exec, db);
 
   if (!result.ok) {
     const entry: StepLogEntry = {
@@ -210,7 +231,7 @@ export async function processStep(exec: ExecutionLike): Promise<void> {
       ranAt: new Date().toISOString(),
       error: result.error,
     };
-    await prisma.workflowExecution.update({
+    await db.workflowExecution.update({
       where: { id: exec.id },
       data: {
         status: 'failed',
@@ -235,7 +256,7 @@ export async function processStep(exec: ExecutionLike): Promise<void> {
 
   const nextIdx = exec.currentStepIdx + 1;
   if (nextIdx >= steps.length) {
-    await prisma.workflowExecution.update({
+    await db.workflowExecution.update({
       where: { id: exec.id },
       data: {
         status: 'completed',
@@ -254,7 +275,7 @@ export async function processStep(exec: ExecutionLike): Promise<void> {
   const delayMin = Number(nextStep.delayMinutes ?? 0);
   const nextDue = new Date(Date.now() + delayMin * 60 * 1000);
 
-  await prisma.workflowExecution.update({
+  await db.workflowExecution.update({
     where: { id: exec.id },
     data: {
       currentStepIdx: nextIdx,
@@ -268,15 +289,19 @@ export async function processStep(exec: ExecutionLike): Promise<void> {
 
 type RunResult = { ok: true } | { ok: false; error: string };
 
-async function runStep(step: WorkflowStep, exec: ExecutionLike): Promise<RunResult> {
+async function runStep(
+  step: WorkflowStep,
+  exec: ExecutionLike,
+  db: Db,
+): Promise<RunResult> {
   try {
     switch (step.type) {
       case 'send_message':
-        return await runSendMessage(step.content, exec);
+        return await runSendMessage(step.content, exec, db);
       case 'add_tag':
-        return await runAddTag(step.tag, exec);
+        return await runAddTag(step.tag, exec, db);
       case 'assign_user':
-        return await runAssignUser(step.userId, exec);
+        return await runAssignUser(step.userId, exec, db);
       case 'wait':
         // `wait` is purely a delay — by the time processStep picks it up
         // the delay has already elapsed (nextStepDueAt was set on entry).
@@ -295,8 +320,9 @@ async function runStep(step: WorkflowStep, exec: ExecutionLike): Promise<RunResu
 async function runSendMessage(
   content: string,
   exec: ExecutionLike,
+  db: Db,
 ): Promise<RunResult> {
-  const contact = await prisma.contact.findUnique({
+  const contact = await db.contact.findUnique({
     where: { id: exec.contactId },
     select: { id: true, fullName: true, zaloUid: true, assignedUserId: true },
   });
@@ -307,7 +333,7 @@ async function runSendMessage(
   // placeholder collapses cleanly when none assigned.
   let repName = '';
   if (contact.assignedUserId) {
-    const rep = await prisma.user.findUnique({
+    const rep = await db.user.findUnique({
       where: { id: contact.assignedUserId },
       select: { fullName: true },
     });
@@ -323,7 +349,7 @@ async function runSendMessage(
   // zca-js instance to drive. EC: conversation deleted mid-flight.
   let zaloAccountId: string | null = null;
   if (exec.conversationId) {
-    const conv = await prisma.conversation.findUnique({
+    const conv = await db.conversation.findUnique({
       where: { id: exec.conversationId },
       select: { zaloAccountId: true },
     });
@@ -333,7 +359,7 @@ async function runSendMessage(
     // Fallback: pick any connected zalo account in the org. Phase 1
     // workflows are simple enough that this is acceptable; phase 2 can
     // pin a workflow to a specific account.
-    const account = await prisma.zaloAccount.findFirst({
+    const account = await db.zaloAccount.findFirst({
       where: { orgId: exec.orgId, status: 'connected' },
       select: { id: true },
     });
@@ -341,6 +367,13 @@ async function runSendMessage(
     zaloAccountId = account.id;
   }
 
+  // `zaloAccountId` is guaranteed non-null at this point (either resolved
+  // from the conversation row or fetched from the org's connected account
+  // above) but TS' narrowing across a `Db` union type can lose track —
+  // assert here so the call site stays typed.
+  if (!zaloAccountId) {
+    return { ok: false, error: 'Tài khoản Zalo không kết nối' };
+  }
   const instance = zaloPool.getInstance(zaloAccountId);
   if (!instance?.api) {
     return { ok: false, error: 'Tài khoản Zalo không kết nối' };
@@ -349,6 +382,10 @@ async function runSendMessage(
   // Defensive sanitize — strip any control chars zca-js could misinterpret.
   const safeText = text.replace(/[ --]/g, '');
 
+  // Feature 0045 caveat: when called from the worker, the row-level lock
+  // is held across this external network call. Batch size 50 bounds the
+  // blast radius; if individual sends start running for minutes, phase 2
+  // splits each row into its own transaction (SPEC §8 Risk #2).
   await instance.api.sendMessage({ msg: safeText }, contact.zaloUid, 0);
 
   // Persist a self-message so the thread shows the outbound (mirrors
@@ -356,11 +393,11 @@ async function runSendMessage(
   // the actual send.
   try {
     if (exec.conversationId) {
-      const account = await prisma.zaloAccount.findUnique({
+      const account = await db.zaloAccount.findUnique({
         where: { id: zaloAccountId },
         select: { zaloUid: true },
       });
-      await prisma.message.create({
+      await db.message.create({
         data: {
           id: randomUUID(),
           conversationId: exec.conversationId,
@@ -372,7 +409,7 @@ async function runSendMessage(
           sentAt: new Date(),
         },
       });
-      await prisma.conversation.update({
+      await db.conversation.update({
         where: { id: exec.conversationId },
         data: { lastMessageAt: new Date(), isReplied: true, unreadCount: 0 },
       });
@@ -384,62 +421,71 @@ async function runSendMessage(
   return { ok: true };
 }
 
-async function runAddTag(tag: string, exec: ExecutionLike): Promise<RunResult> {
+async function runAddTag(
+  tag: string,
+  exec: ExecutionLike,
+  db: Db,
+): Promise<RunResult> {
   const validation = validateTagName(tag);
   if (!validation.ok) return { ok: false, error: `Tag không hợp lệ: ${validation.error}` };
 
-  // Upsert + link in a transaction so a partial failure doesn't leave a
-  // CrmTag row without the ContactTag join.
-  await prisma.$transaction(async (tx) => {
-    const crmTag = await tx.crmTag.upsert({
-      where: {
-        orgId_normalizedName: {
-          orgId: exec.orgId,
-          normalizedName: validation.normalized,
-        },
-      },
-      create: {
-        id: randomUUID(),
+  // Inline the upsert + link writes. When the worker passes `tx` to
+  // processStep, these are already inside the locking transaction;
+  // calling `db.$transaction` again here would either nest (unsupported
+  // by Prisma's interactive transactions) or open a second connection
+  // that escapes the lock. Either way the lock semantics break.
+  const crmTag = await db.crmTag.upsert({
+    where: {
+      orgId_normalizedName: {
         orgId: exec.orgId,
-        name: validation.display,
         normalizedName: validation.normalized,
       },
-      update: {},
-      select: { id: true },
-    });
-
-    const link = await tx.contactTag.findUnique({
-      where: { contactId_tagId: { contactId: exec.contactId, tagId: crmTag.id } },
-      select: { contactId: true },
-    });
-    if (!link) {
-      await tx.contactTag.create({
-        data: {
-          contactId: exec.contactId,
-          tagId: crmTag.id,
-          addedByUserId: null,
-        },
-      });
-      await tx.crmTag.update({
-        where: { id: crmTag.id },
-        data: { usageCount: { increment: 1 } },
-      });
-    }
+    },
+    create: {
+      id: randomUUID(),
+      orgId: exec.orgId,
+      name: validation.display,
+      normalizedName: validation.normalized,
+    },
+    update: {},
+    select: { id: true },
   });
+
+  const link = await db.contactTag.findUnique({
+    where: { contactId_tagId: { contactId: exec.contactId, tagId: crmTag.id } },
+    select: { contactId: true },
+  });
+  if (!link) {
+    await db.contactTag.create({
+      data: {
+        contactId: exec.contactId,
+        tagId: crmTag.id,
+        addedByUserId: null,
+      },
+    });
+    await db.crmTag.update({
+      where: { id: crmTag.id },
+      data: { usageCount: { increment: 1 } },
+    });
+  }
 
   return { ok: true };
 }
 
-async function runAssignUser(userId: string, exec: ExecutionLike): Promise<RunResult> {
+async function runAssignUser(
+  userId: string,
+  exec: ExecutionLike,
+  db: Db,
+): Promise<RunResult> {
   // Validate the user exists in the same org. Defensive — admin may have
   // deleted the assignee after building the workflow.
-  const user = await prisma.user.findFirst({
+  const user = await db.user.findFirst({
     where: { id: userId, orgId: exec.orgId },
     select: { id: true },
   });
   if (!user) return { ok: false, error: 'assignee không thuộc tổ chức' };
 
-  await prisma.contact.update({
+  await db.contact.update({
     where: { id: exec.contactId },
     data: { assignedUserId: userId },
   });

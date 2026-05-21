@@ -11,9 +11,27 @@
  * touch `decryptConfig` or call connectors directly. That gives us one
  * place to harden when phase-2 adds connectors (Slack, Zapier, FB Messenger).
  */
+import type { Prisma, PrismaClient } from '@prisma/client';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
 import { trackBackground } from '../../shared/utils/background-tasks.js';
+
+/**
+ * Feature 0045: the integration-runner takes a row-level lock on the
+ * Integration row via `FOR UPDATE SKIP LOCKED`. Writes to that row
+ * (lastSyncedAt, lastError) MUST go through the same transaction so
+ * they're part of the locking tx; otherwise another process could
+ * claim the row in the gap between lock release and write.
+ *
+ * Writes to the sibling `IntegrationRun` row don't strictly need to
+ * be inside the lock tx (different table, different row) but routing
+ * them through the same client keeps the write semantics atomic with
+ * the parent Integration update.
+ *
+ * Non-worker callers (the manual POST /:id/sync route, tests) pass no
+ * tx, so we fall back to the global `prisma` client.
+ */
+type Db = Prisma.TransactionClient | PrismaClient;
 import {
   encryptConfig,
   decryptConfig,
@@ -206,11 +224,19 @@ export async function softDeleteIntegration(orgId: string, id: string): Promise<
  * via trackBackground(). Two-phase so the HTTP route can return 202 with a
  * concrete runId before the sync completes.
  */
-export async function openSyncRun(integrationId: string): Promise<{
+export async function openSyncRun(
+  integrationId: string,
+  tx?: Prisma.TransactionClient,
+): Promise<{
   runId: string;
   row: IntegrationRow;
 }> {
-  const row = (await prisma.integration.findUnique({ where: { id: integrationId } })) as
+  // Feature 0045: when called from the worker, `tx` is the locking
+  // transaction client. Use it for both the existence check and the
+  // IntegrationRun insert so they stay inside the same transaction
+  // boundary as the Integration row's FOR UPDATE lock.
+  const db: Db = tx ?? prisma;
+  const row = (await db.integration.findUnique({ where: { id: integrationId } })) as
     | IntegrationRow
     | null;
   if (!row) throw new Error('Integration not found');
@@ -220,7 +246,7 @@ export async function openSyncRun(integrationId: string): Promise<{
   if (!connector || !connector.sync) {
     throw new Error(`Connector ${row.type} does not support sync`);
   }
-  const runRow = await prisma.integrationRun.create({
+  const runRow = await db.integrationRun.create({
     data: { integrationId: row.id, status: 'running' },
   });
   return { runId: runRow.id, row };
@@ -231,10 +257,22 @@ export async function openSyncRun(integrationId: string): Promise<{
  * Worker + manual-trigger route both go through here. Never throws — all
  * failures are recorded on the run row + parent Integration.
  */
-export async function executeSyncRun(runId: string, row: IntegrationRow): Promise<void> {
+export async function executeSyncRun(
+  runId: string,
+  row: IntegrationRow,
+  tx?: Prisma.TransactionClient,
+): Promise<void> {
+  // Feature 0045 caveat: when called from the worker, the Integration
+  // row is row-locked via FOR UPDATE SKIP LOCKED. The connector's sync
+  // call below may make external API requests (Google Sheets bulk
+  // update can take seconds for large datasets) — the lock is held the
+  // whole time. BATCH_SIZE=25 in integration-runner bounds the worst
+  // case to 25 serial syncs per tick. If individual syncs become
+  // multi-minute, phase 2 splits each row into its own transaction.
+  const db: Db = tx ?? prisma;
   const connector = getConnector(row.type);
   if (!connector || !connector.sync) {
-    await prisma.integrationRun.update({
+    await db.integrationRun.update({
       where: { id: runId },
       data: {
         status: 'failed',
@@ -247,7 +285,7 @@ export async function executeSyncRun(runId: string, row: IntegrationRow): Promis
   try {
     const config = decryptRowConfig(row);
     const result = await connector.sync(row.orgId, config as never);
-    await prisma.integrationRun.update({
+    await db.integrationRun.update({
       where: { id: runId },
       data: {
         status: result.status,
@@ -256,7 +294,7 @@ export async function executeSyncRun(runId: string, row: IntegrationRow): Promis
         completedAt: new Date(),
       },
     });
-    await prisma.integration.update({
+    await db.integration.update({
       where: { id: row.id },
       data: {
         lastSyncedAt: new Date(),
@@ -265,7 +303,7 @@ export async function executeSyncRun(runId: string, row: IntegrationRow): Promis
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await prisma.integrationRun.update({
+    await db.integrationRun.update({
       where: { id: runId },
       data: {
         status: 'failed',
@@ -273,7 +311,7 @@ export async function executeSyncRun(runId: string, row: IntegrationRow): Promis
         completedAt: new Date(),
       },
     });
-    await prisma.integration.update({
+    await db.integration.update({
       where: { id: row.id },
       data: { lastError: msg.slice(0, 500) },
     });
