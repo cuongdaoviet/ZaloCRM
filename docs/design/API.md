@@ -1843,3 +1843,103 @@ brief staleness beats re-aggregating on every dashboard reload.
 
 **Errors:** none in normal operation — an empty org returns
 `{ byAccount: [], totals: { 0, 0 }, windowDays }`.
+
+---
+
+## Feature 0035 — Per-account proxy + 0044 — Master-key rotation
+
+Allows owners/admins to route each `ZaloAccount` through a different
+HTTP(S)/SOCKS5 proxy and rotates the master encryption key that
+protects sensitive at-rest data (proxy URLs, AI API keys, integration
+configs). See
+[features/0035-per-account-proxy/SPEC.md](../features/0035-per-account-proxy/SPEC.md)
+and
+[features/0044-master-key-rotation/SPEC.md](../features/0044-master-key-rotation/SPEC.md).
+
+### PUT `/api/v1/zalo-accounts/:id` — Cycle 2026-05 additions
+
+Existing endpoint (Owner/Admin only) is extended with `proxyUrl` and
+the response gains a `requiresReconnect` flag.
+
+**New body fields:**
+
+| Field | Type | Notes |
+|---|---|---|
+| `proxyUrl` | string \| null | Proxy URL or `null`/empty string to clear. |
+| `displayName` | string \| null | Existing field — empty string treated as `null`. |
+
+**Accepted proxy schemes** (BR-0002 of SPEC §3):
+
+- `http://[user:pass@]host:port`
+- `https://[user:pass@]host:port`
+- `socks5://[user:pass@]host:port`
+- `socks://...` — normalised to `socks5://` before persisting.
+
+Trailing `/` is stripped. Empty string or `null` clears the proxy.
+
+**Validation errors (400):**
+
+- `{ "error": "Định dạng proxy không hợp lệ", "code": "invalid_proxy_format" }`
+  — scheme not in the allow-list or URL fails Zod's `.url()` check
+  (BR-0003).
+
+**Permission:** `requireRole('owner', 'admin')`. Members hitting
+the endpoint receive `403` from the role middleware before they ever
+see the body.
+
+**Response 200:**
+
+```json
+{
+  "id": "uuid",
+  "status": "connected",
+  "displayName": "Sale account #1",
+  "proxyUrl": "socks5://user:pass@10.0.0.1:1080",
+  "liveStatus": "connected",
+  "requiresReconnect": true
+}
+```
+
+- `requiresReconnect: true` when the new `proxyUrl` differs from the
+  previous value AND `zaloPool.getStatus(id)` is `connected`
+  (BR-0007). The FE prompts the admin to reconnect manually — the
+  backend never auto-reconnects, to avoid race conditions.
+- `proxyUrl` reflects the **post-update** plaintext value (decrypted
+  in-process before serialising). It is never logged in full — see
+  `maskProxyUrl()` for the redacted form (`socks5://***@host:port`,
+  BR-0010).
+
+**At-rest encryption (Feature 0044):** `proxyUrl` is stored as a
+triplet (`proxyUrlCipher`, `proxyUrlIv`, `proxyUrlTag`) using
+AES-256-GCM keyed by the org's derived key. The plaintext is only
+materialised in memory while serving GET/PUT. If decryption fails
+(typically post-rotation with a stale row) the response treats the
+account as having no proxy and a warn-level log line is emitted.
+
+### GET `/api/v1/zalo-accounts` — Cycle 2026-05 additions
+
+**Field visibility changes** (BR-0005 of Feature 0035 SPEC):
+
+- Owner/admin callers: each account object includes `proxyUrl`
+  (decrypted, or `null` when unset / decryption failed).
+- Non-admin callers: `proxyUrl` is omitted from the row entirely —
+  it never appears in `/conversations` or other non-Settings endpoints
+  either.
+
+Existing fields (`id`, `status`, `displayName`, etc.) are unchanged.
+No new query params.
+
+### Master-key rotation (operator-facing)
+
+Master-key rotation is **not** an HTTP endpoint — it ships as a
+backend CLI (`backend/scripts/0044-rotate-master-key.ts`) and is
+documented separately in the SPEC. The HTTP contract above is the
+**only** observable change for API callers:
+
+- Encrypted columns (`proxyUrlCipher/Iv/Tag`,
+  `AiConfig.apiKeyCipher/Iv/Tag`, `Integration.configCipher/...`)
+  are re-encrypted in-place during rotation.
+- Wire shapes stay identical — the FE never sees ciphertext.
+- A failed decrypt during a GET request returns the row with the
+  affected plaintext field set to `null` rather than 500-ing, so a
+  partially-rotated org never fully breaks.
