@@ -10,6 +10,12 @@ datasource db {
 model Organization {
   id        String   @id @default(uuid())
   name      String
+  // ─── Feature 0040 — Lead scoring config ────────────────────────────────────
+  // Per-org override for the rules-based lead scoring formula. When null the
+  // service falls back to baked-in defaults (BR-0007). Schema enforced at the
+  // application layer (see lead-score-service.parseLeadScoreConfig).
+  // ────────────────────────────────────────────────────────────────────────────
+  leadScoreConfig Json?   @map("lead_score_config")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

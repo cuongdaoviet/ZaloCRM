@@ -4,6 +4,7 @@
  * All routes require JWT auth and are scoped to user's org.
  */
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { authMiddleware } from '../auth/auth-middleware.js';
 import { logger } from '../../shared/utils/logger.js';
@@ -12,6 +13,14 @@ import {
   setContactTags,
   legacyTagsByName,
 } from '../crm-tags/crm-tag-service.js';
+import {
+  loadLeadScoreConfig,
+  computeLeadScore,
+  computeLeadScoresBatch,
+  validateLeadScoreConfig,
+  DEFAULT_LEAD_SCORE_CONFIG,
+} from './lead-score-service.js';
+import { requireRole } from '../auth/role-middleware.js';
 
 type QueryParams = Record<string, string>;
 
@@ -64,6 +73,15 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
       const pageNum = parseInt(page);
       const limitNum = parseInt(limit);
 
+      // Feature 0040: optional ?sort=leadScore (default: updatedAt DESC).
+      // Lead score sorting happens AFTER batch compute since the score
+      // isn't persisted (BR-0009). For leadScore sort we widen the candidate
+      // pool to org-wide-but-bounded (cap 1000 per page EC-0004) then sort
+      // in-process. Other sorts use the existing DB orderBy.
+      const sortParam = typeof queryRaw.sort === 'string' ? queryRaw.sort : '';
+      const sortDir = queryRaw.order === 'asc' ? 'asc' : 'desc';
+      const sortByLeadScore = sortParam === 'leadScore';
+
       const [contacts, total] = await Promise.all([
         prisma.contact.findMany({
           where,
@@ -72,13 +90,44 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
             _count: { select: { conversations: true, appointments: true } },
           },
           orderBy: { updatedAt: 'desc' },
-          skip: (pageNum - 1) * limitNum,
-          take: limitNum,
+          // EC-0004: cap batch compute at 1000. If client asked for a wider
+          // page the FE should paginate.
+          skip: sortByLeadScore ? 0 : (pageNum - 1) * limitNum,
+          take: sortByLeadScore ? Math.min(1000, Math.max(limitNum, pageNum * limitNum)) : limitNum,
         }),
         prisma.contact.count({ where }),
       ]);
 
-      return { contacts, total, page: pageNum, limit: limitNum };
+      // Batch compute lead scores for the returned slice.
+      const config = await loadLeadScoreConfig(user.orgId);
+      const scoreMap = await computeLeadScoresBatch(
+        contacts.map((c) => c.id),
+        config,
+      );
+      let enriched = contacts.map((c) => {
+        const r = scoreMap.get(c.id);
+        return {
+          ...c,
+          leadScore: r?.score ?? 0,
+          leadScoreBreakdown: r?.breakdown ?? {
+            recency: 0,
+            engagement: 0,
+            status: 0,
+            appointment: 0,
+          },
+        };
+      });
+
+      if (sortByLeadScore) {
+        enriched.sort((a, b) =>
+          sortDir === 'asc' ? a.leadScore - b.leadScore : b.leadScore - a.leadScore,
+        );
+        // Apply pagination AFTER sort-in-process.
+        const start = (pageNum - 1) * limitNum;
+        enriched = enriched.slice(start, start + limitNum);
+      }
+
+      return { contacts: enriched, total, page: pageNum, limit: limitNum };
     } catch (err) {
       logger.error('[contacts] List error:', err);
       return reply.status(500).send({ error: 'Failed to fetch contacts' });
@@ -173,6 +222,9 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
         color: ct.tag.color,
         emoji: ct.tag.emoji,
       }));
+      // Feature 0040: include leadScore + breakdown on detail (AC-0003).
+      const leadConfig = await loadLeadScoreConfig(user.orgId);
+      const leadResult = await computeLeadScore(contact.id, leadConfig);
       // Strip the heavy join out of the wire payload and replace `tags` with
       // the enriched shape.
       const { contactTags, ...rest } = contact;
@@ -180,12 +232,91 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
       return {
         ...rest,
         tags: enrichedTags,
+        leadScore: leadResult.score,
+        leadScoreBreakdown: leadResult.breakdown,
       };
     } catch (err) {
       logger.error('[contacts] Detail error:', err);
       return reply.status(500).send({ error: 'Failed to fetch contact' });
     }
   });
+
+  // ── Feature 0040 — Lead score config endpoints ────────────────────────────
+  // Defaults are exposed (AC-0007 paths assume `defaults` shape).
+  //
+  // GET /api/v1/settings/lead-score-config — read current org config (any auth
+  //   user; settings UI is admin-gated on the FE, but reads are non-sensitive).
+  // PUT /api/v1/settings/lead-score-config — admin/owner only (AC-0008).
+  app.get(
+    '/api/v1/settings/lead-score-config',
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const user = request.user!;
+        const org = await prisma.organization.findUnique({
+          where: { id: user.orgId },
+          select: { leadScoreConfig: true },
+        });
+        const stored = (org?.leadScoreConfig ?? null) as unknown;
+        // Hand back the resolved config (defaults if unset/corrupt) plus
+        // the raw stored value so the FE can show "still on defaults" hint.
+        const resolved = stored === null ? DEFAULT_LEAD_SCORE_CONFIG : (() => {
+          const v = validateLeadScoreConfig(stored);
+          return v.ok ? v.value : DEFAULT_LEAD_SCORE_CONFIG;
+        })();
+        return {
+          config: resolved,
+          isCustom: stored !== null,
+          defaults: DEFAULT_LEAD_SCORE_CONFIG,
+        };
+      } catch (err) {
+        logger.error('[lead-score] GET config error:', err);
+        return reply.status(500).send({ error: 'Failed to fetch lead score config' });
+      }
+    },
+  );
+
+  app.put(
+    '/api/v1/settings/lead-score-config',
+    { preHandler: [requireRole('owner', 'admin')] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const user = request.user!;
+        const body = request.body as unknown;
+        const result = validateLeadScoreConfig(body);
+        if (!result.ok) {
+          return reply.status(400).send({ error: result.error });
+        }
+        // Persist the validated/normalised config — sorted buckets, trimmed
+        // status map. This is the round-tripped shape that GET returns.
+        await prisma.organization.update({
+          where: { id: user.orgId },
+          data: { leadScoreConfig: result.value as object },
+        });
+        return { config: result.value, isCustom: true, defaults: DEFAULT_LEAD_SCORE_CONFIG };
+      } catch (err) {
+        logger.error('[lead-score] PUT config error:', err);
+        return reply.status(500).send({ error: 'Failed to save lead score config' });
+      }
+    },
+  );
+
+  app.delete(
+    '/api/v1/settings/lead-score-config',
+    { preHandler: [requireRole('owner', 'admin')] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const user = request.user!;
+        await prisma.organization.update({
+          where: { id: user.orgId },
+          data: { leadScoreConfig: Prisma.JsonNull },
+        });
+        return { config: DEFAULT_LEAD_SCORE_CONFIG, isCustom: false, defaults: DEFAULT_LEAD_SCORE_CONFIG };
+      } catch (err) {
+        logger.error('[lead-score] DELETE config error:', err);
+        return reply.status(500).send({ error: 'Failed to reset lead score config' });
+      }
+    },
+  );
 
   // ── POST /api/v1/contacts — create new contact ────────────────────────────
   // Feature 0019 Phase C: `tags` is no longer a column on Contact. Callers
