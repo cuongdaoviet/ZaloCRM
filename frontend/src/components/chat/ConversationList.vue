@@ -92,6 +92,8 @@
           :key="`pin-${conv.id}`"
           :active="conv.id === selectedId"
           @click="$emit('select', conv.id)"
+          @mouseenter="onRowHover(conv.id)"
+          @mouseleave="onRowHoverLeave"
           class="py-2"
           :class="{ 'conversation-active': conv.id === selectedId, 'bg-blue-lighten-5': conv.unreadCount > 0 && conv.id !== selectedId }"
         >
@@ -152,6 +154,8 @@
         :key="conv.id"
         :active="conv.id === selectedId"
         @click="$emit('select', conv.id)"
+        @mouseenter="onRowHover(conv.id)"
+        @mouseleave="onRowHoverLeave"
         @contextmenu.prevent="openContextMenu($event, conv)"
         class="py-2 conversation-row"
         :class="{ 'conversation-active': conv.id === selectedId, 'bg-blue-lighten-5': conv.unreadCount > 0 && conv.id !== selectedId }"
@@ -269,6 +273,13 @@ const props = defineProps<{
   // Feature 0023 — per-tab badge counts (sourced from /conversations/counts)
   mainUnread?: number;
   otherUnread?: number;
+  /**
+   * Feature 0043 — hover prefetch callbacks. The parent owns the cache so
+   * we hand off the conversationId on hover and let the composable decide
+   * when to actually fire the request (200ms debounce internally).
+   */
+  onHover?: (conversationId: string) => void;
+  onHoverLeave?: () => void;
 }>();
 
 const emit = defineEmits<{
@@ -288,6 +299,18 @@ const emit = defineEmits<{
   // Feature 0023 — context-menu action: move a single row between tabs.
   'set-conv-tab': [convId: string, tab: ConversationTab];
 }>();
+
+// ── Feature 0043 — Hover prefetch (BR-0001) ─────────────────────────────
+// Thin pass-through to the composable callbacks supplied by ChatView. The
+// 200ms debounce + cache live in use-conversation-prefetch.ts, so this
+// component stays dumb about timing.
+function onRowHover(convId: string): void {
+  props.onHover?.(convId);
+}
+
+function onRowHoverLeave(): void {
+  props.onHoverLeave?.();
+}
 
 // ── Feature 0023 — Tab bar + context menu ───────────────────────────────
 const activeTab = computed<ConversationTab>(() => props.filters?.tab ?? 'main');

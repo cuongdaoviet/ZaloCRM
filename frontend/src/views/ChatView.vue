@@ -14,6 +14,8 @@
         :unreplied-total="unrepliedTotal"
         :main-unread="mainUnread"
         :other-unread="otherUnread"
+        :on-hover="onConversationHover"
+        :on-hover-leave="onConversationHoverLeave"
         v-model:search="searchQuery"
         @select="selectConversation"
         @filter-account="onFilterAccount"
@@ -95,6 +97,8 @@ const {
   resetFilters, fetchConversationCounts,
   fetchConversations, selectConversation, sendMessage, sendAttachment, createConversation,
   initSocket, destroySocket, addOrToggleReaction,
+  // Feature 0043 — hover prefetch handles passed through to ConversationList.
+  onConversationHover, onConversationHoverLeave,
 } = useChat();
 
 // Feature 0021 — feed auth identity into the chat composable so the
