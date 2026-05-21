@@ -10,6 +10,7 @@ import { zaloPool } from '../zalo/zalo-pool.js';
 import { zaloRateLimiter } from '../zalo/zalo-rate-limiter.js';
 import { logger } from '../../shared/utils/logger.js';
 import { uploadBuffer } from '../../shared/storage/minio-client.js';
+import { config } from '../../config/index.js';
 import { randomUUID } from 'node:crypto';
 import { writeFile, unlink, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -429,53 +430,211 @@ export async function chatRoutes(app: FastifyInstance) {
       // zca-js AttachmentSource requires filename to have an extension like `${string}.${string}`
       const safeFilename = filename.includes('.') ? filename : `${filename}.bin`;
 
-      // Feature 0027 — MinIO/S3 attachment mirror.
-      // Flow (BR-0004):
-      //   1. Save buffer to a tmp file (some zca-js code paths need a path).
-      //   2. Upload buffer to MinIO BEFORE calling Zalo. On failure → 502
-      //      `storage_failed` with no Zalo call (BR-0005) — we never want
-      //      a Message row that points at a Zalo CDN URL we couldn't mirror.
-      //   3. Call zca-js with the buffer (existing AttachmentSource shape).
-      //   4. Persist Message with the **MinIO URL** as `content` so the FE
-      //      can render it via `getImageUrl()` / `<img src>` without needing
-      //      Zalo's auth. The `attachments` JSON field keeps the metadata.
-      //   5. Delete the tmp file in `finally` (swallow errors).
-      // If zca-js fails AFTER MinIO succeeds (BR-0006) → 502
-      // `zalo_send_failed`, MinIO object is left as an orphan (acceptable
-      // per EC-0006, documented in RUNBOOK).
+      // Feature 0027 — MinIO/S3 attachment mirror (primary path).
+      // Feature 0032 — Zalo CDN fallback when MinIO is disabled.
+      //
+      // Flow:
+      //   1. Save buffer to a tmp file (uploadAttachment needs a path).
+      //   2. If `config.minioEnabled` (default), upload to MinIO first.
+      //      - On success: call zca-js sendMessage with the buffer
+      //        (AttachmentSource), persist Message with MinIO URL as
+      //        `content`. Existing 0027 contract preserved.
+      //      - On failure: 502 `storage_failed` (Feature 0027 BR-0005 —
+      //        opt-in to MinIO means we never accept a Zalo-only URL).
+      //   3. If `minioEnabled=false` (env opt-out): Zalo CDN fallback
+      //      (Feature 0032 BR-0001..BR-0003):
+      //      a. `api.uploadAttachment(tmpPath, threadDest)` — returns
+      //         `{ hdUrl, normalUrl, thumb, ... }` from Zalo CDN.
+      //      b. Validate hdUrl non-empty — if empty (Zalo flake / 3.0 bug):
+      //         502 `upload_failed`. We NEVER persist a Message with an
+      //         empty hdUrl (root cause of the 3.0 image-preview bug).
+      //      c. `api.sendMessage({ attachments: [hdUrl] })` to deliver.
+      //      d. Persist Message with `content` as a JSON envelope
+      //         `{ href, hdUrl, thumb }` — matches the inbound envelope
+      //         shape (see message-handler.ts), so the FE's getImageUrl()
+      //         picks up the URL without changes.
+      //   4. Both paths populate `attachments[0]` JSON metadata with
+      //      `hdUrl` + `thumb` (when available) so future export / forward
+      //      features have the Zalo CDN reference, not just the mirror URL.
+      //   5. Delete the tmp file in `finally`.
+      //
+      // If zca-js sendMessage fails AFTER MinIO succeeds (0027 BR-0006) →
+      // 502 `zalo_send_failed`, MinIO object orphaned (acceptable, RUNBOOK).
       const tmpDir = path.join(tmpdir(), 'zalocrm-upload', randomUUID());
       const tmpPath = path.join(tmpDir, safeFilename);
-      let mirrorUrl: string | null = null;
 
       try {
         await mkdir(tmpDir, { recursive: true });
         await writeFile(tmpPath, buffer);
 
+        let mirrorUrl: string | null = null;
+        if (config.minioEnabled) {
+          // Primary path — MinIO mirror. On failure we return 502
+          // `storage_failed` (Feature 0027 BR-0005) WITHOUT calling Zalo,
+          // because the deployment opted into MinIO mirroring and we must
+          // not silently persist a Zalo-only URL.
+          try {
+            const mirror = await uploadBuffer(buffer, mimeType, safeFilename);
+            mirrorUrl = mirror.url;
+          } catch (err) {
+            logger.error('[chat] MinIO upload failed:', err);
+            return reply
+              .status(502)
+              .send({ error: 'Không lưu được file lên bộ nhớ', code: 'storage_failed' });
+          }
+        }
+        // else: Feature 0032 — env opted out (MINIO_ENABLED=false) → skip
+        // MinIO entirely and drop straight into the Zalo CDN fallback below.
+
+        const threadId = conversation.externalThreadId || '';
+        const threadType = conversation.threadType === 'group' ? 1 : 0;
+
+        if (mirrorUrl) {
+          // ── Primary path: MinIO mirror + zca-js sendMessage with buffer ─
+          try {
+            zaloRateLimiter.recordSend(conversation.zaloAccountId);
+            const attachmentSource = {
+              data: buffer,
+              filename: safeFilename as `${string}.${string}`,
+              metadata: { totalSize: buffer.length },
+            };
+            const sendResult = await instance.api.sendMessage(
+              { msg: '', attachments: [attachmentSource] },
+              threadId,
+              threadType,
+            );
+
+            const zaloMsgId =
+              sendResult?.attachment?.[0]?.msgId !== undefined
+                ? String(sendResult.attachment[0].msgId)
+                : null;
+
+            // Feature 0032 — best-effort: zca-js sometimes echoes hdUrl /
+            // normalUrl in the attachment response. Persist when present so
+            // future export / forward features have the Zalo CDN ref.
+            const zaloAtt = (sendResult?.attachment?.[0] ?? {}) as Record<string, unknown>;
+            const echoedHdUrl =
+              typeof zaloAtt.hdUrl === 'string'
+                ? zaloAtt.hdUrl
+                : typeof zaloAtt.normalUrl === 'string'
+                  ? zaloAtt.normalUrl
+                  : null;
+            const echoedThumb = typeof zaloAtt.thumb === 'string' ? zaloAtt.thumb : null;
+
+            const message = await prisma.message.create({
+              data: {
+                id: randomUUID(),
+                conversationId: id,
+                zaloMsgId,
+                senderType: 'self',
+                senderUid: conversation.zaloAccount.zaloUid || '',
+                senderName: 'Staff',
+                // 0027 contract: `content` is the MinIO URL (plain string).
+                // FE's getImageUrl() handles `content.startsWith('http')`.
+                content: mirrorUrl,
+                contentType: isImage ? 'image' : 'file',
+                attachments: [
+                  {
+                    filename: safeFilename,
+                    size: buffer.length,
+                    mimeType,
+                    url: mirrorUrl,
+                    // 0032 BR-0002 — populate when Zalo response carries them.
+                    hdUrl: echoedHdUrl,
+                    thumb: echoedThumb,
+                  },
+                ],
+                sentAt: new Date(),
+                repliedByUserId: user.id,
+              },
+            });
+
+            await prisma.conversation.update({
+              where: { id },
+              data: { lastMessageAt: new Date(), isReplied: true, unreadCount: 0 },
+            });
+
+            const io = (app as any).io as Server | undefined;
+            io?.emit('chat:message', {
+              accountId: conversation.zaloAccountId,
+              message,
+              conversationId: id,
+            });
+
+            return reply.status(201).send(message);
+          } catch (err) {
+            // 0027 BR-0006 — MinIO succeeded but Zalo failed. We orphan
+            // the MinIO object on purpose; replaying with the same buffer
+            // would create a second object. RUNBOOK documents the sweep.
+            logger.error('[chat] Send attachment to Zalo failed:', err);
+            return reply
+              .status(502)
+              .send({ error: 'Gửi file qua Zalo thất bại', code: 'zalo_send_failed' });
+          }
+        }
+
+        // ── Feature 0032 — Zalo CDN fallback path ────────────────────────
+        // BR-0001..BR-0003: uploadAttachment FIRST → validate hdUrl →
+        // sendMessage with the returned URL. We persist the hdUrl from
+        // uploadAttachment (NOT from sendMessage) because zca-js
+        // sometimes returns empty hdUrl on the sendMessage response — the
+        // root cause of the 3.0 empty-preview bug.
+        let uploadResp: Record<string, unknown> = {};
         try {
-          const mirror = await uploadBuffer(buffer, mimeType, safeFilename);
-          mirrorUrl = mirror.url;
+          zaloRateLimiter.recordSend(conversation.zaloAccountId);
+          const apiAny = instance.api as unknown as {
+            uploadAttachment?: (
+              src: string | string[],
+              threadId: string,
+              threadType?: number,
+            ) => Promise<unknown>;
+          };
+          if (typeof apiAny.uploadAttachment !== 'function') {
+            logger.error(
+              '[chat] zca-js instance does not expose uploadAttachment — fallback unavailable',
+            );
+            return reply
+              .status(502)
+              .send({ error: 'Không tải được file lên Zalo', code: 'upload_failed' });
+          }
+
+          const raw = await apiAny.uploadAttachment(tmpPath, threadId, threadType);
+          // zca-js may return the response directly or wrapped in an array
+          // (single-file API). Normalise to a single object.
+          uploadResp =
+            (Array.isArray(raw) ? (raw[0] as Record<string, unknown>) : (raw as Record<string, unknown>)) ?? {};
         } catch (err) {
-          logger.error('[chat] MinIO upload failed:', err);
+          // EC-0002 — uploadAttachment threw (network, quota, auth).
+          logger.error('[chat] Zalo uploadAttachment failed:', err);
           return reply
             .status(502)
-            .send({ error: 'Không lưu được file lên bộ nhớ', code: 'storage_failed' });
+            .send({ error: 'Không tải được file lên Zalo', code: 'upload_failed' });
+        }
+
+        // BR-0003 / EC-0001 — validate non-empty hdUrl. Prefer hdUrl, then
+        // normalUrl, then fileUrl (zca-js variants observed in the wild).
+        const pick = (v: unknown): string | null =>
+          typeof v === 'string' && v.length > 0 ? v : null;
+        const hdUrl =
+          pick(uploadResp.hdUrl) ||
+          pick(uploadResp.normalUrl) ||
+          pick(uploadResp.fileUrl) ||
+          pick((uploadResp as { url?: unknown }).url);
+        const thumb = pick(uploadResp.thumb);
+
+        if (!hdUrl) {
+          logger.error(
+            '[chat] uploadAttachment returned empty hdUrl — refusing to persist:',
+            uploadResp,
+          );
+          return reply
+            .status(502)
+            .send({ error: 'Không tải được file lên Zalo', code: 'upload_failed' });
         }
 
         try {
-          zaloRateLimiter.recordSend(conversation.zaloAccountId);
-          const threadId = conversation.externalThreadId || '';
-          const threadType = conversation.threadType === 'group' ? 1 : 0;
-
-          // Pass the buffer (existing contract — keeps the single-file API
-          // shape). We've already mirrored to MinIO so the local copy is
-          // safe; if Zalo throws here we orphan the MinIO object.
-          const attachmentSource = {
-            data: buffer,
-            filename: safeFilename as `${string}.${string}`,
-            metadata: { totalSize: buffer.length },
-          };
           const sendResult = await instance.api.sendMessage(
-            { msg: '', attachments: [attachmentSource] },
+            { msg: '', attachments: [hdUrl] } as any,
             threadId,
             threadType,
           );
@@ -483,7 +642,18 @@ export async function chatRoutes(app: FastifyInstance) {
           const zaloMsgId =
             sendResult?.attachment?.[0]?.msgId !== undefined
               ? String(sendResult.attachment[0].msgId)
-              : null;
+              : sendResult?.message?.msgId !== undefined
+                ? String(sendResult.message.msgId)
+                : null;
+
+          // BR-0002 — `content` is a JSON envelope matching the inbound
+          // shape so the FE's getImageUrl() (and any export/forward code)
+          // sees the same structure regardless of inbound vs. outbound.
+          const envelope = {
+            href: hdUrl,
+            hdUrl,
+            thumb,
+          };
 
           const message = await prisma.message.create({
             data: {
@@ -493,16 +663,16 @@ export async function chatRoutes(app: FastifyInstance) {
               senderType: 'self',
               senderUid: conversation.zaloAccount.zaloUid || '',
               senderName: 'Staff',
-              // AC-0003: `content` is the MinIO URL. FE's getImageUrl()
-              // handles `content.startsWith('http')` directly.
-              content: mirrorUrl,
+              content: JSON.stringify(envelope),
               contentType: isImage ? 'image' : 'file',
               attachments: [
                 {
                   filename: safeFilename,
                   size: buffer.length,
                   mimeType,
-                  url: mirrorUrl,
+                  url: hdUrl,
+                  hdUrl,
+                  thumb,
                 },
               ],
               sentAt: new Date(),
@@ -524,10 +694,8 @@ export async function chatRoutes(app: FastifyInstance) {
 
           return reply.status(201).send(message);
         } catch (err) {
-          // BR-0006 — MinIO succeeded but Zalo failed. We orphan the MinIO
-          // object on purpose; replaying with the same buffer would create
-          // a second object. RUNBOOK documents the manual sweep.
-          logger.error('[chat] Send attachment to Zalo failed:', err);
+          // EC-0003 — MinIO down + Zalo sendMessage failed: surface 502.
+          logger.error('[chat] Send attachment to Zalo (fallback) failed:', err);
           return reply
             .status(502)
             .send({ error: 'Gửi file qua Zalo thất bại', code: 'zalo_send_failed' });
