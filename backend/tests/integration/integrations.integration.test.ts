@@ -24,26 +24,50 @@ let prisma: PrismaClient;
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
+// vitest hoists vi.mock() calls to the top of the file. Any variable the
+// factory closes over must therefore be created via vi.hoisted() — otherwise
+// the const declarations land below the hoisted factory and we hit a TDZ
+// ReferenceError when the factory is evaluated. This bit us once already on
+// the FE (commit 2791f62) and is the root cause of the 6 google-sheets test
+// failures in this file (the OAuth2 / sheets() factories returned undefined
+// shapes, so testConnection threw and createIntegration returned 400).
+
 // Telegram API: we control fetch responses per-test.
-const fetchMock = vi.fn();
+const fetchMock = vi.hoisted(() => vi.fn());
 vi.stubGlobal('fetch', fetchMock);
 
 // googleapis: stub sheets.spreadsheets.{get,values.{clear,update}} per test.
-const sheetsGetMock = vi.fn();
-const sheetsClearMock = vi.fn();
-const sheetsUpdateMock = vi.fn();
-const getTokenMock = vi.fn();
-const setCredentialsMock = vi.fn();
-const generateAuthUrlMock = vi.fn(() => 'https://accounts.google.com/o/oauth2/v2/auth?mock=1');
+const {
+  sheetsGetMock,
+  sheetsClearMock,
+  sheetsUpdateMock,
+  getTokenMock,
+  setCredentialsMock,
+  generateAuthUrlMock,
+} = vi.hoisted(() => ({
+  sheetsGetMock: vi.fn(),
+  sheetsClearMock: vi.fn(),
+  sheetsUpdateMock: vi.fn(),
+  getTokenMock: vi.fn(),
+  setCredentialsMock: vi.fn(),
+  generateAuthUrlMock: vi.fn(() => 'https://accounts.google.com/o/oauth2/v2/auth?mock=1'),
+}));
 
 vi.mock('googleapis', () => ({
   google: {
     auth: {
-      OAuth2: vi.fn().mockImplementation(() => ({
-        setCredentials: setCredentialsMock,
-        getToken: getTokenMock,
-        generateAuthUrl: generateAuthUrlMock,
-      })),
+      // OAuth2 is invoked with `new google.auth.OAuth2(...)` in
+      // connectors/google-sheets.ts. Arrow factories can't be used as
+      // constructors (TypeError: "is not a constructor"), so we use a
+      // regular `function` expression here — vitest sees it as a class-ish
+      // ctor and `new` returns the explicit object.
+      OAuth2: vi.fn().mockImplementation(function (this: unknown) {
+        return {
+          setCredentials: setCredentialsMock,
+          getToken: getTokenMock,
+          generateAuthUrl: generateAuthUrlMock,
+        };
+      }),
     },
     sheets: vi.fn().mockReturnValue({
       spreadsheets: {
@@ -57,9 +81,11 @@ vi.mock('googleapis', () => ({
   },
 }));
 
-const loggerInfo = vi.fn();
-const loggerWarn = vi.fn();
-const loggerError = vi.fn();
+const { loggerInfo, loggerWarn, loggerError } = vi.hoisted(() => ({
+  loggerInfo: vi.fn(),
+  loggerWarn: vi.fn(),
+  loggerError: vi.fn(),
+}));
 vi.mock('../../src/shared/utils/logger.js', () => ({
   logger: { info: loggerInfo, warn: loggerWarn, error: loggerError, debug: vi.fn() },
 }));
@@ -77,7 +103,11 @@ vi.mock('../../src/modules/auth/auth-middleware.js', () => ({
 }));
 
 // Stable master key for the test process — must be exactly 32 bytes hex.
-process.env.INTEGRATION_CONFIG_MASTER_KEY =
+// Feature 0038 piggybacks on 0036's encrypt-config helper, which reads
+// AI_CONFIG_MASTER_KEY (the placeholder all-zeros also passes the regex
+// guard, but we set an explicit value here so the test process matches what
+// production does).
+process.env.AI_CONFIG_MASTER_KEY =
   'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 process.env.GOOGLE_OAUTH_CLIENT_ID = 'test-client';
 process.env.GOOGLE_OAUTH_CLIENT_SECRET = 'test-secret';
@@ -683,12 +713,15 @@ describe('AC-0010: disabled integrations are skipped', () => {
         type: 'telegram_bot',
         name: 'Off',
         config: {
-          botToken: '1:abc',
+          // ≥ 10 chars: telegram_bot validator requires botToken.length >= 10
+          // (see isTelegramBotConfig in connectors/telegram-bot.ts).
+          botToken: '111:abcdefg',
           chatId: '-1',
           eventTypes: ['contact.created'],
         },
       },
     });
+    expect(create.statusCode).toBe(201);
     const { id } = JSON.parse(create.payload);
     // Flip enabled=false
     await app.inject({
@@ -811,12 +844,14 @@ describe('soft delete clears encrypted config', () => {
         type: 'telegram_bot',
         name: 'ToDelete',
         config: {
-          botToken: '1:abc',
+          // ≥ 10 chars: telegram_bot validator requires botToken.length >= 10.
+          botToken: '111:abcdefg',
           chatId: '-1',
           eventTypes: ['contact.created'],
         },
       },
     });
+    expect(create.statusCode).toBe(201);
     const { id } = JSON.parse(create.payload);
     const del = await app.inject({ method: 'DELETE', url: `/api/v1/integrations/${id}` });
     expect(del.statusCode).toBe(204);
