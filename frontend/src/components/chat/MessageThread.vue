@@ -58,9 +58,120 @@
       </div>
 
       <!-- Messages -->
-      <div ref="messagesContainer" class="flex-grow-1 overflow-y-auto pa-3 chat-messages-area">
-        <v-progress-linear v-if="loading" indeterminate color="primary" class="mb-2" />
-        <div v-for="msg in messages" :key="msg.id" class="mb-2 d-flex message-row" :class="msg.senderType === 'self' ? 'justify-end' : 'justify-start'">
+      <!--
+        Feature 0043 — three render paths for the message body:
+          1. cache miss + loading → skeleton bubbles (no blank flash)
+          2. long thread (> 100 msgs) → VVirtualScroll, only ~visible rows mount (AC-0003)
+          3. short thread → normal v-for (current behaviour)
+        All three live inside the same scroll container so scroll-to-bottom
+        and scroll-position-preservation logic stays unified.
+      -->
+      <div
+        ref="messagesContainer"
+        class="flex-grow-1 overflow-y-auto pa-3 chat-messages-area"
+        :class="{ 'thread-fade-in': !loading && messages.length > 0 }"
+        @scroll="onThreadScroll"
+      >
+        <v-progress-linear v-if="loading && messages.length > 0" indeterminate color="primary" class="mb-2" />
+
+        <!-- Cache-miss initial load: show skeleton bubbles -->
+        <MessageSkeleton v-if="loading && messages.length === 0" :count="6" />
+
+        <!-- Long thread → virtualized -->
+        <v-virtual-scroll
+          v-else-if="useVirtual"
+          ref="virtualScrollRef"
+          :items="messages"
+          :item-height="64"
+          item-key="id"
+          class="virtual-thread"
+          data-testid="virtual-message-list"
+        >
+          <template #default="{ item: msg }">
+            <div class="mb-2 d-flex message-row" :class="msg.senderType === 'self' ? 'justify-end' : 'justify-start'">
+              <div style="max-width: 70%;">
+                <div v-if="conversation.threadType === 'group' && msg.senderType !== 'self'" class="text-caption text-primary font-weight-medium mb-1">
+                  {{ msg.senderName || 'Unknown' }}
+                </div>
+                <div class="bubble-wrapper" :class="msg.senderType === 'self' ? 'bubble-wrapper--self' : 'bubble-wrapper--contact'">
+                  <div class="message-bubble pa-2 px-3 rounded-lg" :class="msg.senderType === 'self' ? 'bg-primary text-white' : 'bg-white'" style="word-wrap: break-word;">
+                    <div v-if="msg.isDeleted" class="text-decoration-line-through font-italic" style="opacity: 0.6;">
+                      {{ msg.content || '(tin nhắn)' }}<span class="text-caption"> (đã thu hồi)</span>
+                    </div>
+                    <div v-else-if="getImageUrl(msg)">
+                      <img :src="getImageUrl(msg)!" alt="Hình ảnh" loading="lazy" class="chat-image" @click="previewImageUrl = getImageUrl(msg)!" />
+                    </div>
+                    <div v-else-if="getFileInfo(msg)" class="file-card">
+                      <v-icon size="20" class="mr-2" color="info">mdi-file-document-outline</v-icon>
+                      <div class="flex-grow-1">
+                        <div class="text-body-2 font-weight-medium">{{ getFileInfo(msg)!.name }}</div>
+                        <div class="text-caption" style="opacity: 0.6;">{{ getFileInfo(msg)!.size }}</div>
+                      </div>
+                      <v-btn v-if="getFileInfo(msg)!.href" icon size="x-small" variant="text" @click="openFile(getFileInfo(msg)!.href)">
+                        <v-icon size="16">mdi-download</v-icon>
+                      </v-btn>
+                    </div>
+                    <div v-else-if="msg.contentType === 'sticker'">🏷️ Sticker</div>
+                    <video
+                      v-else-if="getVideoInfo(msg)"
+                      controls preload="metadata"
+                      class="chat-video"
+                      :src="getVideoInfo(msg)!.href"
+                      :poster="getVideoInfo(msg)!.poster || undefined"
+                    />
+                    <div v-else-if="msg.contentType === 'video'">🎥 Video</div>
+                    <div v-else-if="msg.contentType === 'voice'">🎤 Tin nhắn thoại</div>
+                    <div v-else-if="msg.contentType === 'gif'">GIF</div>
+                    <!-- Zinstant bank/QR card (feature 0029) — same render
+                         path as the short-thread branch below. Tolerant
+                         parser; falls back to muted "Thông tin Zalo" chip
+                         when payload is unrecognisable (EC-0001). -->
+                    <ZinstantCard
+                      v-else-if="msg.contentType === 'zinstant' && parsedZinstant(msg)"
+                      :data="parsedZinstant(msg)!"
+                      @preview="previewImageUrl = $event"
+                    />
+                    <div
+                      v-else-if="msg.contentType === 'zinstant'"
+                      class="zinstant-fallback"
+                    >
+                      <v-icon size="16" class="mr-1">mdi-package-variant-closed</v-icon>
+                      Thông tin Zalo
+                    </div>
+                    <div v-else-if="isReminderMessage(msg)" class="reminder-card">
+                      <div class="d-flex align-center mb-1">
+                        <v-icon size="16" color="warning" class="mr-1">mdi-calendar-clock</v-icon>
+                        <span class="text-caption text-warning font-weight-bold">Nhắc hẹn</span>
+                      </div>
+                      <div class="text-body-2">{{ getReminderTitle(msg) }}</div>
+                      <div v-if="getReminderTime(msg)" class="text-caption mt-1" style="opacity: 0.7;">
+                        <v-icon size="12" class="mr-1">mdi-clock-outline</v-icon>{{ getReminderTime(msg) }}
+                      </div>
+                      <v-btn size="x-small" variant="tonal" color="warning" class="mt-2" prepend-icon="mdi-calendar-sync" @click="syncAppointment(msg)">
+                        Đồng bộ lịch
+                      </v-btn>
+                    </div>
+                    <div v-else>{{ parseDisplayContent(msg.content) }}</div>
+                    <div class="text-caption mt-1 msg-time" :class="msg.senderType === 'self' ? 'msg-time-self' : 'msg-time-contact'" style="font-size: 0.7rem;">
+                      {{ formatMessageTime(msg.sentAt) }}
+                    </div>
+                  </div>
+                </div>
+                <ReactionChips
+                  v-if="(msg.reactions ?? []).length > 0"
+                  :reactions="msg.reactions ?? []"
+                  :self-user-id="selfUserId ?? null"
+                  :zalo-account-uid="conversation.zaloAccount?.zaloUid ?? null"
+                  :align="msg.senderType === 'self' ? 'right' : 'left'"
+                  @toggle="onToggleReactionFromChip(msg.id, $event)"
+                />
+              </div>
+            </div>
+          </template>
+        </v-virtual-scroll>
+
+        <!-- Short thread → original v-for path -->
+        <div v-else v-for="msg in messages" :key="msg.id" class="mb-2 d-flex message-row" :class="msg.senderType === 'self' ? 'justify-end' : 'justify-start'">
           <div style="max-width: 70%;">
             <div
               v-if="conversation.threadType === 'group' && msg.senderType !== 'self'"
@@ -118,6 +229,21 @@
                 <div v-else-if="msg.contentType === 'video'">🎥 Video</div>
                 <div v-else-if="msg.contentType === 'voice'">🎤 Tin nhắn thoại</div>
                 <div v-else-if="msg.contentType === 'gif'">GIF</div>
+                <!-- Zinstant bank/QR card (feature 0029) — tolerant parser;
+                     falls back to muted "📦 Thông tin Zalo" chip when the
+                     payload is unrecognisable (EC-0001). -->
+                <ZinstantCard
+                  v-else-if="msg.contentType === 'zinstant' && parsedZinstant(msg)"
+                  :data="parsedZinstant(msg)!"
+                  @preview="previewImageUrl = $event"
+                />
+                <div
+                  v-else-if="msg.contentType === 'zinstant'"
+                  class="zinstant-fallback"
+                >
+                  <v-icon size="16" class="mr-1">mdi-package-variant-closed</v-icon>
+                  Thông tin Zalo
+                </div>
                 <!-- Reminder/Calendar -->
                 <div v-else-if="isReminderMessage(msg)" class="reminder-card">
                   <div class="d-flex align-center mb-1">
@@ -296,10 +422,18 @@ import { api } from '@/api/index';
 import QuickReplyPopover from './QuickReplyPopover.vue';
 import ReactionPicker from './ReactionPicker.vue';
 import ReactionChips from './ReactionChips.vue';
+import MessageSkeleton from './MessageSkeleton.vue';
+import ZinstantCard from './ZinstantCard.vue';
 import { secondaryZaloName } from '@/composables/use-contact-name';
 import UserInfoPopover, {
   type CreateContactPayload,
 } from './UserInfoPopover.vue';
+import { parseZinstant } from '@/utils/parse-zinstant';
+
+// Feature 0043 — virtual scroll kicks in past this many messages. Below the
+// threshold the v-for path stays so short threads pay no virtualization
+// overhead (DOM swap cost, item-height estimate inaccuracy, etc.).
+const VIRTUAL_SCROLL_THRESHOLD = 100;
 
 const props = defineProps<{
   conversation: Conversation | null;
@@ -403,6 +537,39 @@ onBeforeUnmount(() => window.removeEventListener('click', closePickerOnOutsideCl
 
 const inputText = ref('');
 const messagesContainer = ref<HTMLElement | null>(null);
+// Feature 0043 — VVirtualScroll instance ref. We use it to call
+// scrollToIndex when new messages arrive in virtualized mode (the parent
+// scroll container's scrollHeight trick doesn't apply once rows are
+// windowed).
+interface VirtualScrollInstance {
+  scrollToIndex: (index: number) => void;
+}
+const virtualScrollRef = ref<VirtualScrollInstance | null>(null);
+
+/**
+ * Feature 0043 — derive whether to render the virtualized list. We gate
+ * on length only (not loading) so the v-for path keeps short threads
+ * lightweight. AC-0003: with 500+ messages this flips to true.
+ */
+const useVirtual = computed<boolean>(
+  () => props.messages.length > VIRTUAL_SCROLL_THRESHOLD,
+);
+
+/**
+ * Feature 0043 — track whether the user is parked near the bottom. When
+ * true (default), incoming messages auto-scroll to bottom (EC-0002).
+ * When false (user has scrolled up to read history), we keep scroll
+ * position so new messages don't yank the viewport.
+ */
+const stickToBottom = ref(true);
+const SCROLL_BOTTOM_TOLERANCE_PX = 80;
+
+function onThreadScroll(): void {
+  const el = messagesContainer.value;
+  if (!el) return;
+  const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+  stickToBottom.value = distanceFromBottom <= SCROLL_BOTTOM_TOLERANCE_PX;
+}
 const previewImageUrl = ref('');
 const showImagePreview = computed({ get: () => !!previewImageUrl.value, set: (v) => { if (!v) previewImageUrl.value = ''; } });
 const syncSnack = ref({ show: false, text: '', color: 'success' });
@@ -633,6 +800,23 @@ function getVideoInfo(
   }
 }
 
+/**
+ * Feature 0029 — memoised per-message zinstant parse. Computed inside
+ * `parsedZinstant(msg)` so we don't re-JSON.parse the same payload on
+ * every re-render. Returns null when the payload isn't extractable
+ * (caller falls through to the generic "📦 Thông tin Zalo" chip).
+ */
+const zinstantCache = new Map<string, ReturnType<typeof parseZinstant>>();
+function parsedZinstant(msg: Message): ReturnType<typeof parseZinstant> {
+  if (msg.contentType !== 'zinstant') return null;
+  if (!msg.content) return null;
+  const cached = zinstantCache.get(msg.id);
+  if (cached !== undefined) return cached;
+  const parsed = parseZinstant(msg.content);
+  zinstantCache.set(msg.id, parsed);
+  return parsed;
+}
+
 function parseDisplayContent(content: string | null): string {
   if (!content) return '';
   if (!content.startsWith('{')) return content;
@@ -689,7 +873,52 @@ async function syncAppointment(msg: Message) {
   }
 }
 
-watch(() => props.messages.length, async () => { await nextTick(); if (messagesContainer.value) messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight; });
+/**
+ * Feature 0043 — scroll-to-bottom is now branched by render mode AND by
+ * stickToBottom (EC-0005). Original behaviour was unconditional snap which
+ * yanked the viewport when an inbound message arrived while the user was
+ * scrolled up reading history. Now we only snap when the user is already
+ * pinned to the bottom; otherwise we leave scroll alone.
+ */
+watch(() => props.messages.length, async (newLen, oldLen) => {
+  await nextTick();
+  // New conversation (len went from 0 → N) → always land at bottom and
+  // restore stickToBottom so subsequent inbound messages auto-scroll.
+  const isInitialLoad = (oldLen ?? 0) === 0 && newLen > 0;
+  if (isInitialLoad) stickToBottom.value = true;
+  if (!stickToBottom.value && !isInitialLoad) return;
+
+  if (useVirtual.value && virtualScrollRef.value) {
+    // VVirtualScroll's scrollToIndex windows to the row, which is the only
+    // reliable way to land at the bottom once rows are virtualized.
+    virtualScrollRef.value.scrollToIndex(newLen - 1);
+  } else if (messagesContainer.value) {
+    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+  }
+
+  // Feature 0043 perf measurement — pair with the `conv-click` mark set in
+  // selectConversation. Only logs in dev, only when both marks exist.
+  if (import.meta.env?.DEV && typeof performance !== 'undefined') {
+    try {
+      const clickEntry = performance.getEntriesByName('conv-click').pop();
+      if (clickEntry) {
+        performance.mark('thread-rendered');
+        const delta = performance.now() - clickEntry.startTime;
+        // eslint-disable-next-line no-console
+        console.debug(`[perf 0043] conv switch render: ${delta.toFixed(1)}ms`);
+        performance.clearMarks('conv-click');
+        performance.clearMarks('thread-rendered');
+      }
+    } catch { /* perf API quirks — non-fatal */ }
+  }
+});
+
+// Reset stickToBottom whenever the conversation changes so the new thread
+// always lands pinned to the bottom regardless of how the previous one
+// was scrolled. Use conversation.id (not messages identity) to detect.
+watch(() => props.conversation?.id, () => {
+  stickToBottom.value = true;
+});
 
 // ── Appointment suggestion (feature 0017) ─────────────────────────────────────
 const { parseLatestIncoming } = useAppointmentParser();
@@ -761,6 +990,7 @@ function emitAppointmentSuggest() {
 .message-bubble { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); }
 .reminder-card { padding: 8px 12px; border-left: 3px solid rgb(var(--v-theme-warning)); border-radius: 8px; background: rgba(var(--v-theme-warning), 0.08); }
 .file-card { display: flex; align-items: center; padding: 8px 12px; border-radius: 8px; background: rgba(0, 242, 255, 0.05); border: 1px solid rgba(0, 242, 255, 0.1); }
+.zinstant-fallback { display: inline-flex; align-items: center; opacity: 0.65; font-style: italic; font-size: 0.85rem; }
 .chat-image { max-width: 100%; max-height: 300px; border-radius: 12px; cursor: pointer; transition: transform 0.2s; }
 .chat-image:hover { transform: scale(1.02); }
 .chat-video { max-width: 100%; max-height: 360px; border-radius: 12px; background: #000; display: block; }
@@ -832,4 +1062,22 @@ function emitAppointmentSuggest() {
 }
 .reaction-picker-popover--contact { left: 0; }
 .reaction-picker-popover--self    { right: 0; }
+
+/* ── Feature 0043 — message body transition + virtual scroll sizing ──── */
+.thread-fade-in {
+  /* Subtle fade so the cached-render case doesn't look stuttery when it
+     swaps the skeleton out. Honors reduced-motion preference. */
+  animation: thread-fade 180ms ease-out;
+}
+@keyframes thread-fade {
+  from { opacity: 0.4; }
+  to   { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .thread-fade-in { animation: none; }
+}
+.virtual-thread {
+  /* VVirtualScroll needs an explicit height; fill its scrolling parent. */
+  height: 100%;
+}
 </style>
