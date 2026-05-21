@@ -308,11 +308,13 @@ describe('AC-0007: per-row error isolation inside the integration batch', () => 
       // We can't rely on call order being stable across implementations,
       // so we resolve based on which row the connector is being asked
       // to sync. Connector receives (orgId, config) — both identical
-      // across rows because decryptConfig is mocked. Use call counter
-      // instead: row 1 = call #1, fail = call #2, row 3 = call #3.
+      // across rows because decryptConfig is mocked. Use our own call
+      // counter (safer than mock.calls.length which races with vitest's
+      // internal call-tracking timing).
+      let syncCallCount = 0;
       syncMock.mockImplementation(async () => {
-        const callIdx = syncMock.mock.calls.length;
-        if (callIdx === 2) {
+        syncCallCount += 1;
+        if (syncCallCount === 2) {
           throw new Error('connector blew up on middle row');
         }
         return { status: 'succeeded', recordsProcessed: 7 };
