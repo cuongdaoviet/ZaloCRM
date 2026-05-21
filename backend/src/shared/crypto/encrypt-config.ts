@@ -152,6 +152,31 @@ export function maskApiKey(key: string): string {
   return `${prefix}***${tail}`;
 }
 
+// ─── Feature 0038 — Integration Hub config encryption shims ──────────────────
+// Same primitive (AES-256-GCM via HKDF-derived per-org key), but with the
+// `{configCipher,configIv,configTag}` field naming the `Integration` model uses
+// and a JSON-stringify step so callers can pass arbitrary config objects.
+// ─────────────────────────────────────────────────────────────────────────────
+export interface ConfigBlob {
+  configCipher: string;
+  configIv: string;
+  configTag: string;
+}
+
+export function encryptConfig(orgId: string, config: unknown): ConfigBlob {
+  const blob = encryptForOrg(orgId, JSON.stringify(config));
+  return { configCipher: blob.cipher, configIv: blob.iv, configTag: blob.tag };
+}
+
+export function decryptConfig(orgId: string, blob: ConfigBlob): unknown {
+  const plain = decryptForOrg(orgId, {
+    cipher: blob.configCipher,
+    iv: blob.configIv,
+    tag: blob.configTag,
+  });
+  return JSON.parse(plain);
+}
+
 /**
  * Boot-time guard. Call from app.ts before listening. Refuses to start in
  * production when the master key is missing or the placeholder.

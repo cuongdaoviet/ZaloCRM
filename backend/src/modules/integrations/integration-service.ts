@@ -17,7 +17,7 @@ import { trackBackground } from '../../shared/utils/background-tasks.js';
 import {
   encryptConfig,
   decryptConfig,
-  type EncryptedConfig,
+  type ConfigBlob,
 } from '../../shared/crypto/encrypt-config.js';
 import { getConnector } from './connectors/index.js';
 import type {
@@ -80,7 +80,7 @@ export function toSummary(row: IntegrationRow): IntegrationSummary {
  * Prisma (with whatever select shape) — they only need the public fields.
  */
 function decryptRowConfig(row: IntegrationRow): unknown {
-  return decryptConfig({
+  return decryptConfig(row.orgId, {
     configCipher: row.configCipher,
     configIv: row.configIv,
     configTag: row.configTag,
@@ -120,7 +120,7 @@ export async function createIntegration(input: CreateIntegrationInput): Promise<
   if (!probe.ok) {
     return { ok: false, error: probe.error ?? 'Connection test failed' };
   }
-  const enc = encryptConfig(input.config);
+  const enc = encryptConfig(input.orgId, input.config);
   const row = await prisma.integration.create({
     data: {
       orgId: input.orgId,
@@ -151,13 +151,13 @@ export async function updateIntegration(input: UpdateIntegrationInput): Promise<
   const connector = getConnector(existing.type);
   if (!connector) return { ok: false, error: `Unknown type: ${existing.type}` };
 
-  let enc: EncryptedConfig | null = null;
+  let enc: ConfigBlob | null = null;
   if (input.config !== undefined) {
     const validate = connector.validateConfig(input.config);
     if (!validate.ok) return { ok: false, error: validate.error ?? 'Invalid config' };
     const probe = await connector.testConnection(input.config as never);
     if (!probe.ok) return { ok: false, error: probe.error ?? 'Connection test failed' };
-    enc = encryptConfig(input.config);
+    enc = encryptConfig(existing.orgId, input.config);
   }
 
   const row = await prisma.integration.update({

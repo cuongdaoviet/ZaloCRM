@@ -77,7 +77,7 @@ export async function runDueIntegrations(): Promise<void> {
       if (!connector || !connector.sync || !connector.isDue) continue;
       let config: unknown;
       try {
-        config = decryptConfig({
+        config = decryptConfig(row.orgId, {
           configCipher: row.configCipher,
           configIv: row.configIv,
           configTag: row.configTag,
