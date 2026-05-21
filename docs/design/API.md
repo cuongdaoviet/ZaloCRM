@@ -1943,3 +1943,198 @@ documented separately in the SPEC. The HTTP contract above is the
 - A failed decrypt during a GET request returns the row with the
   affected plaintext field set to `null` rather than 500-ing, so a
   partially-rotated org never fully breaks.
+
+---
+
+## Feature 0036 — AI reply suggestions
+
+"Bring-your-own-key" reply assistant. The admin configures a
+provider + API key (Anthropic, OpenAI-compatible, Gemini, Ollama).
+Sales staff hit a per-conversation endpoint that returns 3 reply
+drafts. Content is never persisted — only counts and token metrics
+go into `AiSuggestionLog`. See
+[features/0036-ai-reply-suggestions/SPEC.md](../features/0036-ai-reply-suggestions/SPEC.md).
+
+### GET `/api/v1/settings/ai-providers`
+
+Static catalogue used by the Settings dropdown.
+
+**Permission:** any authenticated user.
+
+**Response 200:**
+
+```json
+{
+  "providers": [
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "models": [{ "value": "claude-haiku-4-5", "label": "Claude Haiku 4.5" }],
+      "requiresApiKey": true,
+      "supportsCustomEndpoint": false
+    }
+  ]
+}
+```
+
+### GET `/api/v1/settings/ai-config`
+
+Read the org's current AI config. The API key is **never** echoed
+back — only an `apiKeyConfigured` boolean.
+
+**Permission:** `requireRole('owner', 'admin')`. Member → `403`.
+
+**Response 200** (configured):
+
+```json
+{
+  "id": "uuid",
+  "provider": "anthropic",
+  "apiKeyConfigured": true,
+  "apiKeyHint": "***",
+  "apiEndpoint": null,
+  "model": "claude-haiku-4-5",
+  "systemPrompt": "Bạn là CSKH...",
+  "enabled": true,
+  "maxSuggestionsPerDay": 1000,
+  "updatedAt": "2026-05-15T10:00:00.000Z"
+}
+```
+
+When no row exists yet the endpoint returns the same shape with
+`id: null`, `apiKeyConfigured: false`, sensible defaults, and
+`enabled: false` so the Settings form can render as an empty draft.
+
+### PUT `/api/v1/settings/ai-config`
+
+Upsert config. The handler runs a one-token test request against
+the provider before persisting (BR-0012) — bad keys never reach
+the DB.
+
+**Permission:** owner/admin only.
+
+**Body:**
+
+| Field | Type | Notes |
+|---|---|---|
+| `provider` | string | Must match a known provider id (`anthropic`, `openai`, `gemini`, `ollama`, ...). Default `anthropic`. |
+| `apiKey` | string \| null \| undefined | `string` → encrypt + replace; `null` → clear key + force `enabled=false`; `undefined` → keep existing cipher. |
+| `apiEndpoint` | string \| null | Custom base URL (OpenAI-compat / self-hosted Ollama). `undefined` keeps existing. |
+| `model` | string | Defaults to the provider's first model. |
+| `systemPrompt` | string \| null | Optional system prompt, max **2000** chars. |
+| `enabled` | boolean | Defaults to the existing value, or `false` for new rows. |
+| `maxSuggestionsPerDay` | integer | Org cap. Default `1000`. Range `[1, 1_000_000]`. |
+| `skipTest` | boolean | Internal: skip the test-connect step (used by migrations). |
+
+**Validation errors (400):**
+
+- `{ "error": "Unknown provider: <id>" }`.
+- `{ "error": "Model is required" }`.
+- `{ "error": "maxSuggestionsPerDay must be an integer in [1, 1_000_000]" }`.
+- `{ "error": "systemPrompt must be ≤ 2000 characters" }`.
+- `{ "error": "API key required to enable this provider" }` — caller
+  flipped `enabled: true` on a provider that needs a key without
+  ever supplying one.
+- `{ "error": "Provider test failed: <upstream message>" }` — the
+  one-token test request rejected the key. Key fragments
+  (`sk-...`) are scrubbed before bubbling the message.
+
+**Response 200:** the serialised config (same shape as `GET`),
+including a refreshed `updatedAt`.
+
+### DELETE `/api/v1/settings/ai-config`
+
+Soft-delete — disables AI and clears the encrypted key, but leaves
+the rest of the config row intact so admins can re-enable by adding
+a new key.
+
+**Permission:** owner/admin only.
+
+**Response:** `204 No Content` (also when nothing existed to delete).
+
+### GET `/api/v1/settings/ai-usage`
+
+Aggregated counters from `AiSuggestionLog`. Privacy-safe by
+construction — only counts, tokens, costs, and userIds are stored.
+
+**Permission:** owner/admin only.
+
+**Query params:**
+
+| Name | Type | Notes |
+|---|---|---|
+| `from` | ISO date | Inclusive lower bound on `createdAt`. Optional. |
+| `to` | ISO date | Inclusive upper bound. Optional. |
+
+**Response 200:**
+
+```json
+{
+  "total": 248,
+  "totalTokensIn": 84210,
+  "totalTokensOut": 9120,
+  "totalCost": 0.43,
+  "errorCount": 4,
+  "topUsers":   [{ "userId": "uuid", "count": 87 }],
+  "byProvider": [{ "provider": "anthropic", "count": 248 }]
+}
+```
+
+**Errors:**
+
+- `500` — `{ "error": "Failed to compute usage" }` if the aggregate
+  query fails (logged server-side).
+
+### POST `/api/v1/conversations/:id/ai-suggestions`
+
+Generate 3 reply drafts for a conversation. Triggered by the
+"Gợi ý phản hồi (AI)" button in the chat composer.
+
+**Path params:** `id` — conversation UUID.
+
+**Permission:** `requireZaloAccess('chat')` — owner/admin bypass,
+members need `chat` or `admin` on the Zalo account (BR-0003).
+
+**Body:** none — the service reads the recent message thread
+server-side.
+
+**Response 200:**
+
+```json
+{
+  "suggestions": [
+    "Cảm ơn anh, em gửi ngay báo giá qua đây nhé.",
+    "Dạ vâng, mình có size M anh nhé.",
+    "Em kiểm tra hàng rồi báo lại sớm nhất ạ."
+  ],
+  "fromCache": false,
+  "cachedUntil": "2026-05-15T10:05:00.000Z",
+  "provider": "anthropic",
+  "model": "claude-haiku-4-5"
+}
+```
+
+- Repeat calls on the same `triggerMsgId` are served from a
+  per-conversation cache (`fromCache: true`) until `cachedUntil`.
+
+**Error codes (handler-mapped):**
+
+| Status | `error` | Meaning |
+|---|---|---|
+| 400 | `no_context` / `no_inbound` | Conversation has no messages, or the latest message is outbound (nothing to reply to). |
+| 412 | `ai_disabled` | Org disabled the feature in Settings. |
+| 412 | `provider_unconfigured` | No API key on file. |
+| 412 | `unknown_provider` | Stored provider id is no longer in the registry. |
+| 429 | `rate_limit_org` | Org hit `maxSuggestionsPerDay`. Includes `retryAfter` (seconds) in the body and a `Retry-After` header. |
+| 429 | `rate_limit_user` | Per-user/per-minute throttle. Same headers. |
+| 502 | `provider_401` | Provider rejected the API key. The config is auto-disabled by the service. |
+| 503 | `provider_5xx` / `provider_timeout` / `provider_other` | Upstream provider failure — message: `"AI provider unavailable"`. |
+| 500 | `internal_error` / `unknown` | Unhandled error. |
+
+Error body shape:
+
+```json
+{ "error": "rate_limit_org", "message": "...", "retryAfter": 42 }
+```
+
+`retryAfter` is only present on 429 responses.
