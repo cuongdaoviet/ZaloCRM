@@ -44,8 +44,19 @@
       @toggle-contact-panel="showContactPanel = !showContactPanel"
       @toggle-pin="onTogglePinHeader"
       @appointment-suggest="onAppointmentSuggest"
+      @create-contact-from-zalo="onCreateContactFromZalo"
+      @open-contact="onOpenContactFromZalo"
       :show-contact-panel="showContactPanel"
       style="flex: 1; min-width: 300px;"
+    />
+
+    <!-- Feature 0030 — reusing ContactDetailDialog for the "Tạo Contact" flow
+         from the Zalo user popover so we don't duplicate the form logic. -->
+    <ContactDetailDialog
+      v-model="showZaloContactDialog"
+      :contact="null"
+      :prefill="zaloContactPrefill"
+      @saved="onZaloContactSaved"
     />
 
     <!-- Contact panel — resizable -->
@@ -76,10 +87,14 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import ConversationList from '@/components/chat/ConversationList.vue';
 import MessageThread from '@/components/chat/MessageThread.vue';
 import ChatContactPanel from '@/components/chat/ChatContactPanel.vue';
 import NewChatDialog from '@/components/chat/NewChatDialog.vue';
+import ContactDetailDialog, {
+  type ContactPrefill,
+} from '@/components/contacts/ContactDetailDialog.vue';
 import { useChat } from '@/composables/use-chat';
 import { usePinnedConversations } from '@/composables/use-pinned-conversations';
 import { useAuthStore } from '@/stores/auth';
@@ -159,6 +174,39 @@ async function onSetConvTab(convId: string, tab: 'main' | 'other') {
 
 const showContactPanel = ref(false);
 const showNewChatDialog = ref(false);
+
+// ── Feature 0030 — Zalo user popover → "Tạo Contact" / "Xem trong CRM" ──
+const router = useRouter();
+const showZaloContactDialog = ref(false);
+const zaloContactPrefill = ref<ContactPrefill | null>(null);
+
+function onCreateContactFromZalo(payload: {
+  fullName: string;
+  zaloUid: string;
+  avatarUrl: string | null;
+  phone: string | null;
+}) {
+  zaloContactPrefill.value = {
+    fullName: payload.fullName,
+    phone: payload.phone,
+    avatarUrl: payload.avatarUrl,
+    zaloUid: payload.zaloUid,
+  };
+  showZaloContactDialog.value = true;
+}
+
+function onOpenContactFromZalo(contactId: string) {
+  router.push({ name: 'Customer360', params: { id: contactId } });
+}
+
+function onZaloContactSaved() {
+  zaloContactPrefill.value = null;
+  // Refresh conversations so any newly-created contact attaches to the
+  // existing conversation row (BR-0007 cross-reference is computed on
+  // every popover open, so this only ensures the conversation panel
+  // shows the new contact name immediately).
+  fetchConversations();
+}
 
 // Feature 0017 — appointment suggestion handoff from MessageThread.
 const appointmentPrefill = ref<AppointmentPrefill | null>(null);

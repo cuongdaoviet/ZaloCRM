@@ -124,9 +124,24 @@ import TagPicker from '@/components/tags/TagPicker.vue';
 import { useCrmTags } from '@/composables/use-crm-tags';
 import { api } from '@/api/index';
 
+/**
+ * Feature 0030 — `prefill` lets the chat flow (Zalo user popover) open the
+ * dialog already populated with Zalo data so the rep just clicks Lưu. Only
+ * applied when creating a NEW contact (contact prop is null). Keys here
+ * mirror the Contact form fields the rep can edit.
+ */
+export interface ContactPrefill {
+  fullName?: string | null;
+  phone?: string | null;
+  avatarUrl?: string | null;
+  /** Zalo UID stored on the Contact row so dedupe + cross-link works. */
+  zaloUid?: string | null;
+}
+
 const props = defineProps<{
   modelValue: boolean;
   contact: Contact | null;
+  prefill?: ContactPrefill | null;
 }>();
 
 const emit = defineEmits<{
@@ -227,6 +242,24 @@ watch(() => props.contact, (c) => {
   }
 }, { immediate: true, deep: true });
 
+/**
+ * Feature 0030 — apply prefill ONLY when the dialog flips open with no
+ * existing contact (i.e. creating a new one). Watching `modelValue` keeps
+ * the prefill in sync if the rep re-opens the dialog after closing it.
+ */
+watch(
+  () => [props.modelValue, props.prefill] as const,
+  ([opened, prefill]) => {
+    if (!opened || !prefill || props.contact?.id) return;
+    form.value = {
+      ...form.value,
+      fullName: prefill.fullName ?? form.value.fullName,
+      phone: prefill.phone ?? form.value.phone,
+    };
+  },
+  { immediate: true },
+);
+
 function required(v: string) {
   return !!v || 'Bắt buộc';
 }
@@ -235,7 +268,7 @@ async function onSave() {
   // Save core contact fields first (without tags). Tags are written via the
   // dedicated PUT /contacts/:id/tags endpoint which knows about the new
   // tagIds shape + does the dual-write.
-  const payload: Partial<Contact> = {
+  const payload: Partial<Contact> & { zaloUid?: string | null } = {
     fullName: form.value.fullName || null,
     phone: form.value.phone || null,
     email: form.value.email || null,
@@ -249,6 +282,14 @@ async function onSave() {
       : null,
     notes: form.value.notes || null,
   };
+
+  // Feature 0030 — carry zaloUid + avatarUrl from the Zalo popover prefill
+  // through on CREATE so the new Contact is linked to the Zalo user from
+  // the start (enables the cross-reference on next popover open).
+  if (isNew.value && props.prefill) {
+    if (props.prefill.zaloUid) payload.zaloUid = props.prefill.zaloUid;
+    if (props.prefill.avatarUrl) payload.avatarUrl = props.prefill.avatarUrl;
+  }
 
   let result: Contact | null;
   if (isNew.value) {

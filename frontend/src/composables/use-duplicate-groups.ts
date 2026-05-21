@@ -11,7 +11,13 @@
 import { ref } from 'vue';
 import { api } from '@/api/index';
 
-export type DuplicateLevel = 'phone_exact' | 'zaloUid_exact' | 'name_fuzzy';
+// Feature 0034 — `globalId_exact` added as a fourth high-confidence strategy.
+// Same person, different `zaloUid`, same canonical Zalo `globalId`.
+export type DuplicateLevel =
+  | 'phone_exact'
+  | 'zaloUid_exact'
+  | 'globalId_exact'
+  | 'name_fuzzy';
 export type GroupStatus = 'pending' | 'merged' | 'dismissed';
 
 export interface DuplicateContactPreview {
@@ -101,6 +107,8 @@ export interface MergeResult {
 export const LEVEL_LABELS: Record<DuplicateLevel, string> = {
   phone_exact: 'Trùng số điện thoại',
   zaloUid_exact: 'Trùng Zalo UID',
+  // Feature 0034 — canonical Zalo identifier match.
+  globalId_exact: 'Trùng Zalo globalId',
   name_fuzzy: 'Trùng tên (gần đúng)',
 };
 

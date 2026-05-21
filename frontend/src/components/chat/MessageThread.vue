@@ -157,8 +157,23 @@
         <!-- Short thread → original v-for path -->
         <div v-else v-for="msg in messages" :key="msg.id" class="mb-2 d-flex message-row" :class="msg.senderType === 'self' ? 'justify-end' : 'justify-start'">
           <div style="max-width: 70%;">
-            <div v-if="conversation.threadType === 'group' && msg.senderType !== 'self'" class="text-caption text-primary font-weight-medium mb-1">
-              {{ msg.senderName || 'Unknown' }}
+            <div
+              v-if="conversation.threadType === 'group' && msg.senderType !== 'self'"
+              class="d-flex align-center mb-1"
+            >
+              <!-- Feature 0030 — clickable avatar in group chats opens the Zalo user info popover. -->
+              <button
+                v-if="msg.senderUid"
+                type="button"
+                class="sender-avatar-btn"
+                :title="'Xem thông tin ' + (msg.senderName || 'người dùng')"
+                @click.stop="onAvatarClick(msg, $event)"
+              >
+                <v-icon size="18">mdi-account-circle</v-icon>
+              </button>
+              <span class="text-caption text-primary font-weight-medium">
+                {{ msg.senderName || 'Unknown' }}
+              </span>
             </div>
             <!-- Bubble + hover reaction trigger -->
             <div class="bubble-wrapper" :class="msg.senderType === 'self' ? 'bubble-wrapper--self' : 'bubble-wrapper--contact'">
@@ -346,6 +361,17 @@
 
     <!-- Sync snackbar -->
     <v-snackbar v-model="syncSnack.show" :color="syncSnack.color" timeout="3000">{{ syncSnack.text }}</v-snackbar>
+
+    <!-- Feature 0030 — Zalo user info popover (group chats) -->
+    <UserInfoPopover
+      :open="userPopoverOpen"
+      :uid="userPopoverUid"
+      :account-id="conversation?.zaloAccount?.id ?? null"
+      :anchor-el="userPopoverAnchor"
+      @close="closeUserPopover"
+      @create-contact="onCreateContactFromPopover"
+      @open-contact="onOpenContactFromPopover"
+    />
   </div>
 </template>
 
@@ -367,6 +393,9 @@ import ReactionPicker from './ReactionPicker.vue';
 import ReactionChips from './ReactionChips.vue';
 import MessageSkeleton from './MessageSkeleton.vue';
 import { secondaryZaloName } from '@/composables/use-contact-name';
+import UserInfoPopover, {
+  type CreateContactPayload,
+} from './UserInfoPopover.vue';
 
 // Feature 0043 — virtual scroll kicks in past this many messages. Below the
 // threshold the v-for path stays so short threads pay no virtualization
@@ -397,7 +426,41 @@ const emit = defineEmits<{
   'toggle-pin': [];
   'appointment-suggest': [payload: ParsedAppointment];
   react: [messageId: string, emoji: string];
+  /** Feature 0030 — user clicked "Tạo Contact" inside the Zalo user popover. */
+  'create-contact-from-zalo': [payload: CreateContactPayload];
+  /** Feature 0030 — user clicked "Xem trong CRM" inside the popover. */
+  'open-contact': [contactId: string];
 }>();
+
+// ── Feature 0030 — Zalo user info popover state ─────────────────────────────
+const userPopoverOpen = ref(false);
+const userPopoverUid = ref<string | null>(null);
+const userPopoverAnchor = ref<HTMLElement | null>(null);
+
+function onAvatarClick(msg: Message, evt: MouseEvent) {
+  // BR-0003 — never open the popover for the rep's own avatar.
+  if (msg.senderType === 'self') return;
+  if (!msg.senderUid) return;
+  userPopoverUid.value = msg.senderUid;
+  userPopoverAnchor.value = (evt.currentTarget as HTMLElement) ?? null;
+  userPopoverOpen.value = true;
+}
+
+function closeUserPopover() {
+  userPopoverOpen.value = false;
+  userPopoverUid.value = null;
+  userPopoverAnchor.value = null;
+}
+
+function onCreateContactFromPopover(payload: CreateContactPayload) {
+  emit('create-contact-from-zalo', payload);
+  closeUserPopover();
+}
+
+function onOpenContactFromPopover(contactId: string) {
+  emit('open-contact', contactId);
+  closeUserPopover();
+}
 
 // ── Feature 0021 — reaction picker state ─────────────────────────────────────
 const openPickerMsgId = ref<string | null>(null);
@@ -852,6 +915,28 @@ function emitAppointmentSuggest() {
 </script>
 
 <style scoped>
+/* Feature 0030 — clickable sender avatar in group messages. */
+.sender-avatar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(var(--v-theme-primary), 0.12);
+  border: none;
+  cursor: pointer;
+  color: rgb(var(--v-theme-primary));
+  transition: background 0.15s ease;
+  padding: 0;
+}
+.sender-avatar-btn:hover { background: rgba(var(--v-theme-primary), 0.24); }
+.sender-avatar-btn:focus-visible {
+  outline: 2px solid rgb(var(--v-theme-primary));
+  outline-offset: 2px;
+}
+
 .message-bubble { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); }
 .reminder-card { padding: 8px 12px; border-left: 3px solid rgb(var(--v-theme-warning)); border-radius: 8px; background: rgba(var(--v-theme-warning), 0.08); }
 .file-card { display: flex; align-items: center; padding: 8px 12px; border-radius: 8px; background: rgba(0, 242, 255, 0.05); border: 1px solid rgba(0, 242, 255, 0.1); }

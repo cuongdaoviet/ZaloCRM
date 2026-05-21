@@ -157,12 +157,17 @@ const STATUS_OPTIONS = [
 const LEVEL_OPTIONS = [
   { title: 'Trùng SĐT', value: 'phone_exact' },
   { title: 'Trùng Zalo UID', value: 'zaloUid_exact' },
+  // Feature 0034 — filter for the new strategy in the level dropdown.
+  { title: 'Trùng Zalo globalId', value: 'globalId_exact' },
   { title: 'Trùng tên (gần đúng)', value: 'name_fuzzy' },
 ];
 
 function levelColor(level: DuplicateLevel): string {
   if (level === 'phone_exact') return 'success';
   if (level === 'zaloUid_exact') return 'info';
+  // Feature 0034 — distinct chip color so the new high-confidence level is
+  // visually distinguishable from zaloUid_exact in the list.
+  if (level === 'globalId_exact') return 'primary';
   return 'warning';
 }
 

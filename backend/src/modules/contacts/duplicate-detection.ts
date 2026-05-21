@@ -12,13 +12,23 @@ import { normalizePhone } from './phone-normalize.js';
 import { normalizeName } from './name-normalize.js';
 import { levenshtein } from './levenshtein.js';
 
-export type DuplicateLevel = 'phone_exact' | 'zaloUid_exact' | 'name_fuzzy';
+export type DuplicateLevel =
+  | 'phone_exact'
+  | 'zaloUid_exact'
+  // Feature 0034 — canonical Zalo identifier match. Highest-confidence
+  // signal (1.0) alongside phone_exact / zaloUid_exact.
+  | 'globalId_exact'
+  | 'name_fuzzy';
 
 export interface ContactRow {
   id: string;
   fullName: string | null;
   phone: string | null;
   zaloUid: string | null;
+  // Feature 0034 — nullable. Most rows will be NULL until inbound messages
+  // backfill the column (BR-0002, EC-0004). NULL excludes the row from the
+  // `globalId_exact` detector.
+  zaloGlobalId: string | null;
 }
 
 export interface DetectedGroup {
@@ -147,6 +157,34 @@ export function detectUidGroups(contacts: ContactRow[]): DetectedGroup[] {
 }
 
 /**
+ * Feature 0034 BR-0003 — contacts with same non-null zaloGlobalId → confidence
+ * 1.0. Mirrors `detectUidGroups`: pure grouping on a trimmed identifier.
+ *
+ * Rationale: a single real person can hold multiple Zalo `userId`s over time
+ * (old nick deactivated, new one created) but the `globalId` is the canonical
+ * account identifier — when it matches across two contacts they are almost
+ * certainly the same human.
+ */
+export function detectGlobalIdGroups(contacts: ContactRow[]): DetectedGroup[] {
+  const byGlobalId = new Map<string, string[]>();
+  for (const c of contacts) {
+    const gid = c.zaloGlobalId?.trim();
+    if (!gid) continue;
+    const arr = byGlobalId.get(gid);
+    if (arr) arr.push(c.id);
+    else byGlobalId.set(gid, [c.id]);
+  }
+  const groups: DetectedGroup[] = [];
+  for (const ids of byGlobalId.values()) {
+    if (ids.length >= 2) {
+      ids.sort();
+      groups.push({ level: 'globalId_exact', confidence: 1.0, contactIds: ids });
+    }
+  }
+  return groups;
+}
+
+/**
  * BR-0003: normalized name equal OR Levenshtein ≤ 2 (when length ≥ 5).
  * Confidence: 0.9 (exact match) → 0.6 (distance 2). Distance 1 → 0.75.
  *
@@ -250,6 +288,10 @@ export function detectAll(
   }
   if (levels.includes('zaloUid_exact')) {
     groups.push(...detectUidGroups(contacts));
+  }
+  // Feature 0034 — globalId_exact runs alongside the other exact strategies.
+  if (levels.includes('globalId_exact')) {
+    groups.push(...detectGlobalIdGroups(contacts));
   }
   if (levels.includes('name_fuzzy')) {
     const { groups: nameGroups, skipped } = detectNameGroups(contacts);

@@ -132,6 +132,64 @@ describe('processZaloMessage', () => {
     expect(arg.threadType).toBe('group');
   });
 
+  it('Feature 0034: forwards senderGlobalId from getUserInfo to handleIncomingMessage', async () => {
+    const api = {
+      getUserInfo: vi.fn().mockResolvedValue({
+        changed_profiles: {
+          'uid-1': {
+            zaloName: 'Anh',
+            avatar: 'http://x/a.jpg',
+            globalId: 'gid-canonical-1',
+          },
+        },
+      }),
+      getGroupInfo: vi.fn(),
+    };
+    await processZaloMessage({
+      accountId: 'acc-1',
+      api,
+      message: {
+        type: 0,
+        threadId: 'uid-1',
+        isSelf: false,
+        data: {
+          uidFrom: 'uid-1',
+          dName: '',
+          content: 'hi',
+          msgType: 'webchat',
+          msgId: 'm',
+          ts: '1',
+        },
+      },
+      isGroup: false,
+      userInfoCache: new Map(),
+    });
+    const arg = handleIncomingMessageMock.mock.calls[0][0];
+    expect(arg.senderGlobalId).toBe('gid-canonical-1');
+  });
+
+  it('Feature 0034: senderGlobalId is null for self messages (no API call)', async () => {
+    const api = {
+      getUserInfo: vi.fn(),
+      getGroupInfo: vi.fn(),
+    };
+    await processZaloMessage({
+      accountId: 'acc-1',
+      api,
+      message: {
+        type: 0,
+        threadId: 'uid-target',
+        isSelf: true,
+        data: { uidFrom: 'me', dName: '', content: 'hi', msgType: 'webchat', msgId: 'm', ts: '1' },
+      },
+      isGroup: false,
+      userInfoCache: new Map(),
+    });
+    const arg = handleIncomingMessageMock.mock.calls[0][0];
+    expect(arg.senderGlobalId).toBeNull();
+    expect(api.getUserInfo).not.toHaveBeenCalled();
+  });
+
   it('stringifies non-string content', async () => {
     const api = makeApi();
     const richContent = { title: 'Hi', href: 'http://x' };
@@ -159,7 +217,13 @@ describe('resolveZaloName cache (5-minute TTL)', () => {
     const cache = new Map();
     const first = await resolveZaloName(api, 'uid-1', cache);
     const second = await resolveZaloName(api, 'uid-1', cache);
-    expect(first).toEqual({ zaloName: 'Resolved Name', avatar: 'http://x/a.jpg' });
+    // Feature 0034 — return shape now includes `globalId` (empty when the
+    // mock profile doesn't surface one).
+    expect(first).toEqual({
+      zaloName: 'Resolved Name',
+      avatar: 'http://x/a.jpg',
+      globalId: '',
+    });
     expect(second).toEqual(first);
     expect(api.getUserInfo).toHaveBeenCalledTimes(1);
   });
@@ -167,7 +231,43 @@ describe('resolveZaloName cache (5-minute TTL)', () => {
   it('returns empty defaults if API throws', async () => {
     const api = makeApi({ getUserInfo: vi.fn().mockRejectedValue(new Error('x')) });
     const r = await resolveZaloName(api, 'uid-1', new Map());
-    expect(r).toEqual({ zaloName: '', avatar: '' });
+    expect(r).toEqual({ zaloName: '', avatar: '', globalId: '' });
+  });
+
+  it('Feature 0034: returns globalId when profile includes it', async () => {
+    const api = {
+      getUserInfo: vi.fn().mockResolvedValue({
+        changed_profiles: {
+          'uid-1': {
+            zaloName: 'Anh',
+            avatar: 'http://x/a.jpg',
+            globalId: 'gid-canonical',
+          },
+        },
+      }),
+    };
+    const r = await resolveZaloName(api, 'uid-1', new Map());
+    expect(r).toEqual({
+      zaloName: 'Anh',
+      avatar: 'http://x/a.jpg',
+      globalId: 'gid-canonical',
+    });
+  });
+
+  it('Feature 0034: snake_case global_id is also read', async () => {
+    const api = {
+      getUserInfo: vi.fn().mockResolvedValue({
+        changed_profiles: {
+          'uid-1': {
+            zalo_name: 'Anh',
+            avatar: '',
+            global_id: 'gid-snake',
+          },
+        },
+      }),
+    };
+    const r = await resolveZaloName(api, 'uid-1', new Map());
+    expect(r.globalId).toBe('gid-snake');
   });
 });
 
