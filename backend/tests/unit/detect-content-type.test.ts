@@ -41,4 +41,39 @@ describe('detectContentType', () => {
   it('returns "text" for plain string content with no matching msgType', () => {
     expect(detectContentType('unknown_type', 'hello')).toBe('text');
   });
+
+  // ── Feature 0029 — zinstant detection (AC-0001) ────────────────────────────
+  describe('zinstant detection', () => {
+    it('detects @@ZINSTANT@@ marker in string content', () => {
+      expect(detectContentType('webchat', '@@ZINSTANT@@ payload')).toBe('zinstant');
+    });
+
+    it('detects JSON-shape zinstant with appId + params', () => {
+      const json = JSON.stringify({
+        appId: 'bank_card',
+        params: { bankCode: 'BIDV', accountNumber: '12345678' },
+      });
+      expect(detectContentType('webchat', json)).toBe('zinstant');
+    });
+
+    it('detects zinstant object shape (already parsed)', () => {
+      expect(
+        detectContentType('webchat', { appId: 'bank_card', params: {} }),
+      ).toBe('zinstant');
+    });
+
+    it('zinstant wins over generic card msgType', () => {
+      expect(
+        detectContentType('card_recommended', '{"appId":"bank","params":{}}'),
+      ).toBe('zinstant');
+    });
+
+    it('non-zinstant JSON does not trigger zinstant', () => {
+      expect(detectContentType('webchat', '{"foo":"bar"}')).toBe('text');
+    });
+
+    it('malformed JSON does not crash detection (BR-0004)', () => {
+      expect(detectContentType('webchat', '{not json')).toBe('text');
+    });
+  });
 });

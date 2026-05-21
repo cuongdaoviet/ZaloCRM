@@ -144,8 +144,17 @@ export async function processZaloMessage(opts: {
 /**
  * Map zca-js msgType string to a normalized content type label.
  * Falls back to 'text' for unrecognised types or plain-string content.
+ *
+ * Feature 0029 — Zinstant (Zalo bank/QR card) detection. We check BEFORE
+ * generic `card` matching because Zalo sometimes ships zinstant payloads
+ * under msgType strings that contain "card" too (e.g. `webchat`). Marker
+ * `@@ZINSTANT@@` is Zalo's plain-text envelope; JSON-shaped payloads
+ * carry `{ appId, params }` keys.
  */
 export function detectContentType(msgType: string | undefined, content: any): string {
+  // Zinstant detection runs first so it wins over generic 'card'/'rich'.
+  if (isZinstantPayload(content)) return 'zinstant';
+
   if (!msgType) return 'text';
   if (msgType.includes('photo') || msgType.includes('image')) return 'image';
   if (msgType.includes('sticker')) return 'sticker';
@@ -158,6 +167,35 @@ export function detectContentType(msgType: string | undefined, content: any): st
   if (msgType.includes('recommended') || msgType.includes('card')) return 'contact_card';
   if (typeof content === 'object' && content !== null) return 'rich';
   return 'text';
+}
+
+/**
+ * Feature 0029 — true when raw content looks like a Zalo zinstant card
+ * envelope (bank/QR/share cards). Tolerant of both string and object
+ * shapes. JSON parse failures are swallowed silently (BR-0004).
+ */
+function isZinstantPayload(content: unknown): boolean {
+  if (typeof content === 'string') {
+    if (content.includes('@@ZINSTANT@@')) return true;
+    if (content.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(content);
+        return hasZinstantShape(parsed);
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+  if (content && typeof content === 'object') {
+    return hasZinstantShape(content);
+  }
+  return false;
+}
+
+function hasZinstantShape(obj: any): boolean {
+  if (!obj || typeof obj !== 'object') return false;
+  return Boolean(obj.appId) && obj.params !== undefined && obj.params !== null;
 }
 
 /**
