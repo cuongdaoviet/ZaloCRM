@@ -7,7 +7,14 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import ExcelJS from 'exceljs';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { authMiddleware } from '../auth/auth-middleware.js';
+import { requireRole } from '../auth/role-middleware.js';
 import { logger } from '../../shared/utils/logger.js';
+
+// Feature 0048 BR-0003: org-wide reports + Excel export are owner/admin
+// only. Sibling features (/kpi, /analytics) are already admin-only; this
+// closes the gap. Applied as a route-group preHandler so all four endpoints
+// stay consistent.
+const ADMIN_ONLY = requireRole('owner', 'admin');
 import {
   buildMessagesSheet,
   buildContactsSheet,
@@ -26,7 +33,7 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', authMiddleware);
 
   // GET /api/v1/reports/messages?from=&to=
-  app.get('/api/v1/reports/messages', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/api/v1/reports/messages', { preHandler: ADMIN_ONLY }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { orgId } = request.user!;
       const query = request.query as QueryParams;
@@ -66,7 +73,7 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // GET /api/v1/reports/contacts?from=&to= — contacts by status distribution
-  app.get('/api/v1/reports/contacts', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/api/v1/reports/contacts', { preHandler: ADMIN_ONLY }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { orgId } = request.user!;
       const query = request.query as QueryParams;
@@ -110,7 +117,7 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // GET /api/v1/reports/appointments?from=&to=
-  app.get('/api/v1/reports/appointments', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/api/v1/reports/appointments', { preHandler: ADMIN_ONLY }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { orgId } = request.user!;
       const query = request.query as QueryParams;
@@ -145,7 +152,7 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // GET /api/v1/reports/export?type=messages&from=&to=
-  app.get('/api/v1/reports/export', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/api/v1/reports/export', { preHandler: ADMIN_ONLY }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { orgId } = request.user!;
       const query = request.query as QueryParams;

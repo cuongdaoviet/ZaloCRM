@@ -5,6 +5,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { authMiddleware } from '../auth/auth-middleware.js';
+import { requireRole } from '../auth/role-middleware.js';
 import { emitWebhook } from '../api/webhook-service.js';
 import { randomUUID } from 'node:crypto';
 
@@ -139,8 +140,10 @@ export async function orderRoutes(app: FastifyInstance) {
     return { orders };
   });
 
-  // Order stats — revenue summary with optional date range
-  app.get('/api/v1/orders/stats', async (request: FastifyRequest) => {
+  // Order stats — revenue summary with optional date range.
+  // Feature 0048 BR-0002: owner/admin only. totalRevenue + todayRevenue
+  // are management figures; members should not see org-wide revenue.
+  app.get('/api/v1/orders/stats', { preHandler: requireRole('owner', 'admin') }, async (request: FastifyRequest) => {
     const user = request.user!;
     const { from = '', to = '' } = request.query as Record<string, string>;
 
@@ -173,8 +176,10 @@ export async function orderRoutes(app: FastifyInstance) {
     };
   });
 
-  // Staff performance — per-staff order count and revenue
-  app.get('/api/v1/orders/by-staff', async (request: FastifyRequest) => {
+  // Staff performance — per-staff order count and revenue.
+  // Feature 0048 BR-0001: owner/admin only. Leaks every staff member's
+  // revenue performance to peers if left open; that's management-only data.
+  app.get('/api/v1/orders/by-staff', { preHandler: requireRole('owner', 'admin') }, async (request: FastifyRequest) => {
     const user = request.user!;
 
     const staffStats = await prisma.order.groupBy({
