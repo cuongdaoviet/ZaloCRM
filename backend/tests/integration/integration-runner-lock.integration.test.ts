@@ -165,3 +165,129 @@ describe('AC-0006: integration-runner uses FOR UPDATE SKIP LOCKED', () => {
     expect(syncMock).toHaveBeenCalled();
   }, 30_000);
 });
+
+describe('AC-0007: per-row error isolation inside the integration batch', () => {
+  beforeEach(async () => {
+    await resetDb(prisma);
+    vi.clearAllMocks();
+    isDueMock.mockReturnValue(true);
+  });
+
+  /**
+   * SPEC 0045 §6 AC-0007 + BR-0005 — a single connector failure inside
+   * the batch must NOT roll back the whole transaction. The two
+   * surrounding integrations still get their `lastSyncedAt` updated and
+   * a 'succeeded' IntegrationRun row; the failing integration commits
+   * with `lastError` populated and a 'failed' run row.
+   *
+   * Test shape: seed 3 enabled google_sheets integrations, force the
+   * middle row's `connector.sync` to reject, drive one
+   * `runDueIntegrations()`. Assert all three rows show post-batch
+   * state — proving the worker's per-row try/catch + transaction
+   * commit semantics work end-to-end.
+   */
+  it(
+    'one failing connector does not poison the other rows in the batch',
+    async () => {
+      const org = await prisma.organization.create({ data: { name: 'IsoOrg' } });
+      // Stagger lastSyncedAt so the worker's ORDER BY last_synced_at
+      // ASC NULLS FIRST claim returns them in (ok1, fail, ok2) order.
+      const okId1 = (
+        await prisma.integration.create({
+          data: {
+            orgId: org.id,
+            type: 'google_sheets',
+            name: 'IsoOk1',
+            configCipher: 'cipher',
+            configIv: 'iv',
+            configTag: 'tag',
+            enabled: true,
+            lastSyncedAt: new Date(Date.now() - 3 * 60 * 60 * 1000),
+          },
+        })
+      ).id;
+      const failId = (
+        await prisma.integration.create({
+          data: {
+            orgId: org.id,
+            type: 'google_sheets',
+            name: 'IsoFail',
+            configCipher: 'cipher',
+            configIv: 'iv',
+            configTag: 'tag',
+            enabled: true,
+            lastSyncedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+          },
+        })
+      ).id;
+      const okId2 = (
+        await prisma.integration.create({
+          data: {
+            orgId: org.id,
+            type: 'google_sheets',
+            name: 'IsoOk2',
+            configCipher: 'cipher',
+            configIv: 'iv',
+            configTag: 'tag',
+            enabled: true,
+            lastSyncedAt: new Date(Date.now() - 1 * 60 * 60 * 1000),
+          },
+        })
+      ).id;
+
+      // Sequence syncMock per-call: rows 1 + 3 succeed, row 2 throws.
+      // We can't rely on call order being stable across implementations,
+      // so we resolve based on which row the connector is being asked
+      // to sync. Connector receives (orgId, config) — both identical
+      // across rows because decryptConfig is mocked. Use call counter
+      // instead: row 1 = call #1, fail = call #2, row 3 = call #3.
+      syncMock.mockImplementation(async () => {
+        const callIdx = syncMock.mock.calls.length;
+        if (callIdx === 2) {
+          throw new Error('connector blew up on middle row');
+        }
+        return { status: 'succeeded', recordsProcessed: 7 };
+      });
+
+      const { runDueIntegrations } = await import(
+        '../../src/workers/integration-runner.js'
+      );
+      await runDueIntegrations();
+
+      // Sync was attempted for all three rows.
+      expect(syncMock).toHaveBeenCalledTimes(3);
+
+      // Row 1 (ok) — lastSyncedAt fresh, lastError cleared.
+      const ok1 = await prisma.integration.findUnique({ where: { id: okId1 } });
+      expect(ok1?.lastSyncedAt?.getTime()).toBeGreaterThan(Date.now() - 60_000);
+      expect(ok1?.lastError).toBeNull();
+
+      // Row 2 (failed) — lastError populated. lastSyncedAt is NOT
+      // updated by executeSyncRun's failure branch (only `lastError`
+      // is written), so it remains at the original ~2h-old value.
+      const fail = await prisma.integration.findUnique({ where: { id: failId } });
+      expect(fail?.lastError).toContain('connector blew up on middle row');
+      expect(fail?.lastSyncedAt?.getTime()).toBeLessThan(Date.now() - 60 * 60 * 1000);
+
+      // Row 3 (ok) — fresh lastSyncedAt. THIS is the key assertion:
+      // the row AFTER the failing one still got committed, proving the
+      // batch was not unwound by row 2's throw.
+      const ok2 = await prisma.integration.findUnique({ where: { id: okId2 } });
+      expect(ok2?.lastSyncedAt?.getTime()).toBeGreaterThan(Date.now() - 60_000);
+      expect(ok2?.lastError).toBeNull();
+
+      // Belt-and-suspenders: the IntegrationRun ledger reflects the
+      // same picture — two 'succeeded' rows and one 'failed' row,
+      // all committed in the same batch transaction.
+      const runs = await prisma.integrationRun.findMany({
+        orderBy: { startedAt: 'asc' },
+      });
+      expect(runs).toHaveLength(3);
+      const byIntegration = new Map(runs.map((r) => [r.integrationId, r.status]));
+      expect(byIntegration.get(okId1)).toBe('succeeded');
+      expect(byIntegration.get(failId)).toBe('failed');
+      expect(byIntegration.get(okId2)).toBe('succeeded');
+    },
+    30_000,
+  );
+});
