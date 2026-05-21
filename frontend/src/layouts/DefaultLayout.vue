@@ -156,6 +156,8 @@ const menuItems: MenuItem[] = [
   { title: 'Lead score', icon: 'mdi-fire', path: '/settings/lead-score', adminOnly: true },
   // Feature 0037 — Workflow automation engine (phase 1).
   { title: 'Workflow tự động', icon: 'mdi-pipe', path: '/settings/workflows', adminOnly: true },
+  // Feature 0036 — AI reply suggestions (BYOK).
+  { title: 'Gợi ý AI', icon: 'mdi-robot-outline', path: '/settings/ai-config', adminOnly: true },
   { title: 'Tin nhắn mẫu', icon: 'mdi-message-flash-outline', path: '/quick-replies' },
   { title: 'API & Webhook', icon: 'mdi-api', path: '/api-settings' },
 ];

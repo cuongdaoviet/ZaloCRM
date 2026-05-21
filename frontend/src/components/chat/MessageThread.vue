@@ -432,6 +432,16 @@
         </v-chip>
       </div>
 
+      <!-- Feature 0036 — AI reply suggestion chips. Renders above the composer
+           when the last message is inbound + within 24h. Click a chip fills
+           the composer; refresh fetches a fresh set. -->
+      <AiSuggestionChips
+        v-if="showAiChips"
+        :conversation-id="conversation?.id ?? null"
+        :enabled="aiChipsEnabled"
+        @pick="onAiSuggestionPick"
+      />
+
       <!-- Feature 0031 — composer reply preview banner. Renders just above
            the input when `replyingTo` is set. Click ✕ → emits reply-clear so
            the parent (use-chat) clears the target without sending. -->
@@ -589,6 +599,8 @@ import MessageSkeleton from './MessageSkeleton.vue';
 import ZinstantCard from './ZinstantCard.vue';
 import MentionPicker from './MentionPicker.vue';
 import StickerPicker, { type StickerPick } from './StickerPicker.vue';
+// Feature 0036 — AI reply suggestion chips above composer.
+import AiSuggestionChips from './AiSuggestionChips.vue';
 import { secondaryZaloName } from '@/composables/use-contact-name';
 import UserInfoPopover, {
   type CreateContactPayload,
@@ -729,6 +741,38 @@ onMounted(() => window.addEventListener('click', closePickerOnOutsideClick, true
 onBeforeUnmount(() => window.removeEventListener('click', closePickerOnOutsideClick, true));
 
 const inputText = ref('');
+
+// ── Feature 0036 — AI suggestion chip gating ──────────────────────────────
+// BR-0003 conditions: last message is from contact, within 24h, and AI is
+// enabled per-org (gate driven by `aiEnabledFlag` injected from parent — when
+// the org has no AiConfig the BE returns 412 ai_disabled and the chips block
+// hides itself).
+const INBOUND_WINDOW_MS = 24 * 60 * 60 * 1000;
+const showAiChips = computed<boolean>(() => {
+  if (!props.conversation) return false;
+  // Filter out optimistic outbound stubs that haven't sent yet.
+  const sent = props.messages.filter((m) => !m.isDeleted);
+  if (sent.length === 0) return false;
+  const last = sent[sent.length - 1];
+  if (!last) return false;
+  if (last.senderType !== 'contact') return false;
+  const at = new Date(last.sentAt).getTime();
+  if (Number.isNaN(at)) return false;
+  if (Date.now() - at > INBOUND_WINDOW_MS) return false;
+  return true;
+});
+
+const aiChipsEnabled = computed<boolean>(() => showAiChips.value);
+
+function onAiSuggestionPick(text: string): void {
+  // Fill the composer; do not auto-send so rep can edit.
+  inputText.value = text;
+  nextTick(() => {
+    const native = (textareaRef.value as { focus?: () => void } | null) ?? null;
+    native?.focus?.();
+  });
+}
+
 const messagesContainer = ref<HTMLElement | null>(null);
 // Feature 0043 — VVirtualScroll instance ref. We use it to call
 // scrollToIndex when new messages arrive in virtualized mode (the parent
