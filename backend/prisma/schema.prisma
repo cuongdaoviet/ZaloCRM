@@ -233,6 +233,13 @@ model Message {
   @@index([zaloMsgId])
   // Powers /search/messages: filter by conversation, sort by sentAt desc
   @@index([conversationId, sentAt(sort: Desc)])
+  // Feature 0033 — friend aggregates: chatting-count query filters by
+  // `(conversation_id, sender_type='contact', sent_at >= NOW() - 7d)`. The
+  // existing `(conversationId, sentAt)` index does not cover senderType so
+  // Postgres still has to read rows it would otherwise skip. This composite
+  // makes the inner join on conversations → messages an index-only scan
+  // for inbound traffic in the active window.
+  @@index([conversationId, senderType, sentAt(sort: Desc)])
   @@map("messages")
 }
 
