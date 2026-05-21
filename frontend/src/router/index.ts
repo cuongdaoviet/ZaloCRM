@@ -44,7 +44,7 @@ export const routes = [
     path: '/zalo-accounts',
     name: 'ZaloAccounts',
     component: () => import('@/views/ZaloAccountsView.vue'),
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
     path: '/appointments',
@@ -68,7 +68,7 @@ export const routes = [
     path: '/settings',
     name: 'Settings',
     component: () => import('@/views/SettingsView.vue'),
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
     path: '/api-settings',
@@ -80,7 +80,7 @@ export const routes = [
     path: '/quick-replies',
     name: 'QuickReplies',
     component: () => import('@/views/QuickRepliesView.vue'),
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
     path: '/search',
@@ -110,7 +110,7 @@ export const routes = [
     path: '/keyword-rules',
     name: 'KeywordRules',
     component: () => import('@/views/KeywordRulesView.vue'),
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
     path: '/activity',

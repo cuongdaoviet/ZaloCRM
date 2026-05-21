@@ -194,7 +194,9 @@ const menuGroups: MenuGroup[] = [
     items: [
       { title: 'Tin nhắn', icon: 'mdi-message-text-outline', path: '/chat' },
       { title: 'Tìm tin nhắn', icon: 'mdi-text-search', path: '/search' },
-      { title: 'Tin nhắn mẫu', icon: 'mdi-message-flash-outline', path: '/quick-replies' },
+      // Feature 0048c: writes are admin-only server-side, so hide menu
+      // from members too. Was previously open → confusing read-only UX.
+      { title: 'Tin nhắn mẫu', icon: 'mdi-message-flash-outline', path: '/quick-replies', adminOnly: true },
     ],
   },
   {
@@ -216,7 +218,8 @@ const menuGroups: MenuGroup[] = [
     icon: 'mdi-bullhorn-outline',
     items: [
       { title: 'Chiến dịch', icon: 'mdi-bullhorn-outline', path: '/campaigns', adminOnly: true },
-      { title: 'Auto-tag keyword', icon: 'mdi-tag-text-outline', path: '/keyword-rules' },
+      // Feature 0048c: writes are admin-only server-side; hide from members.
+      { title: 'Auto-tag keyword', icon: 'mdi-tag-text-outline', path: '/keyword-rules', adminOnly: true },
       // Feature 0037 — Workflow automation engine (phase 1).
       { title: 'Workflow tự động', icon: 'mdi-pipe', path: '/settings/workflows', adminOnly: true },
       // Feature 0036 — AI reply suggestions (BYOK).
@@ -241,8 +244,9 @@ const menuGroups: MenuGroup[] = [
     label: 'Hệ thống',
     icon: 'mdi-cog-outline',
     items: [
-      { title: 'Tài khoản Zalo', icon: 'mdi-cellphone-link', path: '/zalo-accounts' },
-      { title: 'Nhân viên', icon: 'mdi-account-cog-outline', path: '/settings' },
+      // Feature 0048c: account CRUD + team mgmt are admin-only server-side.
+      { title: 'Tài khoản Zalo', icon: 'mdi-cellphone-link', path: '/zalo-accounts', adminOnly: true },
+      { title: 'Nhân viên', icon: 'mdi-account-cog-outline', path: '/settings', adminOnly: true },
       { title: 'Quản lý nhãn', icon: 'mdi-tag-multiple-outline', path: '/settings/tags', adminOnly: true },
       // Feature 0040 — Lead score admin config.
       { title: 'Lead score', icon: 'mdi-fire', path: '/settings/lead-score', adminOnly: true },

@@ -51,12 +51,27 @@ Roles trong hệ thống (Prisma `User.role`): `owner`, `admin`, `member`.
   if (to.meta.requiresAdmin && !authStore.isAdmin) return next('/');
   ```
 
-### Phần C — Page-level menu consistency (product call)
+### Phần C — Page-level menu consistency (product decision: option B for all 4)
 
-- **BR-0006 — Quyết định cho 4 page "menu open, writes admin-only".**
+- **BR-0006 — Quyết định 2026-05-22: cả 4 page mark `adminOnly: true`.**
   Pages: Tin nhắn mẫu, Auto-tag keyword, Tài khoản Zalo, Nhân viên.
-  Hai lựa chọn:
-  - (a) Giữ menu open → member có read-only view. Cần kiểm tra UI hide
+  Product call: chọn option (b) — hide tất cả khỏi menu member. Lý do:
+  giảm noise trên màn member, tránh nhầm lẫn read-only view khi mọi
+  action đều 403. Member cần template / staff list thì hỏi admin chia
+  sẻ.
+  Implementation:
+  - `frontend/src/layouts/DefaultLayout.vue`: thêm `adminOnly: true`
+    cho 4 menu entries.
+  - `frontend/src/router/index.ts`: thêm `requiresAdmin: true` meta
+    cho `/quick-replies`, `/keyword-rules`, `/zalo-accounts`,
+    `/settings`.
+  - `frontend/src/router/__tests__/router-rbac.test.ts`: chuyển 4 paths
+    từ `NON_ADMIN_PATHS` sang `ADMIN_PATHS` (15 admin / 10 non-admin
+    sau cập nhật).
+
+#### Phương án đã loại
+
+- (a) Giữ menu open → member có read-only view. Cần kiểm tra UI hide
     nút action cho member.
   - (b) Mark `adminOnly: true` → member không thấy menu.
   - Cần CEO/product call trước khi implement. Hiện đề xuất (a) cho
