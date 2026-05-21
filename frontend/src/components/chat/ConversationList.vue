@@ -1,5 +1,5 @@
 <template>
-  <div class="conversation-list d-flex flex-column" style="width: 100%; border-right: 1px solid var(--border-glow, rgba(0,242,255,0.1)); height: 100%;">
+  <div class="conversation-list d-flex flex-column" style="width: 100%; height: 100%;">
     <!-- New chat button -->
     <div class="pa-2 pb-0">
       <v-btn
@@ -94,15 +94,23 @@
           @click="$emit('select', conv.id)"
           @mouseenter="onRowHover(conv.id)"
           @mouseleave="onRowHoverLeave"
-          class="py-2"
-          :class="{ 'conversation-active': conv.id === selectedId, 'bg-blue-lighten-5': conv.unreadCount > 0 && conv.id !== selectedId }"
+          class="conversation-row"
+          :class="{ 'conversation-active': conv.id === selectedId, 'conversation-unread': conv.unreadCount > 0 && conv.id !== selectedId }"
         >
           <template #prepend>
-            <v-avatar size="40" color="grey-lighten-2">
-              <v-icon v-if="conv.threadType === 'group'" icon="mdi-account-group" />
-              <v-img v-else-if="conv.contact?.avatarUrl" :src="conv.contact.avatarUrl" />
-              <v-icon v-else icon="mdi-account" />
-            </v-avatar>
+            <div class="conversation-avatar-wrap">
+              <v-avatar size="40" color="grey-lighten-2">
+                <v-icon v-if="conv.threadType === 'group'" icon="mdi-account-group" />
+                <v-img v-else-if="conv.contact?.avatarUrl" :src="conv.contact.avatarUrl" />
+                <v-icon v-else icon="mdi-account" />
+              </v-avatar>
+              <!-- Feature 0042 BR-0003 — unread red dot at top-right of avatar -->
+              <span
+                v-if="conv.unreadCount > 0"
+                class="conversation-unread-badge"
+                :aria-label="`${conv.unreadCount} tin chưa đọc`"
+              >{{ formatUnreadCount(conv.unreadCount) }}</span>
+            </div>
           </template>
 
           <v-list-item-title class="d-flex align-center">
@@ -123,16 +131,9 @@
           </v-list-item-title>
 
           <v-list-item-subtitle class="d-flex align-center">
-            <span class="text-truncate" style="max-width: 200px;" :class="{ 'font-weight-medium': conv.unreadCount > 0 }">
+            <span class="text-truncate conversation-preview" :class="{ 'font-weight-medium': conv.unreadCount > 0 }">
               {{ lastMessagePreview(conv) }}
             </span>
-            <v-spacer />
-            <v-badge
-              v-if="conv.unreadCount > 0"
-              :content="conv.unreadCount"
-              color="error"
-              inline
-            />
           </v-list-item-subtitle>
 
           <template #append>
@@ -157,15 +158,23 @@
         @mouseenter="onRowHover(conv.id)"
         @mouseleave="onRowHoverLeave"
         @contextmenu.prevent="openContextMenu($event, conv)"
-        class="py-2 conversation-row"
-        :class="{ 'conversation-active': conv.id === selectedId, 'bg-blue-lighten-5': conv.unreadCount > 0 && conv.id !== selectedId }"
+        class="conversation-row"
+        :class="{ 'conversation-active': conv.id === selectedId, 'conversation-unread': conv.unreadCount > 0 && conv.id !== selectedId }"
       >
         <template #prepend>
-          <v-avatar size="40" color="grey-lighten-2">
-            <v-icon v-if="conv.threadType === 'group'" icon="mdi-account-group" />
-            <v-img v-else-if="conv.contact?.avatarUrl" :src="conv.contact.avatarUrl" />
-            <v-icon v-else icon="mdi-account" />
-          </v-avatar>
+          <div class="conversation-avatar-wrap">
+            <v-avatar size="40" color="grey-lighten-2">
+              <v-icon v-if="conv.threadType === 'group'" icon="mdi-account-group" />
+              <v-img v-else-if="conv.contact?.avatarUrl" :src="conv.contact.avatarUrl" />
+              <v-icon v-else icon="mdi-account" />
+            </v-avatar>
+            <!-- Feature 0042 BR-0003 — unread red dot at top-right of avatar -->
+            <span
+              v-if="conv.unreadCount > 0"
+              class="conversation-unread-badge"
+              :aria-label="`${conv.unreadCount} tin chưa đọc`"
+            >{{ formatUnreadCount(conv.unreadCount) }}</span>
+          </div>
         </template>
 
         <v-list-item-title class="d-flex align-center">
@@ -184,16 +193,9 @@
         </v-list-item-title>
 
         <v-list-item-subtitle class="d-flex align-center">
-          <span class="text-truncate" style="max-width: 200px;" :class="{ 'font-weight-medium': conv.unreadCount > 0 }">
+          <span class="text-truncate conversation-preview" :class="{ 'font-weight-medium': conv.unreadCount > 0 }">
             {{ lastMessagePreview(conv) }}
           </span>
-          <v-spacer />
-          <v-badge
-            v-if="conv.unreadCount > 0"
-            :content="conv.unreadCount"
-            color="error"
-            inline
-          />
         </v-list-item-subtitle>
 
         <!-- Zalo account indicator + pin button on hover -->
@@ -428,6 +430,13 @@ function lastMessagePreview(conv: Conversation): string {
   return prefix + (text.length > 50 ? text.slice(0, 50) + '...' : text);
 }
 
+// Feature 0042 BR-0003 — clamp unread count for the avatar badge.
+function formatUnreadCount(n: number): string {
+  if (n <= 0) return '';
+  if (n > 99) return '99+';
+  return String(n);
+}
+
 function formatTime(dateStr: string | null): string {
   if (!dateStr) return '';
   const date = new Date(dateStr);
@@ -471,5 +480,60 @@ function formatTime(dateStr: string | null): string {
 /* Feature 0024 — keep the muted Zalo name from blowing the row width. */
 .zalo-secondary {
   max-width: 140px;
+}
+
+/* Feature 0042 BR-0002 — 64px compact conversation rows. */
+.conversation-row {
+  min-height: 64px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+.conversation-row :deep(.v-list-item__prepend) {
+  padding-right: 12px;
+}
+
+/* Feature 0042 BR-0004 — full-row active highlight, not just border. */
+.conversation-row.conversation-active {
+  background: var(--smax-primary-soft, #e3f2fd);
+}
+.conversation-row.conversation-active :deep(.v-list-item__overlay) {
+  opacity: 0;
+}
+
+/* Subtle but visible unread row background (lighter than active). */
+.conversation-row.conversation-unread {
+  background: rgba(41, 98, 255, 0.04);
+}
+
+/* Avatar wrapper anchors the unread red dot (BR-0003). */
+.conversation-avatar-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+/* Feature 0042 BR-0003 — prominent red unread badge on avatar.
+   Min size 20px, max content "99+" rendered inside. */
+.conversation-unread-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: var(--smax-error, #ff3d00);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+  border: 2px solid var(--smax-bg, #ffffff);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+  pointer-events: none;
+}
+
+.conversation-preview {
+  max-width: 220px;
+  font-size: 12px;
 }
 </style>
