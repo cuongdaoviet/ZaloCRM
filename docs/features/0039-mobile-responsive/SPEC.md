@@ -226,3 +226,97 @@ effort. Phase 2 = native app (separate product call).
 - Native iOS / Android app (separate product).
 - Camera/microphone permission flows.
 - Gesture shortcuts (swipe to archive, etc.).
+
+## 9. ZaloCRM-3.0 lessons (recon notes)
+
+Scanned `/tmp/zalocrm3/frontend/src/` mobile surface.
+
+### 3.0 status: responsive only with thin PWA shell
+
+3.0 has `manifest.json` + Apple meta tags so users can "Add to Home
+Screen", but `service-worker.js` doesn't exist and SW registration in
+`main.ts` is commented out. No `vite-plugin-pwa`. The "offline"
+indicators are cosmetic (`OfflineIndicator.vue` watches
+`navigator.onLine`, `use-offline-queue.ts` is an in-memory stub).
+**This validates our cut** — 3.0 didn't actually ship offline either.
+
+### Port verbatim from 3.0
+
+**(a) Layout switcher in `App.vue`** (port pattern, swap their custom
+`useMobile()` for Vuetify `useDisplay().smAndDown`):
+
+```vue
+<template>
+  <component :is="layout">
+    <router-view />
+  </component>
+</template>
+<script setup lang="ts">
+import { computed } from 'vue';
+import { useDisplay } from 'vuetify';
+import DefaultLayout from '@/layouts/DefaultLayout.vue';
+import MobileLayout from '@/layouts/MobileLayout.vue';
+
+const { smAndDown } = useDisplay();
+const layout = computed(() => (smAndDown.value ? MobileLayout : DefaultLayout));
+</script>
+```
+
+Cleaner than per-view `v-if="isMobile"` branching. Source:
+`/tmp/zalocrm3/frontend/src/App.vue`.
+
+**(b) `MobileContactView.vue` markup** — ~100 LOC ready-to-port:
+tonal `v-card variant="tonal" rounded="xl"` per contact (avatar +
+name + phone + status chip), horizontally scrollable `v-chip` filter
+row at top, search field with 300ms debounce, FAB at
+`bottom: 88px; right: 16px`. Source:
+`/tmp/zalocrm3/frontend/src/views/MobileContactView.vue`.
+
+**(c) Safe-area inset handling** for bottom nav on iOS with notch:
+
+```css
+.bottom-nav {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+main {
+  padding-bottom: calc(72px + env(safe-area-inset-bottom));
+}
+```
+
+Small but prevents the bottom nav from being eaten by the home
+indicator bar.
+
+### Deviate explicitly from 3.0
+
+**(a) Tab list.** 3.0 has 4 tabs: Chat / Khách hàng / Lịch hẹn / Tổng
+quan (Dashboard). **No Friends tab.** Our SPEC keeps Chat / Contacts /
+Friends / More — Friends is a primary surface for us (Feature 0042
+shipped the page).
+
+**(b) Breakpoint detection.** 3.0 uses a custom `use-mobile.ts`
+composable with `window.innerWidth < 768` watcher. Reinvented wheel.
+Use Vuetify's `useDisplay().smAndDown` directly.
+
+**(c) Explicit 44px touch targets.** 3.0 has no explicit minimum
+sizing — relies on Vuetify defaults + `density="compact"`, which can
+drop buttons below 44px on phones. Our SPEC enforces 44px floor
+(BR-0009).
+
+**(d) Don't auto-apply mobile layout to admin/settings.** 3.0's switch
+is purely viewport-based — admin screens get the cramped mobile
+chrome even when an admin uses a tablet. **Decision for our impl:**
+mobile layout applies to all routes (consistent UX); admins on
+tablets can still use desktop because tablets are ≥ `md`.
+
+### Surprises
+
+- 3.0 has `MobileChatView.vue` (121 lines) but it's **never routed** —
+  `ChatView.vue` handles its own mobile branching. Orphaned. We've
+  already shipped mobile pane switch in Feature 0042 inside ChatView
+  — keep that, don't port MobileChatView.
+- 3.0's `OfflineIndicator` + `use-offline-queue` + `PullToRefresh` +
+  `use-pending-mutations` are wired in but **purely cosmetic** — no SW
+  means the "offline queue" only survives in-tab memory. Matches our
+  phase-1 cut decision: do not port these.
+- 3.0's `MobileLayout.vue` is a slim 30-line wrapper (`v-app-bar` +
+  `<slot/>` + `BottomNav.vue`). We can match that simplicity.
