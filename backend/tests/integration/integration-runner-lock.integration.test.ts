@@ -49,6 +49,12 @@ vi.mock('../../src/shared/database/prisma-client.js', async () => ({
 vi.mock('../../src/shared/utils/logger.js', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
+// node-cron is mocked so calling startIntegrationRunner() in the
+// AC-0008 log-assertion test doesn't register a real interval that
+// fires while the test container is still running.
+vi.mock('node-cron', () => ({
+  default: { schedule: vi.fn(() => ({ stop: vi.fn() })) },
+}));
 
 beforeAll(async () => {
   prisma = await setupDb();

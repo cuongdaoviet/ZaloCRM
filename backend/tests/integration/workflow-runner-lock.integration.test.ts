@@ -35,6 +35,13 @@ vi.mock('../../src/shared/utils/logger.js', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 vi.mock('../../src/modules/zalo/zalo-pool.js', () => ({ zaloPool: zaloPoolMock }));
+// node-cron is mocked so calling startWorkflowRunner() in the AC-0008
+// log-assertion test doesn't register a real interval that fires while
+// the test container is still running. The AC just cares that the log
+// line is emitted, not that the cron is wired up.
+vi.mock('node-cron', () => ({
+  default: { schedule: vi.fn(() => ({ stop: vi.fn() })) },
+}));
 
 beforeAll(async () => {
   prisma = await setupDb();
