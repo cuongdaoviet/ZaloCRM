@@ -46,17 +46,50 @@
 
     <!-- Sidebar navigation -->
     <v-navigation-drawer v-model="drawer" :rail="rail" permanent @click="rail = false">
-      <v-list density="compact" nav class="mt-2">
-        <v-list-item
-          v-for="item in visibleMenuItems"
-          :key="item.path"
-          :to="item.path"
-          :prepend-icon="item.icon"
-          :title="item.title"
-          :value="item.path"
-          rounded="xl"
-          class="mb-1 mx-2"
-        />
+      <v-list
+        v-model:opened="openedGroups"
+        density="compact"
+        nav
+        class="mt-2"
+      >
+        <template v-for="group in visibleMenuGroups" :key="group.id">
+          <!-- Ungrouped row (e.g. Dashboard) — no header, render flat. -->
+          <template v-if="!group.label">
+            <v-list-item
+              v-for="item in group.items"
+              :key="item.path"
+              :to="item.path"
+              :prepend-icon="item.icon"
+              :title="item.title"
+              :value="item.path"
+              rounded="xl"
+              class="mb-1 mx-2"
+            />
+          </template>
+
+          <!-- Grouped rows — collapsible v-list-group, single-expand. -->
+          <v-list-group v-else :value="group.id">
+            <template #activator="{ props: activatorProps }">
+              <v-list-item
+                v-bind="activatorProps"
+                :prepend-icon="group.icon"
+                :title="group.label"
+                rounded="xl"
+                class="mb-1 mx-2 sidebar-group-activator"
+              />
+            </template>
+            <v-list-item
+              v-for="item in group.items"
+              :key="item.path"
+              :to="item.path"
+              :prepend-icon="item.icon"
+              :title="item.title"
+              :value="item.path"
+              rounded="xl"
+              class="mb-1 mx-2"
+            />
+          </v-list-group>
+        </template>
       </v-list>
 
       <template #append>
@@ -85,7 +118,7 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import { useTheme } from 'vuetify';
 import { useAuthStore } from '@/stores/auth';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import NotificationBell from '@/components/NotificationBell.vue';
 import GlobalSearch from '@/components/GlobalSearch.vue';
 import { useUserPreferences } from '@/composables/use-user-preferences';
@@ -93,6 +126,7 @@ import { useUserPreferences } from '@/composables/use-user-preferences';
 const theme = useTheme();
 const authStore = useAuthStore();
 const router = useRouter();
+const route = useRoute();
 
 const drawer = ref(true);
 const rail = ref(false);
@@ -133,40 +167,143 @@ interface MenuItem {
   adminOnly?: boolean;
 }
 
-const menuItems: MenuItem[] = [
-  { title: 'Dashboard', icon: 'mdi-view-dashboard-outline', path: '/' },
-  { title: 'Tin nhắn', icon: 'mdi-message-text-outline', path: '/chat' },
-  { title: 'Tìm tin nhắn', icon: 'mdi-text-search', path: '/search' },
-  { title: 'Khách hàng', icon: 'mdi-account-group-outline', path: '/contacts' },
-  { title: 'Tài khoản Zalo', icon: 'mdi-cellphone-link', path: '/zalo-accounts' },
-  { title: 'Lịch hẹn', icon: 'mdi-calendar-clock-outline', path: '/appointments' },
-  { title: 'Đơn hàng', icon: 'mdi-cart-outline', path: '/orders' },
-  { title: 'Báo cáo', icon: 'mdi-chart-arc', path: '/reports' },
-  { title: 'KPI & Leaderboard', icon: 'mdi-trophy-outline', path: '/kpi', adminOnly: true },
-  { title: 'Phân tích nâng cao', icon: 'mdi-chart-timeline-variant', path: '/analytics', adminOnly: true },
-  { title: 'Chiến dịch', icon: 'mdi-bullhorn-outline', path: '/campaigns', adminOnly: true },
-  { title: 'Bạn bè', icon: 'mdi-account-multiple-outline', path: '/friends' },
-  { title: 'Kết bạn', icon: 'mdi-account-multiple-plus-outline', path: '/friendship-attempts' },
-  { title: 'Auto-tag keyword', icon: 'mdi-tag-text-outline', path: '/keyword-rules' },
-  { title: 'Hoạt động', icon: 'mdi-history', path: '/activity', adminOnly: true },
-  { title: 'Khách trùng', icon: 'mdi-account-multiple-remove-outline', path: '/duplicate-groups', adminOnly: true },
-  { title: 'Nhân viên', icon: 'mdi-account-cog-outline', path: '/settings' },
-  { title: 'Quản lý nhãn', icon: 'mdi-tag-multiple-outline', path: '/settings/tags', adminOnly: true },
-  // Feature 0040 — Lead score admin config.
-  { title: 'Lead score', icon: 'mdi-fire', path: '/settings/lead-score', adminOnly: true },
-  // Feature 0037 — Workflow automation engine (phase 1).
-  { title: 'Workflow tự động', icon: 'mdi-pipe', path: '/settings/workflows', adminOnly: true },
-  // Feature 0036 — AI reply suggestions (BYOK).
-  { title: 'Gợi ý AI', icon: 'mdi-robot-outline', path: '/settings/ai-config', adminOnly: true },
-  // Feature 0038 — Integration Hub (Sheets + Telegram).
-  { title: 'Integrations', icon: 'mdi-puzzle', path: '/settings/integrations', adminOnly: true },
-  { title: 'Tin nhắn mẫu', icon: 'mdi-message-flash-outline', path: '/quick-replies' },
-  { title: 'API & Webhook', icon: 'mdi-api', path: '/api-settings' },
+interface MenuGroup {
+  id: string;
+  label: string | null; // null = ungrouped row (e.g. Dashboard anchor)
+  icon?: string;        // header icon (required when label is non-null)
+  items: MenuItem[];
+}
+
+// Feature 0047 — sidebar grouped by functional domain.
+// Order: Dashboard anchor → Chat (most-used) → CRM → Marketing/Automation →
+// Reports → System. Each labelled group renders as a collapsible
+// v-list-group; only one is open at a time, and the group containing the
+// active route auto-opens on mount + route change.
+const menuGroups: MenuGroup[] = [
+  {
+    id: 'home',
+    label: null,
+    items: [
+      { title: 'Dashboard', icon: 'mdi-view-dashboard-outline', path: '/' },
+    ],
+  },
+  {
+    id: 'chat',
+    label: 'Trò chuyện',
+    icon: 'mdi-chat-outline',
+    items: [
+      { title: 'Tin nhắn', icon: 'mdi-message-text-outline', path: '/chat' },
+      { title: 'Tìm tin nhắn', icon: 'mdi-text-search', path: '/search' },
+      { title: 'Tin nhắn mẫu', icon: 'mdi-message-flash-outline', path: '/quick-replies' },
+    ],
+  },
+  {
+    id: 'crm',
+    label: 'Khách hàng',
+    icon: 'mdi-account-group-outline',
+    items: [
+      { title: 'Khách hàng', icon: 'mdi-account-group-outline', path: '/contacts' },
+      { title: 'Bạn bè', icon: 'mdi-account-multiple-outline', path: '/friends' },
+      { title: 'Kết bạn', icon: 'mdi-account-multiple-plus-outline', path: '/friendship-attempts' },
+      { title: 'Khách trùng', icon: 'mdi-account-multiple-remove-outline', path: '/duplicate-groups', adminOnly: true },
+      { title: 'Lịch hẹn', icon: 'mdi-calendar-clock-outline', path: '/appointments' },
+      { title: 'Đơn hàng', icon: 'mdi-cart-outline', path: '/orders' },
+    ],
+  },
+  {
+    id: 'marketing',
+    label: 'Marketing & Automation',
+    icon: 'mdi-bullhorn-outline',
+    items: [
+      { title: 'Chiến dịch', icon: 'mdi-bullhorn-outline', path: '/campaigns', adminOnly: true },
+      { title: 'Auto-tag keyword', icon: 'mdi-tag-text-outline', path: '/keyword-rules' },
+      // Feature 0037 — Workflow automation engine (phase 1).
+      { title: 'Workflow tự động', icon: 'mdi-pipe', path: '/settings/workflows', adminOnly: true },
+      // Feature 0036 — AI reply suggestions (BYOK).
+      { title: 'Gợi ý AI', icon: 'mdi-robot-outline', path: '/settings/ai-config', adminOnly: true },
+      // Feature 0038 — Integration Hub (Sheets + Telegram).
+      { title: 'Integrations', icon: 'mdi-puzzle', path: '/settings/integrations', adminOnly: true },
+    ],
+  },
+  {
+    id: 'reports',
+    label: 'Báo cáo',
+    icon: 'mdi-chart-arc',
+    items: [
+      { title: 'Báo cáo', icon: 'mdi-chart-arc', path: '/reports' },
+      { title: 'KPI & Leaderboard', icon: 'mdi-trophy-outline', path: '/kpi', adminOnly: true },
+      { title: 'Phân tích nâng cao', icon: 'mdi-chart-timeline-variant', path: '/analytics', adminOnly: true },
+      { title: 'Hoạt động', icon: 'mdi-history', path: '/activity', adminOnly: true },
+    ],
+  },
+  {
+    id: 'system',
+    label: 'Hệ thống',
+    icon: 'mdi-cog-outline',
+    items: [
+      { title: 'Tài khoản Zalo', icon: 'mdi-cellphone-link', path: '/zalo-accounts' },
+      { title: 'Nhân viên', icon: 'mdi-account-cog-outline', path: '/settings' },
+      { title: 'Quản lý nhãn', icon: 'mdi-tag-multiple-outline', path: '/settings/tags', adminOnly: true },
+      // Feature 0040 — Lead score admin config.
+      { title: 'Lead score', icon: 'mdi-fire', path: '/settings/lead-score', adminOnly: true },
+      { title: 'API & Webhook', icon: 'mdi-api', path: '/api-settings' },
+    ],
+  },
 ];
 
-const visibleMenuItems = computed(() =>
-  menuItems.filter((m) => !m.adminOnly || authStore.isAdmin),
+// Filter admin-only items, then drop any group that ends up empty so the
+// header doesn't orphan above zero rows.
+const visibleMenuGroups = computed(() =>
+  menuGroups
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((m) => !m.adminOnly || authStore.isAdmin),
+    }))
+    .filter((g) => g.items.length > 0),
 );
+
+// Single-expand accordion: at most one group open at a time. Vuetify's
+// v-list `opened` prop is an array — we enforce length ≤ 1 in the watcher
+// that fires when the user clicks a different header.
+const openedGroups = ref<string[]>([]);
+
+// Find which group owns a given path. Falls back to '' (no group) for
+// ungrouped rows like Dashboard. Longest-prefix wins so '/settings/tags'
+// matches the System group's '/settings' entry correctly — but since we
+// match exact paths from the menu config first, prefix matching is only
+// needed for child routes (e.g. '/contacts/:id' → CRM group).
+function groupIdForPath(path: string): string {
+  for (const g of menuGroups) {
+    if (!g.label) continue; // ungrouped
+    const hit = g.items.find(
+      (i) => path === i.path || path.startsWith(i.path + '/'),
+    );
+    if (hit) return g.id;
+  }
+  return '';
+}
+
+// Sync opened group to the active route. Runs on mount + every navigation.
+// We only auto-open; we don't auto-close, so the user's manual expansion
+// stays put until they navigate into a different group.
+watch(
+  () => route.path,
+  (path) => {
+    const gid = groupIdForPath(path);
+    if (gid && !openedGroups.value.includes(gid)) {
+      openedGroups.value = [gid];
+    }
+  },
+  { immediate: true },
+);
+
+// Enforce single-expand: when the user clicks a second header, drop the
+// previously-open group. Vuetify normally allows multi-open; we cap to 1.
+watch(openedGroups, (val) => {
+  if (val.length > 1) {
+    openedGroups.value = [val[val.length - 1]];
+  }
+});
 
 function toggleTheme() {
   themePref.value = isDark.value ? 'light' : 'dark';
@@ -177,3 +314,12 @@ function logout() {
   router.push('/login');
 }
 </script>
+
+<style scoped>
+/* Group activator (header row of each v-list-group) — slightly heavier
+   than nested items so the hierarchy reads at a glance, but not so heavy
+   that it competes with the active route highlight. */
+.sidebar-group-activator :deep(.v-list-item-title) {
+  font-weight: 600;
+}
+</style>
