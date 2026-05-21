@@ -16,7 +16,9 @@
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "rotate-master-key": "tsx scripts/rotate-master-key.ts",
+    "migrate-encrypt-proxy-url": "tsx scripts/migrate-encrypt-proxy-url.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
