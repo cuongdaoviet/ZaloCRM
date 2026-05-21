@@ -14,13 +14,16 @@
       <v-window v-model="tab">
         <!-- ── Tab: Tags ───────────────────────────────────────────────── -->
         <v-window-item value="tags">
-          <div class="pa-3 d-flex flex-wrap align-center" style="gap: 12px;">
+          <!-- Feature 0039: `flex-wrap` + responsive `flex-grow` so the
+               search field can shrink to full width on xs without the
+               "Tạo nhãn" button overflowing the card edge. -->
+          <div class="pa-3 d-flex flex-wrap align-center ga-3 settings-toolbar">
             <v-text-field
               v-model="search"
               prepend-inner-icon="mdi-magnify"
               label="Tìm theo tên"
               density="compact" variant="outlined" hide-details clearable
-              style="max-width: 280px;"
+              class="settings-toolbar__search"
             />
             <v-switch
               v-model="showArchived"
@@ -433,6 +436,20 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* Feature 0039 — keep the tag toolbar useable on phones.
+   The search field gets a desktop max-width but is allowed to fill the
+   row on `xs` so the label doesn't wrap. The container's `flex-wrap`
+   already kicks the create button to its own row when needed. */
+.settings-toolbar__search {
+  max-width: 280px;
+}
+@media (max-width: 600px) {
+  .settings-toolbar__search {
+    max-width: 100%;
+    flex: 1 1 100%;
+  }
+}
+
 .color-swatch {
   display: inline-block;
   width: 18px;

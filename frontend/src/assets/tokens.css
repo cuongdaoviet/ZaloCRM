@@ -69,6 +69,69 @@
   --smax-badge-unread-bg: var(--smax-error);
   --smax-badge-unread-fg: #ffffff;
   --smax-badge-unread-size: 20px;
+
+  /* Feature 0039 — touch target floor (BR-0009).
+     iOS HIG / WCAG 2.5.5 both ask for at least 44×44 px. We expose it as
+     a token so component-level CSS can opt into the floor (`min-height:
+     var(--smax-touch-target-min)`). Stays a desktop default; the mobile
+     media query below upgrades dense row heights at the same time. */
+  --smax-touch-target-min: 44px;
+
+  /* Feature 0039 — mobile bottom nav height (BR-0003). 56px is the
+     Vuetify v-bottom-navigation default; we keep the variable so the
+     MobileLayout padding can reference it (the layout adds the safe-area
+     inset on top). */
+  --smax-bottom-nav-h: 56px;
+}
+
+/* Feature 0039 — mobile token overrides (BR-0009, AC-0008).
+   On phones we widen dense rows to 56px so a tap target on a v-list-item
+   or table row never falls below 44px. Desktop keeps the 40px row from
+   Feature 0042.
+
+   We also override Vuetify's default x-small / small button heights so
+   icon buttons inside chat list rows / table actions clear the 44 px
+   floor without us having to hand-edit every component that picked
+   `size="x-small"` for visual reasons (chat appointments, conversation
+   notes, webhook debug panel, message thread file-download icons, …).
+   The desktop UX keeps its tight density above 600px; only phones get
+   the bump. */
+@media (max-width: 600px) {
+  :root {
+    --smax-row-height-dense: 56px;
+  }
+
+  /* BR-0009 — clickable v-btn elements must hit the 44px floor on
+     phones. Vuetify's `--v-btn-height` is read by `.v-btn` for height
+     calc, so overriding it on `.v-btn` is enough to lift x-small (16px)
+     and small (28px) up to the floor without touching other sizing
+     (icon size, font size). We scope it to `.v-btn` so v-chip's
+     `size="x-small"` (which we use for status pills) is untouched. */
+  .v-btn--size-x-small,
+  .v-btn--size-small {
+    --v-btn-height: var(--smax-touch-target-min);
+    min-height: var(--smax-touch-target-min);
+    min-width: var(--smax-touch-target-min);
+  }
+
+  /* v-list-item rows expose `--v-list-item-padding-block` for height —
+     bump the floor so a tap on a list row in MobileBottomNav's "More"
+     drawer or any v-list in a settings page can't drop below 44px. */
+  .v-list-item {
+    min-height: var(--smax-touch-target-min);
+  }
+}
+
+/* Feature 0039 — safe-area inset helper (BR-0003).
+   Applied to fixed-position bottom bars so the iOS home indicator can't
+   eat the last row of buttons. `env()` falls back to 0 on Android or
+   desktop browsers, so the rule is harmless cross-platform. */
+.smax-safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.smax-touch-target {
+  min-height: var(--smax-touch-target-min);
+  min-width: var(--smax-touch-target-min);
 }
 
 /* ════════ Helper utility classes ════════ */
