@@ -20,6 +20,12 @@
           <div class="flex-grow-1">
             <div class="d-flex align-center" style="gap: 8px;">
               <h1 class="text-h5 mb-0">{{ overview.contact.fullName || 'Chưa có tên' }}</h1>
+              <!-- Feature 0024 — muted Zalo display name (BR-0005). -->
+              <span
+                v-if="zaloSecondary !== null"
+                class="text-body-2 text-grey"
+                :title="zaloSecondary || ''"
+              >({{ zaloSecondary }})</span>
               <v-chip v-if="overview.contact.status" size="small" color="primary" variant="tonal">
                 {{ STATUS_LABELS[overview.contact.status] || overview.contact.status }}
               </v-chip>
@@ -243,6 +249,7 @@ import {
 } from '@/composables/use-customer-overview';
 import TagChip from '@/components/tags/TagChip.vue';
 import { useCrmTags } from '@/composables/use-crm-tags';
+import { secondaryZaloName } from '@/composables/use-contact-name';
 
 interface EnrichedTag {
   id: string | null;
@@ -260,6 +267,12 @@ const { overview, loading, error, fetchOverview } = useCustomerOverview();
 // shims have been removed.
 const { loadTags } = useCrmTags();
 loadTags();
+
+// Feature 0024 — muted Zalo display name shown next to the CRM name in the
+// detail-page header. Null when both names match or zaloDisplayName is empty.
+const zaloSecondary = computed<string | null>(() =>
+  secondaryZaloName(overview.value?.contact ?? null),
+);
 
 const enrichedTags = computed<EnrichedTag[]>(() => {
   const c = overview.value?.contact;

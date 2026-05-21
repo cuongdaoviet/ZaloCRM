@@ -13,6 +13,8 @@ export interface OverviewContactTag {
 export interface OverviewContact {
   id: string;
   fullName: string | null;
+  // Feature 0024 — Zalo display name, auto-synced from inbound messages.
+  zaloDisplayName: string | null;
   phone: string | null;
   email: string | null;
   avatarUrl: string | null;

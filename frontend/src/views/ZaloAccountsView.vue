@@ -13,6 +13,16 @@
             {{ statusText(item.liveStatus || item.status) }}
           </v-chip>
         </template>
+        <template #item.acceptedNicksCount="{ item }">
+          <span>{{ friendStatsByAccount[item.id]?.acceptedNicksCount ?? 0 }}</span>
+        </template>
+        <template #item.chattingNicksCount="{ item }">
+          <v-tooltip :text="`Đang chat = có tin nhắn KH gửi đến trong ${windowDays} ngày gần đây`" location="top">
+            <template #activator="{ props }">
+              <span v-bind="props">{{ friendStatsByAccount[item.id]?.chattingNicksCount ?? 0 }}</span>
+            </template>
+          </v-tooltip>
+        </template>
         <template #item.actions="{ item }">
           <v-btn v-if="authStore.isAdmin" icon size="small" color="cyan" title="Phân quyền truy cập" @click="openAccess(item)">
             <v-icon>mdi-shield-account</v-icon>
@@ -174,8 +184,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useZaloAccounts, type ZaloAccount } from '@/composables/use-zalo-accounts';
+import { useFriendStats } from '@/composables/use-friend-stats';
 import { useAuthStore } from '@/stores/auth';
 import ZaloAccessDialog from '@/components/settings/ZaloAccessDialog.vue';
 import AutoReplyDialog from '@/components/settings/AutoReplyDialog.vue';
@@ -190,6 +201,13 @@ const {
 } = useZaloAccounts();
 
 const authStore = useAuthStore();
+// Feature 0033 — friend aggregates per nick.
+const {
+  stats: friendStats,
+  byAccount: friendStatsByAccount,
+  fetchStats: fetchFriendStats,
+} = useFriendStats();
+const windowDays = computed(() => friendStats.value?.windowDays ?? 7);
 
 const showAddDialog = ref(false);
 const syncing = ref<string | null>(null);
@@ -216,6 +234,9 @@ const headers = [
   { title: 'Zalo UID', key: 'zaloUid' },
   { title: 'SĐT', key: 'phone' },
   { title: 'Trạng thái', key: 'status', sortable: true },
+  // Feature 0033 — friend aggregate counts (read-only).
+  { title: 'Bạn đã accept', key: 'acceptedNicksCount', sortable: false, align: 'end' as const },
+  { title: 'Đang chat', key: 'chattingNicksCount', sortable: false, align: 'end' as const },
   { title: 'Hành động', key: 'actions', sortable: false, align: 'end' as const },
 ];
 
@@ -299,5 +320,7 @@ async function handleDeleteAccount() {
 onMounted(() => {
   fetchAccounts();
   setupSocket();
+  // Friend aggregate stats — best-effort; the table renders 0 if it errors.
+  fetchFriendStats();
 });
 </script>
