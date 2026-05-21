@@ -20,7 +20,7 @@
  * State CSRF: signed JWT keeps it tamper-resistant.
  */
 import type { FastifyInstance } from 'fastify';
-import { randomUUID, createHmac } from 'node:crypto';
+import { randomUUID, createHmac, timingSafeEqual } from 'node:crypto';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { config } from '../../config/index.js';
 import { authMiddleware } from '../auth/auth-middleware.js';
@@ -74,7 +74,18 @@ function verifyOAuthState(state: string, secret: string): { ok: true; orgId: str
   if (parts.length !== 4) return { ok: false, error: 'Malformed state' };
   const [orgId, nonce, expStr, sig] = parts;
   const expected = createHmac('sha256', secret).update(`${orgId}.${nonce}.${expStr}`).digest('hex').slice(0, 32);
-  if (expected !== sig) return { ok: false, error: 'State signature mismatch' };
+  // Feature 0046 BR-0017 — constant-time compare. `!== ` leaks the
+  // first divergent byte, which over many probes lets an attacker
+  // reconstruct the expected signature without holding the secret.
+  // Length check before timingSafeEqual: the helper throws on
+  // mismatched-length buffers, and a length mismatch is already
+  // sufficient to declare the signature invalid.
+  if (
+    expected.length !== sig.length ||
+    !timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(sig, 'hex'))
+  ) {
+    return { ok: false, error: 'State signature mismatch' };
+  }
   const exp = Number(expStr);
   if (!Number.isFinite(exp) || Date.now() > exp) {
     return { ok: false, error: 'State expired' };
