@@ -168,6 +168,13 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    // Feature 0038 — Integration Hub (Google Sheets + Telegram).
+    path: '/settings/integrations',
+    name: 'SettingsIntegrations',
+    component: () => import('@/views/SettingsIntegrationsView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('@/views/NotFoundView.vue'),

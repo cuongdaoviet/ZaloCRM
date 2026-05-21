@@ -158,6 +158,8 @@ const menuItems: MenuItem[] = [
   { title: 'Workflow tự động', icon: 'mdi-pipe', path: '/settings/workflows', adminOnly: true },
   // Feature 0036 — AI reply suggestions (BYOK).
   { title: 'Gợi ý AI', icon: 'mdi-robot-outline', path: '/settings/ai-config', adminOnly: true },
+  // Feature 0038 — Integration Hub (Sheets + Telegram).
+  { title: 'Integrations', icon: 'mdi-puzzle', path: '/settings/integrations', adminOnly: true },
   { title: 'Tin nhắn mẫu', icon: 'mdi-message-flash-outline', path: '/quick-replies' },
   { title: 'API & Webhook', icon: 'mdi-api', path: '/api-settings' },
 ];
