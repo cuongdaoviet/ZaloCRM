@@ -135,6 +135,13 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    // Feature 0040 — Lead score admin config page.
+    path: '/settings/lead-score',
+    name: 'SettingsLeadScore',
+    component: () => import('@/views/SettingsLeadScoreView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('@/views/NotFoundView.vue'),

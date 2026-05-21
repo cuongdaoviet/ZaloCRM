@@ -53,6 +53,14 @@
         </div>
       </template>
 
+      <!-- Lead score badge (Feature 0040) -->
+      <template #item.leadScore="{ item }">
+        <LeadScoreBadge
+          :score="item.leadScore ?? 0"
+          :breakdown="item.leadScoreBreakdown ?? null"
+        />
+      </template>
+
       <!-- Source chip -->
       <template #item.source="{ item }">
         <v-chip v-if="item.source" size="small" variant="tonal">
@@ -167,6 +175,7 @@ import { computed, ref, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import ContactFilters from '@/components/contacts/ContactFilters.vue';
 import ContactDetailDialog from '@/components/contacts/ContactDetailDialog.vue';
+import LeadScoreBadge from '@/components/contacts/LeadScoreBadge.vue';
 import { useContacts, SOURCE_OPTIONS, STATUS_OPTIONS } from '@/composables/use-contacts';
 import type { Contact } from '@/composables/use-contacts';
 import { useFriendship, type BulkResult } from '@/composables/use-friendship';
@@ -199,6 +208,9 @@ const bulkAccountOptions = computed(() =>
 const headers = [
   { title: '', key: 'avatarUrl', sortable: false, width: '48px' },
   { title: 'Tên', key: 'fullName', sortable: true },
+  // Feature 0040 — Lead score column. Sortable; we proxy sort clicks
+  // through the BE which knows to re-rank the page (?sort=leadScore).
+  { title: 'Lead', key: 'leadScore', sortable: true, width: '90px' },
   { title: 'SĐT', key: 'phone', sortable: false },
   { title: 'Email', key: 'email', sortable: false },
   { title: 'Nguồn', key: 'source', sortable: false },
