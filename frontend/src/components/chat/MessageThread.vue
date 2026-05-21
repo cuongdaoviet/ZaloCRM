@@ -151,7 +151,23 @@
                         Đồng bộ lịch
                       </v-btn>
                     </div>
-                    <div v-else>{{ parseDisplayContent(msg.content) }}</div>
+                    <!-- Default text — feature 0026 renders @<uid> tokens as
+                         mention chips in group conversations. Mirrors the
+                         non-virtualized branch above so AC-0007/0008 still
+                         pass in long threads. -->
+                    <div v-else class="message-text">
+                      <template
+                        v-for="(part, partIdx) in renderTextParts(msg)"
+                        :key="partIdx"
+                      >
+                        <span
+                          v-if="part.kind === 'mention'"
+                          class="mention-chip"
+                          :class="{ 'mention-chip--unknown': !part.found }"
+                        >@{{ part.displayName }}</span>
+                        <template v-else>{{ part.text }}</template>
+                      </template>
+                    </div>
                     <div class="text-caption mt-1 msg-time" :class="msg.senderType === 'self' ? 'msg-time-self' : 'msg-time-contact'" style="font-size: 0.7rem;">
                       {{ formatMessageTime(msg.sentAt) }}
                     </div>
@@ -258,8 +274,22 @@
                     Đồng bộ lịch
                   </v-btn>
                 </div>
-                <!-- Default text -->
-                <div v-else>{{ parseDisplayContent(msg.content) }}</div>
+                <!-- Default text — feature 0026 renders @<uid> tokens as
+                     mention chips in group conversations. parseDisplayContent
+                     handles JSON-shaped link cards (legacy text path). -->
+                <div v-else class="message-text">
+                  <template
+                    v-for="(part, partIdx) in renderTextParts(msg)"
+                    :key="partIdx"
+                  >
+                    <span
+                      v-if="part.kind === 'mention'"
+                      class="mention-chip"
+                      :class="{ 'mention-chip--unknown': !part.found }"
+                    >@{{ part.displayName }}</span>
+                    <template v-else>{{ part.text }}</template>
+                  </template>
+                </div>
                 <!-- Timestamp -->
                 <div class="text-caption mt-1 msg-time" :class="msg.senderType === 'self' ? 'msg-time-self' : 'msg-time-contact'" style="font-size: 0.7rem;">
                   {{ formatMessageTime(msg.sentAt) }}
@@ -352,6 +382,16 @@
           @select="applyQuickReply"
           @hover="quickReplyHighlighted = $event"
         />
+        <!-- Feature 0026 — mention picker. Mirrors quick-reply popover; only
+             active in group conversations (parent gates via groupMembers prop). -->
+        <MentionPicker
+          :open="mentionOpen"
+          :members="mentionFiltered"
+          :highlighted-index="mentionHighlighted"
+          :query="mentionTriggerQuery"
+          @select="applyMention"
+          @hover="mentionHighlighted = $event"
+        />
         <v-btn
           icon size="small" variant="text" class="mr-1"
           title="Đính kèm ảnh hoặc file"
@@ -366,11 +406,15 @@
           @change="onFilePicked"
         />
         <v-textarea
+          ref="textareaRef"
           v-model="inputText"
           :placeholder="pendingFile ? 'Thêm ghi chú (tuỳ chọn)...' : 'Nhập tin nhắn... (gõ / để dùng tin mẫu)'"
           variant="solo-filled" density="compact" hide-details auto-grow rows="1" max-rows="3"
           @keydown="onTextareaKeyDown"
           @input="onInputUpdate"
+          @click="onCaretMove"
+          @keyup="onCaretMove"
+          @blur="onComposerBlur"
           class="flex-grow-1 mr-2"
         />
         <v-btn
@@ -424,11 +468,21 @@ import ReactionPicker from './ReactionPicker.vue';
 import ReactionChips from './ReactionChips.vue';
 import MessageSkeleton from './MessageSkeleton.vue';
 import ZinstantCard from './ZinstantCard.vue';
+import MentionPicker from './MentionPicker.vue';
 import { secondaryZaloName } from '@/composables/use-contact-name';
 import UserInfoPopover, {
   type CreateContactPayload,
 } from './UserInfoPopover.vue';
 import { parseZinstant } from '@/utils/parse-zinstant';
+import {
+  parseMentions,
+  detectMentionTrigger,
+  filterMembers,
+  applyMentionInsert,
+  type GroupMember,
+  type MentionPart,
+  type MentionTrigger,
+} from '@/composables/use-mentions';
 
 // Feature 0043 — virtual scroll kicks in past this many messages. Below the
 // threshold the v-for path stays so short threads pay no virtualization
@@ -450,6 +504,12 @@ const props = defineProps<{
    * absent, the picker is hidden (read-only viewers).
    */
   onReact?: (messageId: string, emoji: string) => void;
+  /**
+   * Feature 0026 — group member roster for mention chip render + composer
+   * picker. Empty array (or non-group conversation) disables auto-complete
+   * and renders raw uid fallback for any @<uid> tokens in messages.
+   */
+  groupMembers?: GroupMember[];
 }>();
 
 const emit = defineEmits<{
@@ -682,11 +742,15 @@ function onInputUpdate() {
   const q = detectSlashCommand(inputText.value);
   if (q === null) {
     quickReplyOpen.value = false;
-    return;
+  } else {
+    quickReplyOpen.value = true;
+    quickReplyQuery.value = q;
+    quickReplyHighlighted.value = 0;
   }
-  quickReplyOpen.value = true;
-  quickReplyQuery.value = q;
-  quickReplyHighlighted.value = 0;
+  // Feature 0026 — refresh mention picker state on every input. Caret may
+  // not have moved yet (input fires before selectionchange) so we re-read
+  // the native textarea on the next tick.
+  void nextTick(() => refreshMentionTrigger());
 }
 
 function onTextareaKeyDown(e: KeyboardEvent) {
@@ -694,6 +758,42 @@ function onTextareaKeyDown(e: KeyboardEvent) {
   // keydown when committing a candidate. isComposing=true means the user is
   // still composing — pressing Enter at that moment must not send.
   if (e.isComposing || e.keyCode === 229) return;
+
+  // Feature 0026 — mention picker keyboard handling takes precedence over
+  // quick-reply and the default Enter→send. Only active when both a trigger
+  // is detected AND we have a non-empty filtered member list.
+  if (mentionOpen.value) {
+    const memberItems = mentionFiltered.value;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      mentionTrigger.value = null;
+      return;
+    }
+    if (memberItems.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        mentionHighlighted.value =
+          (mentionHighlighted.value + 1) % memberItems.length;
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        mentionHighlighted.value =
+          (mentionHighlighted.value - 1 + memberItems.length) % memberItems.length;
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        void applyMention(memberItems[mentionHighlighted.value]);
+        return;
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        void applyMention(memberItems[mentionHighlighted.value]);
+        return;
+      }
+    }
+  }
 
   if (!quickReplyOpen.value) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -827,6 +927,123 @@ function parseDisplayContent(content: string | null): string {
     if (p.href) return `🔗 ${p.description || p.href}`;
     return content;
   } catch { return content; }
+}
+
+// ── Feature 0026 — mention chip render ───────────────────────────────────
+/**
+ * Build a per-uid member map (lazily memoized by the groupMembers prop)
+ * for parseMentions. Recomputes when the prop array reference changes.
+ */
+const groupMemberMap = computed<Map<string, GroupMember>>(() => {
+  const list = props.groupMembers ?? [];
+  return new Map(list.map((m) => [m.uid, m]));
+});
+
+/**
+ * Resolve the parts to render for a message bubble.
+ *
+ * - Group conversation with text content → parseMentions splits the string.
+ * - Anywhere else → single text part with the legacy parseDisplayContent
+ *   transformation (handles JSON link cards). BR-0003 — never parse mentions
+ *   in user-to-user conversations.
+ */
+function renderTextParts(msg: Message): MentionPart[] {
+  const isGroup = props.conversation?.threadType === 'group';
+  const raw = msg.content ?? '';
+  if (!isGroup) {
+    return [{ kind: 'text', text: parseDisplayContent(msg.content) }];
+  }
+  // JSON-shaped content (link card, reminder fallthrough) → keep legacy
+  // single-string render. Mentions are only meaningful in plain text.
+  if (raw.startsWith('{')) {
+    return [{ kind: 'text', text: parseDisplayContent(msg.content) }];
+  }
+  return parseMentions(raw, groupMemberMap.value);
+}
+
+// ── Feature 0026 — mention picker state (composer) ───────────────────────
+const textareaRef = ref<{ $el?: HTMLElement } | null>(null);
+const mentionTrigger = ref<MentionTrigger | null>(null);
+const mentionHighlighted = ref(0);
+
+const mentionOpen = computed<boolean>(() => {
+  if (!mentionTrigger.value) return false;
+  // BR-0003 — only group conversations expose the picker.
+  if (props.conversation?.threadType !== 'group') return false;
+  return (props.groupMembers?.length ?? 0) > 0;
+});
+
+const mentionTriggerQuery = computed<string>(
+  () => mentionTrigger.value?.query ?? '',
+);
+
+const mentionFiltered = computed<GroupMember[]>(() => {
+  if (!mentionOpen.value) return [];
+  return filterMembers(props.groupMembers ?? [], mentionTriggerQuery.value);
+});
+
+/**
+ * Resolve the inner <textarea> element from the v-textarea ref.
+ * Vuetify wraps the native input — we drill into $el to read caret.
+ */
+function getNativeTextarea(): HTMLTextAreaElement | null {
+  const root = textareaRef.value?.$el;
+  if (!root) return null;
+  return root.querySelector('textarea');
+}
+
+/**
+ * Recompute the mention trigger from the current input + caret position.
+ * Closes the picker when no trigger is active so the textarea behaves
+ * normally outside `@`-tokens.
+ */
+function refreshMentionTrigger(): void {
+  if (props.conversation?.threadType !== 'group') {
+    mentionTrigger.value = null;
+    return;
+  }
+  const native = getNativeTextarea();
+  const caret = native?.selectionStart ?? inputText.value.length;
+  const next = detectMentionTrigger(inputText.value, caret);
+  mentionTrigger.value = next;
+  // Reset highlight whenever the active trigger changes (different @-token
+  // or first time we open). Don't reset on every keystroke inside the same
+  // trigger — that would clobber ↑/↓ navigation.
+  if (next === null) {
+    mentionHighlighted.value = 0;
+  } else if (mentionHighlighted.value >= mentionFiltered.value.length) {
+    mentionHighlighted.value = 0;
+  }
+}
+
+function onCaretMove() {
+  refreshMentionTrigger();
+}
+
+function onComposerBlur() {
+  // Close after a tick so click-on-picker still fires its @select handler.
+  setTimeout(() => {
+    mentionTrigger.value = null;
+  }, 120);
+}
+
+/** Apply the selected member: splice "@<uid> " into input, restore caret. */
+async function applyMention(member: GroupMember) {
+  if (!mentionTrigger.value) return;
+  const { value, caret } = applyMentionInsert(
+    inputText.value,
+    mentionTrigger.value,
+    member,
+  );
+  inputText.value = value;
+  mentionTrigger.value = null;
+  mentionHighlighted.value = 0;
+  await nextTick();
+  const native = getNativeTextarea();
+  if (native) {
+    native.focus();
+    native.setSelectionRange(caret, caret);
+  }
 }
 
 function isReminderMessage(msg: Message): boolean {
@@ -1079,5 +1296,37 @@ function emitAppointmentSuggest() {
 .virtual-thread {
   /* VVirtualScroll needs an explicit height; fill its scrolling parent. */
   height: 100%;
+}
+
+/* ── Feature 0026 — mention chip render inside message bubble ──────────── */
+.message-text {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.mention-chip {
+  display: inline-block;
+  padding: 0 4px;
+  margin: 0 1px;
+  border-radius: 4px;
+  background: rgba(0, 242, 255, 0.18);
+  color: rgb(var(--v-theme-primary));
+  font-weight: 500;
+}
+/* Fallback when the mentioned uid is not in the group member roster (left
+   the group, deleted, etc.) — render muted so the reader knows it's an
+   unresolved reference. See SPEC BR-0002 / EC-0001..EC-0002. */
+.mention-chip--unknown {
+  background: rgba(0, 0, 0, 0.05);
+  color: rgba(0, 0, 0, 0.55);
+  font-weight: normal;
+}
+/* Inside a self-bubble (white text on coloured bg) we need higher contrast. */
+.bg-primary .mention-chip {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+.bg-primary .mention-chip--unknown {
+  background: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.75);
 }
 </style>

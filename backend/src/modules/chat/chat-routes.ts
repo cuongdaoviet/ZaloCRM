@@ -244,6 +244,107 @@ export async function chatRoutes(app: FastifyInstance) {
     return conversation;
   });
 
+  // ── List group members (feature 0026) ───────────────────────────────────
+  // GET /api/v1/conversations/:id/members
+  // Returns { members: [{ uid, displayName, avatarUrl }] } for a group
+  // conversation. Source: zca-js `api.getGroupInfo(groupId)`.
+  //
+  // Spec details (SPEC.md §6 / BR-0009..BR-0010):
+  //   - Non-group conversation → 400 `not_a_group`.
+  //   - requireZaloAccess('chat') enforces ACL on the underlying Zalo account
+  //     (also gives 403 / 404 / cross-org behaviour via the middleware).
+  //   - When the Zalo api isn't connected (account offline) → ALWAYS 200 with
+  //     `members: []` so the UI can degrade gracefully (no toast spam).
+  //   - In-memory cache keyed by conversationId, TTL 5 minutes. The cache lives
+  //     for the process lifetime — acceptable since group membership rarely
+  //     changes inside a 5-minute window, and the cache is invalidated on
+  //     process restart.
+  const GROUP_MEMBERS_CACHE_TTL_MS = 5 * 60 * 1000;
+  interface GroupMember {
+    uid: string;
+    displayName: string;
+    avatarUrl: string;
+  }
+  interface GroupMembersCacheEntry {
+    members: GroupMember[];
+    cachedAt: number;
+  }
+  const groupMembersCache = new Map<string, GroupMembersCacheEntry>();
+
+  app.get(
+    '/api/v1/conversations/:id/members',
+    { preHandler: requireZaloAccess('chat') },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user!;
+      const { id } = request.params as { id: string };
+
+      const conversation = await prisma.conversation.findFirst({
+        where: { id, orgId: user.orgId },
+        include: {
+          contact: { select: { zaloUid: true } },
+          zaloAccount: { select: { id: true } },
+        },
+      });
+      if (!conversation) {
+        return reply.status(404).send({ error: 'Conversation not found' });
+      }
+
+      // BR-0003 — mentions only for group conversations.
+      if (conversation.threadType !== 'group') {
+        return reply.status(400).send({ error: 'not_a_group' });
+      }
+
+      // Group's external thread id is the source of truth. Fall back to the
+      // contact zaloUid (legacy data shape) just in case.
+      const groupId =
+        conversation.externalThreadId || conversation.contact?.zaloUid || '';
+      if (!groupId) {
+        return reply.send({ members: [] });
+      }
+
+      // Cache hit — skip the SDK call entirely.
+      const cached = groupMembersCache.get(id);
+      if (cached && Date.now() - cached.cachedAt < GROUP_MEMBERS_CACHE_TTL_MS) {
+        return reply.send({ members: cached.members });
+      }
+
+      const instance = zaloPool.getInstance(conversation.zaloAccountId);
+      // BR-0010 — graceful degradation when account is offline.
+      if (!instance?.api) {
+        return reply.send({ members: [] });
+      }
+
+      try {
+        const result = await instance.api.getGroupInfo(groupId);
+        const groupInfo = result?.gridInfoMap?.[groupId];
+        const rawMembers: any[] = Array.isArray(groupInfo?.currentMems)
+          ? groupInfo.currentMems
+          : [];
+
+        const members: GroupMember[] = rawMembers.map((m) => {
+          const uid = String(m?.id ?? m?.uid ?? '');
+          const displayName =
+            (typeof m?.dName === 'string' && m.dName) ||
+            (typeof m?.displayName === 'string' && m.displayName) ||
+            (typeof m?.zaloName === 'string' && m.zaloName) ||
+            uid;
+          const avatarUrl =
+            (typeof m?.avatar === 'string' && m.avatar) ||
+            (typeof m?.avatarUrl === 'string' && m.avatarUrl) ||
+            '';
+          return { uid, displayName, avatarUrl };
+        }).filter((m) => m.uid);
+
+        groupMembersCache.set(id, { members, cachedAt: Date.now() });
+        return reply.send({ members });
+      } catch (err) {
+        logger.error('[chat] getGroupInfo failed:', err);
+        // Be lenient — UI just disables auto-complete with empty list.
+        return reply.send({ members: [] });
+      }
+    },
+  );
+
   // ── List messages for a conversation (paginated, newest first) ──────────
   app.get('/api/v1/conversations/:id/messages', { preHandler: requireZaloAccess('read') }, async (request: FastifyRequest, reply: FastifyReply) => {
     const user = request.user!;

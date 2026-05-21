@@ -37,7 +37,9 @@
     <!-- Message thread — flexible center.
          Feature 0042: wrapped in .chat-panel-thread so the mobile back bar
          (EC-0003) stacks above the thread. Preserves the Feature 0030 Zalo
-         popover handlers (@create-contact-from-zalo / @open-contact). -->
+         popover handlers (@create-contact-from-zalo / @open-contact).
+         Feature 0026: groupMembers prop drives the mention chip render +
+         composer picker for group conversations. -->
     <div class="chat-panel-thread">
       <!-- Mobile back button — only visible while the thread is in view -->
       <div v-if="isMobile && hasSelection" class="chat-mobile-back-bar">
@@ -56,6 +58,7 @@
         :is-pinned="selectedConv ? pinnedIds.has(selectedConv.id) : false"
         :self-user-id="selfUserId ?? null"
         :on-react="addOrToggleReaction"
+        :group-members="selectedConv && selectedConv.id ? (groupMembersByConv[selectedConv.id] ?? []) : []"
         @send="sendMessage"
         @send-attachment="onSendAttachment"
         @toggle-contact-panel="showContactPanel = !showContactPanel"
@@ -132,6 +135,8 @@ const {
   initSocket, destroySocket, addOrToggleReaction,
   // Feature 0043 — hover prefetch handles passed through to ConversationList.
   onConversationHover, onConversationHoverLeave,
+  // Feature 0026 — group member roster cache for mention render + composer picker
+  groupMembersByConv,
 } = useChat();
 
 // Feature 0021 — feed auth identity into the chat composable so the
