@@ -135,6 +135,12 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/friendship-attempts',
+    name: 'FriendshipAttempts',
+    component: () => import('@/views/FriendshipAttemptsView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/settings/tags',
     name: 'SettingsTags',
     component: () => import('@/views/SettingsTagsView.vue'),

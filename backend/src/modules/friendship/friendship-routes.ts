@@ -11,6 +11,9 @@
  * Feature 0033 adds one read-only aggregate:
  *   GET    /api/v1/friends/stats                     — per-account + org totals
  *
+ * Feature 0042 adds the friend list endpoint:
+ *   GET    /api/v1/friends                           — paginated grid view
+ *
  * All routes require auth + org-scoped. Members only see their own; owners
  * and admins see the whole org (BR-0003).
  */
@@ -178,6 +181,124 @@ export async function friendshipRoutes(app: FastifyInstance): Promise<void> {
         return reply.status(result.status).send({ error: result.error, code: result.code });
       }
       return reply.send(result.attempt);
+    },
+  );
+
+  // ── GET /api/v1/friends — feature 0042 ────────────────────────────────────
+  // Paginated friend list across all Zalo accounts the user can see.
+  // Owner/admin: all friends in org. Member: only friends on accounts they
+  // have ZaloAccountAccess to (mirrors friends/stats ACL).
+  // Filters:
+  //   accountId  — restrict to a single ZaloAccount (must still be ACL-visible).
+  //   search     — case-insensitive partial match on Friend.displayName
+  //                OR Contact.fullName / phone.
+  // Pagination: page (default 1), perPage (default 24, max 100).
+  app.get(
+    '/api/v1/friends',
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const user = request.user!;
+      const q = request.query as Record<string, string | undefined>;
+
+      // Resolve visible account scope. Members are restricted to accounts
+      // they have ZaloAccountAccess on; owner/admin see the whole org.
+      let visibleAccountIds: string[] | null = null;
+      if (user.role === 'member') {
+        const access = await prisma.zaloAccountAccess.findMany({
+          where: { userId: user.id },
+          select: { zaloAccountId: true },
+        });
+        visibleAccountIds = access.map((a) => a.zaloAccountId);
+        if (visibleAccountIds.length === 0) {
+          return reply.send({
+            data: [],
+            pagination: { page: 1, perPage: 24, total: 0, totalPages: 1 },
+          });
+        }
+      }
+
+      const where: Record<string, unknown> = { orgId: user.orgId };
+
+      // accountId filter — only honour if visible.
+      if (q.accountId) {
+        if (
+          visibleAccountIds !== null &&
+          !visibleAccountIds.includes(q.accountId)
+        ) {
+          return reply.send({
+            data: [],
+            pagination: { page: 1, perPage: 24, total: 0, totalPages: 1 },
+          });
+        }
+        where.zaloAccountId = q.accountId;
+      } else if (visibleAccountIds !== null) {
+        where.zaloAccountId = { in: visibleAccountIds };
+      }
+
+      // search — match Friend.displayName OR contact.fullName / phone.
+      const searchRaw = (q.search ?? '').trim();
+      if (searchRaw.length > 0) {
+        where.OR = [
+          { displayName: { contains: searchRaw, mode: 'insensitive' } },
+          { contact: { fullName: { contains: searchRaw, mode: 'insensitive' } } },
+          { contact: { phone: { contains: searchRaw } } },
+        ];
+      }
+
+      const page = Math.max(1, Number(q.page) || 1);
+      const perPage = Math.min(
+        Math.max(1, Number(q.perPage) || 24),
+        LIST_PAGE_MAX,
+      );
+
+      const [rows, total] = await Promise.all([
+        prisma.friend.findMany({
+          where: where as never,
+          include: {
+            zaloAccount: { select: { id: true, displayName: true } },
+            contact: {
+              select: {
+                id: true,
+                fullName: true,
+                phone: true,
+                avatarUrl: true,
+              },
+            },
+          },
+          orderBy: [{ createdAt: 'desc' }],
+          skip: (page - 1) * perPage,
+          take: perPage,
+        }),
+        prisma.friend.count({ where: where as never }),
+      ]);
+
+      const data = rows.map((f) => ({
+        id: f.id,
+        zaloUid: f.zaloUid,
+        displayName: f.displayName,
+        avatarUrl: f.avatarUrl,
+        createdAt: f.createdAt,
+        zaloAccountId: f.zaloAccountId,
+        zaloAccountName: f.zaloAccount?.displayName ?? null,
+        contactId: f.contact?.id ?? null,
+        contact: f.contact
+          ? {
+              id: f.contact.id,
+              fullName: f.contact.fullName,
+              phone: f.contact.phone,
+              avatarUrl: f.contact.avatarUrl,
+            }
+          : null,
+      }));
+
+      return reply.send({
+        data,
+        pagination: {
+          page,
+          perPage,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / perPage)),
+        },
+      });
     },
   );
 

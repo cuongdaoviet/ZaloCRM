@@ -21,7 +21,8 @@
     <!-- Filters -->
     <ContactFilters :filters="filters" @search="onFilterChange" />
 
-    <!-- Data table -->
+    <!-- Data table — Feature 0042 BR-0005 / AC-0003: compact 40px rows so
+         we fit ~6 columns on a 1280px viewport without horizontal scroll. -->
     <v-data-table
       v-model="selected"
       :headers="headers"
@@ -32,6 +33,8 @@
       item-value="id"
       show-select
       hover
+      density="compact"
+      class="contacts-dense-table"
       @click:row="onRowClick"
       @update:page="onPageChange"
     >
@@ -107,10 +110,13 @@
       </template>
     </v-data-table>
 
-    <!-- Contact detail/edit dialog -->
+    <!-- Contact detail/edit dialog. Feature 0042 EC-0002: the Friends page
+         deeplinks here with ?prefillName=…&prefillZaloUid=… so a user can
+         turn a Zalo friend into a CRM Contact in one click. -->
     <ContactDetailDialog
       v-model="showDialog"
       :contact="selectedContact"
+      :prefill="contactPrefill"
       @saved="onSaved"
       @deleted="onDeleted"
     />
@@ -174,7 +180,9 @@
 import { computed, ref, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import ContactFilters from '@/components/contacts/ContactFilters.vue';
-import ContactDetailDialog from '@/components/contacts/ContactDetailDialog.vue';
+import ContactDetailDialog, {
+  type ContactPrefill,
+} from '@/components/contacts/ContactDetailDialog.vue';
 import LeadScoreBadge from '@/components/contacts/LeadScoreBadge.vue';
 import { useContacts, SOURCE_OPTIONS, STATUS_OPTIONS } from '@/composables/use-contacts';
 import type { Contact } from '@/composables/use-contacts';
@@ -190,6 +198,9 @@ const { accounts, fetchAccounts } = useZaloAccounts();
 const showDialog = ref(false);
 const selectedContact = ref<Contact | null>(null);
 const selected = ref<string[]>([]);
+// Feature 0042 EC-0002 — payload set when the Friends page deeplinks in to
+// create a new Contact from a Zalo friend. Cleared once the dialog closes.
+const contactPrefill = ref<ContactPrefill | null>(null);
 
 // Bulk friendship dialog
 const bulkFriendDialogOpen = ref(false);
@@ -256,11 +267,13 @@ function onPageChange(page: number) {
 
 function openCreate() {
   selectedContact.value = null;
+  contactPrefill.value = null;
   showDialog.value = true;
 }
 
 function onRowClick(_event: Event, row: { item: Contact }) {
   selectedContact.value = row.item;
+  contactPrefill.value = null;
   showDialog.value = true;
 }
 
@@ -312,9 +325,50 @@ function applyQueryFilters() {
   if (ids.length > 0) filters.tagIds = ids;
 }
 
+// Feature 0042 EC-0002 — pop the create dialog with a prefilled contact when
+// the Friends page deeplinks in. We read `prefillName`, `prefillZaloUid`, and
+// `prefillAvatarUrl`; any subset works and the dialog handles missing fields.
+function applyContactPrefillFromQuery() {
+  const q = route.query;
+  const name = typeof q.prefillName === 'string' ? q.prefillName : '';
+  const zaloUid = typeof q.prefillZaloUid === 'string' ? q.prefillZaloUid : '';
+  const avatarUrl = typeof q.prefillAvatarUrl === 'string' ? q.prefillAvatarUrl : '';
+  if (!name && !zaloUid) return;
+  contactPrefill.value = {
+    fullName: name || null,
+    zaloUid: zaloUid || null,
+    avatarUrl: avatarUrl || null,
+    phone: null,
+  };
+  selectedContact.value = null;
+  showDialog.value = true;
+}
+
 onMounted(() => {
   applyQueryFilters();
   fetchContacts();
   fetchAccounts();
+  applyContactPrefillFromQuery();
 });
 </script>
+
+<style scoped>
+/* Feature 0042 BR-0005 — dense 40px row table.
+   Vuetify's `density="compact"` lands ~36-44px depending on contents; we pin
+   it to var(--smax-row-height-dense) so the page stays aligned with the
+   Friends grid + chat list metrics defined in `tokens.css`. */
+.contacts-dense-table :deep(tbody tr) {
+  height: var(--smax-row-height-dense, 40px);
+}
+.contacts-dense-table :deep(tbody td) {
+  padding-top: 0;
+  padding-bottom: 0;
+  font-size: 13px;
+}
+.contacts-dense-table :deep(thead th) {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+</style>
