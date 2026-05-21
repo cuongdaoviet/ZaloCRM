@@ -39,6 +39,9 @@ model Organization {
   crmTags       CrmTag[]
   crmTagGroups  CrmTagGroup[]
   zaloLabels    ZaloLabel[]
+  // Feature 0037 — Workflow automation engine
+  workflowDefinitions WorkflowDefinition[]
+  workflowExecutions  WorkflowExecution[]
 
   @@map("organizations")
 }
@@ -184,6 +187,7 @@ model Contact {
   attempts        FriendshipAttempt[]
   friends         Friend[]
   contactTags     ContactTag[]
+  workflowExecutions WorkflowExecution[]
 
   @@index([orgId, mergedIntoId])
   // Feature 0034 — composite index powers fast `globalId_exact` lookup in the
@@ -816,4 +820,58 @@ model MessageReaction {
   @@unique([messageId, reactorId])
   @@index([messageId])
   @@map("message_reactions")
+}
+
+// ─── Feature 0037 — Workflow automation engine (phase 1) ─────────────────────
+// Single trigger type (`inbound_message`) + four step types
+// (`send_message`, `add_tag`, `assign_user`, `wait`) executed sequentially.
+// A cron-style worker (workflow-runner) ticks every 60s, picks any
+// WorkflowExecution whose `nextStepDueAt` is in the past, and advances the
+// step pointer. 24h re-trigger cooldown enforced at evaluator level.
+// Future phases (Phase 2): time-based triggers, branching, more step types.
+// ─────────────────────────────────────────────────────────────────────────────
+model WorkflowDefinition {
+  id          String   @id @default(uuid())
+  orgId       String   @map("org_id")
+  name        String
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  // { type: 'inbound_message', messageMatch?, contactStatus?, isFirstInbound? }
+  trigger     Json
+  // [{ type: 'send_message'|'add_tag'|'assign_user'|'wait', delayMinutes, ... }]
+  steps       Json
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  org        Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  executions WorkflowExecution[]
+
+  @@index([orgId, isActive])
+  @@map("workflow_definitions")
+}
+
+model WorkflowExecution {
+  id              String    @id @default(uuid())
+  orgId           String    @map("org_id")
+  workflowId      String    @map("workflow_id")
+  contactId       String    @map("contact_id")
+  conversationId  String?   @map("conversation_id")
+  // running | completed | failed | cancelled
+  status          String    @default("running")
+  currentStepIdx  Int       @default(0) @map("current_step_idx")
+  nextStepDueAt   DateTime? @map("next_step_due_at")
+  // [{ idx, status: 'ok'|'failed'|'skipped', ranAt: ISO, error? }]
+  stepLog         Json      @default("[]") @map("step_log")
+  startedAt       DateTime  @default(now()) @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+
+  org      Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  workflow WorkflowDefinition @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  contact  Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  // Worker scan: WHERE status='running' AND nextStepDueAt <= NOW().
+  @@index([orgId, status, nextStepDueAt])
+  // Cooldown re-trigger lookup: (workflow, contact) ordered by startedAt desc.
+  @@index([workflowId, contactId, startedAt(sort: Desc)])
+  @@map("workflow_executions")
 }

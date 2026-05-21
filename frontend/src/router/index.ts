@@ -154,6 +154,13 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    // Feature 0037 — Workflow automation engine (phase 1).
+    path: '/settings/workflows',
+    name: 'SettingsWorkflows',
+    component: () => import('@/views/SettingsWorkflowsView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('@/views/NotFoundView.vue'),

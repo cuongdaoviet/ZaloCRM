@@ -14,6 +14,9 @@ import { maybeAutoReply } from '../auto-reply/auto-reply-service.js';
 import { processInboundForKeywordRules } from '../keyword-rules/keyword-rule-service.js';
 import { handleFriendEvent } from '../friendship/friendship-listener.js';
 import { handleReactionEvent } from '../reactions/reaction-listener.js';
+// Feature 0037 — Workflow automation engine: fire-and-forget trigger eval.
+import { evaluateWorkflowTriggers } from '../workflow/workflow-service.js';
+import { trackBackground } from '../../shared/utils/background-tasks.js';
 
 export type { UserInfoCacheEntry };
 
@@ -86,6 +89,21 @@ export function attachZaloListener(ctx: ListenerContext): void {
           isSelf: !!message.isSelf,
           content: result.message.content,
         });
+
+        // Feature 0037: workflow trigger evaluation. Wrapped in
+        // trackBackground so test teardown drains the eval (it creates
+        // WorkflowExecution rows that would otherwise race TRUNCATE).
+        // The listener path NEVER awaits this — message persist is hot.
+        trackBackground(
+          evaluateWorkflowTriggers({
+            orgId: result.orgId,
+            conversationId: result.conversationId,
+            contactId: result.contactId,
+            threadType: isGroup ? 'group' : 'user',
+            isSelf: !!message.isSelf,
+            content: result.message.content,
+          }),
+        );
       }
     } catch (err) {
       logger.error(`[zalo:${accountId}] Message handler error:`, err);
