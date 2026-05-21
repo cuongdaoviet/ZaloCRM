@@ -39,7 +39,8 @@
          (EC-0003) stacks above the thread. Preserves the Feature 0030 Zalo
          popover handlers (@create-contact-from-zalo / @open-contact).
          Feature 0026: groupMembers prop drives the mention chip render +
-         composer picker for group conversations. -->
+         composer picker for group conversations.
+         Feature 0028: @send-sticker fires from the composer sticker picker. -->
     <div class="chat-panel-thread">
       <!-- Mobile back button — only visible while the thread is in view -->
       <div v-if="isMobile && hasSelection" class="chat-mobile-back-bar">
@@ -62,6 +63,7 @@
         :replying-to="replyingTo"
         @send="sendMessage"
         @send-attachment="onSendAttachment"
+        @send-sticker="onSendSticker"
         @toggle-contact-panel="showContactPanel = !showContactPanel"
         @toggle-pin="onTogglePinHeader"
         @appointment-suggest="onAppointmentSuggest"
@@ -134,7 +136,7 @@ const {
   // Feature 0023 — per-tab badges + tab mutator
   mainUnread, otherUnread, setConversationTab,
   resetFilters, fetchConversationCounts,
-  fetchConversations, selectConversation, sendMessage, sendAttachment, createConversation,
+  fetchConversations, selectConversation, sendMessage, sendAttachment, sendSticker, createConversation,
   initSocket, destroySocket, addOrToggleReaction,
   // Feature 0043 — hover prefetch handles passed through to ConversationList.
   onConversationHover, onConversationHoverLeave,
@@ -162,6 +164,15 @@ const attachmentToast = ref<{ show: boolean; text: string; color: string }>({
 
 async function onSendAttachment(file: File) {
   const result = await sendAttachment(file);
+  if (!result.ok) {
+    attachmentToast.value = { show: true, text: result.error, color: 'error' };
+  }
+}
+
+// Feature 0028 — surface sticker send failures (rate limit, ACL, SDK fail)
+// in the same toast lane used by attachment errors.
+async function onSendSticker(payload: { stickerId: number; catId: number; type: number }) {
+  const result = await sendSticker(payload);
   if (!result.ok) {
     attachmentToast.value = { show: true, text: result.error, color: 'error' };
   }

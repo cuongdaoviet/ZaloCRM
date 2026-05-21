@@ -8,6 +8,7 @@ import { authMiddleware } from '../auth/auth-middleware.js';
 import { requireZaloAccess } from '../zalo/zalo-access-middleware.js';
 import { zaloPool } from '../zalo/zalo-pool.js';
 import { zaloRateLimiter } from '../zalo/zalo-rate-limiter.js';
+import { lookupStickerCdnUrl } from '../zalo/zalo-sticker-routes.js';
 import { logger } from '../../shared/utils/logger.js';
 import { uploadBuffer } from '../../shared/storage/minio-client.js';
 import { config } from '../../config/index.js';
@@ -940,6 +941,132 @@ export async function chatRoutes(app: FastifyInstance) {
         // Best-effort cleanup — disk-full or permission issues here are
         // already a problem we'd see from the writeFile above.
         await unlink(tmpPath).catch(() => {});
+      }
+    },
+  );
+
+  // ── Send a sticker (feature 0028) ────────────────────────────────────────
+  // POST /api/v1/conversations/:id/stickers
+  // Body: { stickerId: number, catId: number, type: number }
+  // Calls zca-js `api.sendSticker({ id, cateId, type }, threadId, threadType)`.
+  // Persists a Message with contentType='sticker' and content = JSON
+  // `{ stickerId, catId, type, cdnUrl? }` so the FE can render the image
+  // without needing a follow-up lookup. zaloMsgId is captured from the SDK
+  // response when present.
+  app.post(
+    '/api/v1/conversations/:id/stickers',
+    { preHandler: requireZaloAccess('chat') },
+    async (request, reply) => {
+      const user = request.user!;
+      const { id } = request.params as { id: string };
+      const body = (request.body ?? {}) as {
+        stickerId?: number;
+        catId?: number;
+        type?: number;
+        cdnUrl?: string;
+      };
+      const stickerId = Number(body.stickerId);
+      const catId = Number(body.catId);
+      const stickerType = Number(body.type);
+
+      if (
+        !Number.isFinite(stickerId) ||
+        !Number.isFinite(catId) ||
+        !Number.isFinite(stickerType)
+      ) {
+        return reply
+          .status(400)
+          .send({ error: 'stickerId, catId, type là bắt buộc', code: 'invalid_body' });
+      }
+
+      const conversation = await prisma.conversation.findFirst({
+        where: { id, orgId: user.orgId },
+        include: { zaloAccount: true },
+      });
+      if (!conversation) return reply.status(404).send({ error: 'Conversation not found' });
+
+      const instance = zaloPool.getInstance(conversation.zaloAccountId);
+      if (!instance?.api) {
+        return reply.status(400).send({ error: 'Zalo account not connected' });
+      }
+      if (typeof instance.api.sendSticker !== 'function') {
+        return reply
+          .status(502)
+          .send({ error: 'SDK không hỗ trợ gửi sticker', code: 'sticker_unsupported' });
+      }
+
+      const limits = zaloRateLimiter.checkLimits(conversation.zaloAccountId);
+      if (!limits.allowed) {
+        return reply.status(429).send({ error: limits.reason });
+      }
+
+      try {
+        const threadId = conversation.externalThreadId || '';
+        const threadType = conversation.threadType === 'group' ? 1 : 0;
+
+        zaloRateLimiter.recordSend(conversation.zaloAccountId);
+        const sendResult = await instance.api.sendSticker(
+          { id: stickerId, cateId: catId, type: stickerType },
+          threadId,
+          threadType,
+        );
+
+        const zaloMsgId =
+          sendResult?.msgId !== undefined && sendResult.msgId !== null
+            ? String(sendResult.msgId)
+            : null;
+
+        // Best-effort lookup so we can persist a `cdnUrl` alongside the IDs
+        // (Phase 1). Failures are non-fatal — FE falls back to the proxy GET
+        // endpoint when cdnUrl is missing.
+        let cdnUrl: string | null = body.cdnUrl ?? null;
+        if (!cdnUrl) {
+          try {
+            const detail = await lookupStickerCdnUrl(instance.api, stickerId);
+            if (detail) cdnUrl = detail;
+          } catch {
+            /* Ignore — FE has its own proxy fallback (BR-0003). */
+          }
+        }
+
+        const stickerPayload = { stickerId, catId, type: stickerType, cdnUrl };
+
+        const message = await prisma.message.create({
+          data: {
+            id: randomUUID(),
+            conversationId: id,
+            zaloMsgId,
+            senderType: 'self',
+            senderUid: conversation.zaloAccount.zaloUid || '',
+            senderName: 'Staff',
+            content: JSON.stringify(stickerPayload),
+            contentType: 'sticker',
+            sentAt: new Date(),
+            repliedByUserId: user.id,
+          },
+        });
+
+        await prisma.conversation.update({
+          where: { id },
+          data: { lastMessageAt: new Date(), isReplied: true, unreadCount: 0 },
+        });
+
+        const io = (app as any).io as Server | undefined;
+        io?.emit('chat:message', {
+          accountId: conversation.zaloAccountId,
+          message,
+          conversationId: id,
+        });
+
+        return reply.status(200).send({
+          messageId: message.id,
+          sticker: stickerPayload,
+        });
+      } catch (err) {
+        logger.error('[chat] Send sticker error:', err);
+        return reply
+          .status(502)
+          .send({ error: 'Gửi sticker thất bại', code: 'zalo_send_failed' });
       }
     },
   );

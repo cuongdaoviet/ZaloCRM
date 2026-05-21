@@ -39,6 +39,7 @@ import { teamRoutes } from './modules/auth/team-routes.js';
 import { orgRoutes } from './modules/auth/org-routes.js';
 import { zaloAccessRoutes } from './modules/zalo/zalo-access-routes.js';
 import { zaloSyncRoutes } from './modules/zalo/zalo-sync-routes.js';
+import { zaloStickerRoutes } from './modules/zalo/zalo-sticker-routes.js';
 import { zaloPool } from './modules/zalo/zalo-pool.js';
 import { registerZaloSocketHandlers } from './modules/zalo/zalo-socket.js';
 import { notificationRoutes } from './modules/notifications/notification-routes.js';
@@ -161,6 +162,7 @@ async function bootstrap() {
   await app.register(orgRoutes);
   await app.register(zaloAccessRoutes);
   await app.register(zaloSyncRoutes);
+  await app.register(zaloStickerRoutes);
   await app.register(notificationRoutes);
   await app.register(searchRoutes);
   await app.register(publicApiRoutes);

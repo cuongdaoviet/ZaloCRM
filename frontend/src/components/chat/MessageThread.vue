@@ -279,8 +279,21 @@
                     <v-icon size="16">mdi-download</v-icon>
                   </v-btn>
                 </div>
-                <!-- Sticker/Video/Voice/GIF -->
-                <div v-else-if="msg.contentType === 'sticker'">🏷️ Sticker</div>
+                <!-- Sticker (feature 0028) — render inline image when we
+                     have a URL. Falls back to "Sticker" placeholder while the
+                     proxy lookup is in flight or when the URL is missing. -->
+                <div v-else-if="msg.contentType === 'sticker'" class="sticker-cell">
+                  <img
+                    v-if="getStickerUrl(msg)"
+                    :src="getStickerUrl(msg)!"
+                    alt="Sticker"
+                    class="chat-sticker"
+                  />
+                  <span v-else class="text-caption text-grey">Sticker</span>
+                </div>
+                <!-- Video/Voice/GIF -->
+                <!-- (Sticker case handled above; remaining placeholders below) -->
+                <span v-else-if="false"></span>
                 <!-- Video (feature 0025) — inline HTML5 player with native
                      controls. User-uploaded Zalo videos don't ship captions,
                      so no <track> elements (Web:S4084 acceptable). -->
@@ -486,6 +499,24 @@
           :disabled="sending"
           @click="openFilePicker"
         ><v-icon>mdi-paperclip</v-icon></v-btn>
+        <!-- Feature 0028 — sticker button + picker popover. Hidden when the
+             parent provided no accountId (read-only viewers / no live SDK). -->
+        <div v-if="conversation?.zaloAccount?.id" class="sticker-launcher mr-1">
+          <v-btn
+            icon size="small" variant="text"
+            title="Gửi sticker"
+            class="sticker-btn"
+            :disabled="sending"
+            @click="toggleStickerPicker"
+          ><v-icon>mdi-sticker-emoji</v-icon></v-btn>
+          <StickerPicker
+            v-if="stickerPickerOpen"
+            class="sticker-picker-popover"
+            :account-id="conversation.zaloAccount.id"
+            @select="onPickSticker"
+            @close="stickerPickerOpen = false"
+          />
+        </div>
         <input
           ref="fileInputEl"
           type="file"
@@ -557,6 +588,7 @@ import ReactionChips from './ReactionChips.vue';
 import MessageSkeleton from './MessageSkeleton.vue';
 import ZinstantCard from './ZinstantCard.vue';
 import MentionPicker from './MentionPicker.vue';
+import StickerPicker, { type StickerPick } from './StickerPicker.vue';
 import { secondaryZaloName } from '@/composables/use-contact-name';
 import UserInfoPopover, {
   type CreateContactPayload,
@@ -622,6 +654,8 @@ const emit = defineEmits<{
   'reply-set': [message: Message];
   /** Feature 0031 — user clicked the ✕ on the composer reply preview banner. */
   'reply-clear': [];
+  /** Feature 0028 — user picked a sticker to send. */
+  'send-sticker': [payload: StickerPick];
 }>();
 
 // ── Feature 0030 — Zalo user info popover state ─────────────────────────────
@@ -1472,6 +1506,58 @@ function emitAppointmentSuggest() {
   emit('appointment-suggest', appointmentSuggestion.value);
   suggestionDismissed.value = true;
 }
+
+// ── Feature 0028 — sticker composer wiring ─────────────────────────────────
+const stickerPickerOpen = ref(false);
+
+function toggleStickerPicker() {
+  stickerPickerOpen.value = !stickerPickerOpen.value;
+}
+
+function onPickSticker(payload: StickerPick) {
+  stickerPickerOpen.value = false;
+  emit('send-sticker', payload);
+}
+
+/**
+ * Resolve the CDN URL for an inbound or outbound sticker message.
+ * Outbound: backend persists `{ stickerId, catId, type, cdnUrl }` in content
+ * (BR-0007) so the URL is available immediately.
+ * Inbound: Zalo payload can carry various URL fields (`stickerWebpUrl`,
+ * `stickerUrl`, `stickerSpriteUrl`) or only `{ id, catId, type }`. We try
+ * every known field; if none match, the template falls back to the
+ * "Sticker" caption (BR-0003) until a proxy lookup hydrates the row.
+ */
+function getStickerUrl(msg: Message): string | null {
+  if (!msg.content) return null;
+  if (msg.content.startsWith('http')) return msg.content;
+  if (!msg.content.startsWith('{')) return null;
+  try {
+    const p = JSON.parse(msg.content);
+    const url =
+      p.cdnUrl ||
+      p.stickerWebpUrl ||
+      p.stickerUrl ||
+      p.stickerSpriteUrl ||
+      p.url ||
+      '';
+    return typeof url === 'string' && url.startsWith('http') ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+// Close the sticker picker when the user clicks outside the launcher.
+function closeStickerOnOutsideClick(e: MouseEvent) {
+  if (!stickerPickerOpen.value) return;
+  const target = e.target as HTMLElement | null;
+  if (target && target.closest('.sticker-launcher')) return;
+  stickerPickerOpen.value = false;
+}
+onMounted(() => window.addEventListener('click', closeStickerOnOutsideClick, true));
+onBeforeUnmount(() =>
+  window.removeEventListener('click', closeStickerOnOutsideClick, true),
+);
 </script>
 
 <style scoped>
@@ -1621,6 +1707,28 @@ function emitAppointmentSuggest() {
 .bg-primary .mention-chip--unknown {
   background: rgba(255, 255, 255, 0.15);
   color: rgba(255, 255, 255, 0.75);
+}
+
+/* ── Feature 0028 — sticker composer + inline render ───────────────────── */
+.sticker-launcher {
+  position: relative;
+}
+.sticker-picker-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 25;
+}
+.sticker-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.chat-sticker {
+  max-width: 160px;
+  max-height: 160px;
+  display: block;
+  background: transparent;
 }
 
 /* ── Feature 0031 — reply / quote bubble + composer banner ───────────────── */
