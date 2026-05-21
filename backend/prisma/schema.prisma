@@ -136,6 +136,10 @@ model Contact {
   phone            String?
   email            String?   @map("email")
   fullName         String?   @map("full_name")
+  // Feature 0024 — Zalo display name auto-synced from inbound messages.
+  // Never overwritten by rep edits (fullName is the CRM-editable name).
+  // Display rule: show as muted secondary when it differs from fullName.
+  zaloDisplayName  String?   @map("zalo_display_name")
   avatarUrl        String?   @map("avatar_url")
   source           String?   // FB, TT, GT, CN, etc.
   sourceDate       DateTime? @map("source_date")
@@ -229,6 +233,13 @@ model Message {
   @@index([zaloMsgId])
   // Powers /search/messages: filter by conversation, sort by sentAt desc
   @@index([conversationId, sentAt(sort: Desc)])
+  // Feature 0033 — friend aggregates: chatting-count query filters by
+  // `(conversation_id, sender_type='contact', sent_at >= NOW() - 7d)`. The
+  // existing `(conversationId, sentAt)` index does not cover senderType so
+  // Postgres still has to read rows it would otherwise skip. This composite
+  // makes the inner join on conversations → messages an index-only scan
+  // for inbound traffic in the active window.
+  @@index([conversationId, senderType, sentAt(sort: Desc)])
   @@map("messages")
 }
 

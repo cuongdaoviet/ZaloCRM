@@ -20,6 +20,11 @@ export interface ContactTagRef {
 export interface Contact {
   id: string;
   fullName: string | null;
+  // Feature 0024 — Zalo display name auto-synced from inbound messages.
+  // Read-only on the FE — never sent in PUT bodies. Rendered as muted
+  // secondary text in conversation rows / chat header / contact detail
+  // when it differs from `fullName` (case-insensitive trim compare).
+  zaloDisplayName?: string | null;
   phone: string | null;
   email?: string | null;
   avatarUrl?: string | null;

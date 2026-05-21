@@ -8,12 +8,16 @@
  *   GET    /api/v1/friendship-attempts/:id           — detail
  *   POST   /api/v1/friendship-attempts/:id/cancel    — cancel queued/looking_up
  *
+ * Feature 0033 adds one read-only aggregate:
+ *   GET    /api/v1/friends/stats                     — per-account + org totals
+ *
  * All routes require auth + org-scoped. Members only see their own; owners
  * and admins see the whole org (BR-0003).
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { authMiddleware } from '../auth/auth-middleware.js';
+import { computeFriendStats } from './friend-stats-service.js';
 import {
   bulkEnqueue,
   cancelAttempt,
@@ -176,4 +180,20 @@ export async function friendshipRoutes(app: FastifyInstance): Promise<void> {
       return reply.send(result.attempt);
     },
   );
+
+  // ── GET /api/v1/friends/stats — feature 0033 ──────────────────────────────
+  // Read-only aggregate. Owner/admin sees all ZaloAccount in org; member sees
+  // only those they have a ZaloAccountAccess row for. Response is cached 60s
+  // per (orgId, userId) — friend rows and message activity drift slowly
+  // enough that a brief staleness is preferable to re-aggregating on every
+  // dashboard reload.
+  app.get('/api/v1/friends/stats', async (request, reply) => {
+    const user = request.user!;
+    const payload = await computeFriendStats({
+      orgId: user.orgId,
+      userId: user.id,
+      role: user.role,
+    });
+    return reply.send(payload);
+  });
 }
