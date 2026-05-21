@@ -1728,3 +1728,118 @@ higher on the account.
 
 Phase 1 returns a hardcoded default catalogue (BR-0009) — Phase 2
 will hit Zalo's real catalogue API.
+
+---
+
+## Feature 0030 — Zalo user info popup
+
+One-shot lookup that backs the avatar-hover popover. Crosses Zalo
+identity data (`api.getUserInfo`) with the org's `Contact` table so
+the FE can show "Tạo Contact" or "Xem trong CRM". See
+[features/0030-zalo-user-popup/SPEC.md](../features/0030-zalo-user-popup/SPEC.md).
+
+### GET `/api/v1/zalo/users/:uid`
+
+**Path params:** `uid` — numeric Zalo uid.
+
+**Query params:**
+
+| Name | Type | Required | Notes |
+|---|---|---|---|
+| `accountId` | UUID | yes | Which Zalo account to call `getUserInfo` on. |
+
+**Permission:** owner/admin bypass; member must have `chat` or
+`admin` on `accountId`. The middleware is inlined because
+`requireZaloAccess` reads `accountId` from path params, not query.
+
+**Validation errors (400):**
+
+- `{ "error": "missing_account_id" }` — `accountId` not provided.
+- `{ "error": "invalid_uid" }` — `uid` is empty or not all digits.
+
+**Other errors:**
+
+| Status | When |
+|---|---|
+| 403 | Member without `chat` access on `accountId` — `{ "error": "Không có quyền truy cập tài khoản Zalo này" }` (or `"Không đủ quyền"` for `read`-only). |
+| 404 | Cross-org or unknown `accountId` — `{ "error": "Account not found" }`. |
+
+**Response 200:**
+
+```json
+{
+  "uid": "2347234782",
+  "displayName": "Lan Anh",
+  "avatarUrl": "https://...",
+  "gender": "female",
+  "phone": "0901234567",
+  "contactId": "uuid | null",
+  "online": true,
+  "cached": false
+}
+```
+
+- `contactId` is the org's `Contact.id` if a row with this `zaloUid`
+  exists, else `null` — drives the popover's "Tạo Contact" vs "Xem
+  trong CRM" CTA (BR-0007 in SPEC §3).
+- `online` is `false` when the underlying Zalo account isn't
+  connected; the payload either echoes a cached entry or returns a
+  `displayName: "Unknown"` stub (EC-0003).
+- `cached: true` when the value came from the in-process 10-minute
+  cache. Cache key is `${accountId}:${uid}`.
+
+**Degraded responses (still 200):**
+
+- zca-js throws (privacy, network) → `displayName: "Unknown"`,
+  empty avatar/gender/phone, `online: true` (EC-0001 in SPEC §5).
+  The FE still renders a useful popover.
+- Account offline → see above.
+
+---
+
+## Feature 0033 — Friend aggregates
+
+Read-only aggregate of the org's Zalo friend list, used by the
+dashboard's "Friend stats" widget and the unified Friends grid (which
+also feeds Feature 0042's left-rail counter). See
+[features/0033-friend-aggregates/SPEC.md](../features/0033-friend-aggregates/SPEC.md).
+
+### GET `/api/v1/friends/stats`
+
+Per-Zalo-account aggregate plus org-wide totals.
+
+**Permission:** any authenticated user. Owner/admin sees every
+`ZaloAccount` in the org; members are restricted to accounts they
+have a `ZaloAccountAccess` row for.
+
+**Response 200:**
+
+```json
+{
+  "byAccount": [
+    {
+      "zaloAccountId": "uuid",
+      "displayName": "Sale account #1",
+      "acceptedNicksCount": 142,
+      "chattingNicksCount": 38
+    }
+  ],
+  "totals": {
+    "acceptedNicksCount": 142,
+    "chattingNicksCount": 38
+  },
+  "windowDays": 7
+}
+```
+
+- `acceptedNicksCount` — total friends on the account.
+- `chattingNicksCount` — friends with at least one inbound message
+  within `windowDays` (configurable; default 7).
+- `windowDays` — comes from `config.friendChatWindowDays`.
+
+**Caching:** 60-second in-memory cache keyed by `(orgId, userId)`
+(BR-0007). Friend rows and message activity drift slowly enough that
+brief staleness beats re-aggregating on every dashboard reload.
+
+**Errors:** none in normal operation — an empty org returns
+`{ byAccount: [], totals: { 0, 0 }, windowDays }`.
