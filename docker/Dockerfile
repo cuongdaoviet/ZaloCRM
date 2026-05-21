@@ -27,7 +27,27 @@ COPY --from=backend-builder /app/backend/prisma     /app/prisma
 COPY --from=backend-builder /app/backend/package.json /app/package.json
 COPY --from=frontend-builder /app/frontend/dist     /app/static
 
-RUN mkdir -p /var/lib/zalo-crm/files
+# Feature 0046 BR-0022..BR-0024 — run the Node process as a dedicated
+# unprivileged user. A Node RCE that escapes the runtime no longer
+# drops the attacker straight to root.
+#
+# - mkdir the uploads volume mount point in the same layer as the
+#   user/group creation so the chown that follows covers a known set
+#   of files.
+# - addgroup -S / adduser -S → system uid/gid (no collision with host
+#   uids on older builds).
+# - chown the app dir AND the uploads mount point so first-run writes
+#   succeed without a runtime chown step.
+# - USER app sits BEFORE CMD so both `tini` (ENTRYPOINT) and the shell
+#   that runs `prisma db push` + `node dist/app.js` execute as app,
+#   not root.
+# - Port 3000 is non-privileged → no setcap needed.
+RUN mkdir -p /var/lib/zalo-crm/files \
+    && addgroup -S app \
+    && adduser -S -G app -h /app -s /sbin/nologin app \
+    && chown -R app:app /app /var/lib/zalo-crm/files
+
+USER app
 
 EXPOSE 3000
 ENTRYPOINT ["/sbin/tini", "--"]
