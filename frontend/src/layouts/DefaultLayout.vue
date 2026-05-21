@@ -153,6 +153,8 @@ const menuItems: MenuItem[] = [
   { title: 'Quản lý nhãn', icon: 'mdi-tag-multiple-outline', path: '/settings/tags', adminOnly: true },
   // Feature 0040 — Lead score admin config.
   { title: 'Lead score', icon: 'mdi-fire', path: '/settings/lead-score', adminOnly: true },
+  // Feature 0037 — Workflow automation engine (phase 1).
+  { title: 'Workflow tự động', icon: 'mdi-pipe', path: '/settings/workflows', adminOnly: true },
   { title: 'Tin nhắn mẫu', icon: 'mdi-message-flash-outline', path: '/quick-replies' },
   { title: 'API & Webhook', icon: 'mdi-api', path: '/api-settings' },
 ];
