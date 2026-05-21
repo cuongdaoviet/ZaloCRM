@@ -279,8 +279,21 @@
                     <v-icon size="16">mdi-download</v-icon>
                   </v-btn>
                 </div>
-                <!-- Sticker/Video/Voice/GIF -->
-                <div v-else-if="msg.contentType === 'sticker'">🏷️ Sticker</div>
+                <!-- Sticker (feature 0028) — render inline image when we
+                     have a URL. Falls back to "Sticker" placeholder while the
+                     proxy lookup is in flight or when the URL is missing. -->
+                <div v-else-if="msg.contentType === 'sticker'" class="sticker-cell">
+                  <img
+                    v-if="getStickerUrl(msg)"
+                    :src="getStickerUrl(msg)!"
+                    alt="Sticker"
+                    class="chat-sticker"
+                  />
+                  <span v-else class="text-caption text-grey">Sticker</span>
+                </div>
+                <!-- Video/Voice/GIF -->
+                <!-- (Sticker case handled above; remaining placeholders below) -->
+                <span v-else-if="false"></span>
                 <!-- Video (feature 0025) — inline HTML5 player with native
                      controls. User-uploaded Zalo videos don't ship captions,
                      so no <track> elements (Web:S4084 acceptable). -->
@@ -486,6 +499,24 @@
           :disabled="sending"
           @click="openFilePicker"
         ><v-icon>mdi-paperclip</v-icon></v-btn>
+        <!-- Feature 0028 — sticker button + picker popover. Hidden when the
+             parent provided no accountId (read-only viewers / no live SDK). -->
+        <div v-if="conversation?.zaloAccountId" class="sticker-launcher mr-1">
+          <v-btn
+            icon size="small" variant="text"
+            title="Gửi sticker"
+            class="sticker-btn"
+            :disabled="sending"
+            @click="toggleStickerPicker"
+          ><v-icon>mdi-sticker-emoji</v-icon></v-btn>
+          <StickerPicker
+            v-if="stickerPickerOpen"
+            class="sticker-picker-popover"
+            :account-id="conversation.zaloAccountId"
+            @select="onPickSticker"
+            @close="stickerPickerOpen = false"
+          />
+        </div>
         <input
           ref="fileInputEl"
           type="file"
@@ -557,6 +588,7 @@ import ReactionChips from './ReactionChips.vue';
 import MessageSkeleton from './MessageSkeleton.vue';
 import ZinstantCard from './ZinstantCard.vue';
 import MentionPicker from './MentionPicker.vue';
+import StickerPicker, { type StickerPick } from './StickerPicker.vue';
 import { secondaryZaloName } from '@/composables/use-contact-name';
 import UserInfoPopover, {
   type CreateContactPayload,
@@ -622,6 +654,8 @@ const emit = defineEmits<{
   'reply-set': [message: Message];
   /** Feature 0031 — user clicked the ✕ on the composer reply preview banner. */
   'reply-clear': [];
+  /** Feature 0028 — user picked a sticker to send. */
+  'send-sticker': [payload: StickerPick];
 }>();
 
 // ── Feature 0030 — Zalo user info popover state ─────────────────────────────
