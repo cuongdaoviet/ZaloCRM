@@ -71,6 +71,7 @@ import { aiConfigRoutes } from './modules/ai/ai-config-routes.js';
 import { aiUsageRoutes } from './modules/ai/ai-usage-routes.js';
 import { aiSuggestionRoutes } from './modules/ai/ai-suggestion-routes.js';
 import { assertAiMasterKey } from './shared/crypto/encrypt-config.js';
+import { assertJwtSecret } from './shared/crypto/assert-jwt-secret.js';
 // Feature 0038 — Integration Hub (Sheets + Telegram)
 import { integrationRoutes } from './modules/integrations/integration-routes.js';
 import { startIntegrationRunner } from './workers/integration-runner.js';
@@ -250,6 +251,16 @@ async function bootstrap() {
     assertAiMasterKey();
   } catch (err) {
     logger.error('[ai] AI_CONFIG_MASTER_KEY check failed — refusing to start:', err);
+    process.exit(1);
+  }
+
+  // Feature 0046 — refuse to start in production with a placeholder/short
+  // JWT secret. Tokens signed with the dev placeholder are forgeable by
+  // anyone who can read the public repo.
+  try {
+    assertJwtSecret();
+  } catch (err) {
+    logger.error('[auth] JWT_SECRET check failed — refusing to start:', err);
     process.exit(1);
   }
 

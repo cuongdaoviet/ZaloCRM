@@ -349,6 +349,119 @@ docker exec -it zalo-crm-app sh -c "cd /app/backend && pnpm migrate-encrypt-prox
 Script idempotent. Sau khi xong, cột `proxy_url` plaintext bị DROP.
 Từ đây trở đi quy trình rotation 10.2 cover cả 3 bảng.
 
+## §0046. Deploying Feature 0046 — Security hardening (cycle 2026-05)
+
+> Bắt buộc đọc trước khi deploy bản chứa Feature 0046 vào staging/prod.
+> 8 fixes đóng gói trong feature này có 4 fix gây breaking change ở
+> tầng env / image / network — bỏ qua step nào trong checklist dưới
+> sẽ làm container `app` từ chối khởi động hoặc làm vỡ `<img src>`
+> trong UI chat.
+
+### §0046.1. Pre-flight env updates (BẮT BUỘC)
+
+Trước khi `docker compose up -d --build`:
+
+1. **Sinh JWT_SECRET mới** (BR-0004 boot guard refuse start nếu thiếu/placeholder/<32 chars).
+
+   ```bash
+   openssl rand -base64 48
+   ```
+
+   Cập nhật `.env`:
+
+   ```
+   JWT_SECRET=<paste output>
+   ```
+
+   **Hệ quả:** mọi user đang đăng nhập sẽ bị 401 và phải đăng nhập
+   lại sau khi deploy. Đây là chiến lược invalidation cho cycle này
+   — thông báo qua banner in-app trước khi deploy.
+
+2. **Sinh credentials MinIO mới** (BR-0008 docker-compose refuse start
+   nếu thiếu — không còn fallback `minioadmin/minioadmin`).
+
+   ```bash
+   echo "MINIO_ROOT_USER=zalocrm_minio_$(openssl rand -hex 4)"
+   echo "MINIO_ROOT_PASSWORD=$(openssl rand -base64 24)"
+   echo "S3_ACCESS_KEY=$(openssl rand -hex 12)"
+   echo "S3_SECRET_KEY=$(openssl rand -base64 24)"
+   ```
+
+   Cập nhật `.env` cả 4 biến. **KHÔNG được để trống** — `docker compose
+   up` sẽ fail-fast với message rõ ràng.
+
+3. **Đổi `S3_PUBLIC_URL`** sang đường dẫn nginx mới (BR-0009).
+
+   ```
+   S3_PUBLIC_URL=https://<your-domain>/attachments
+   ```
+
+   Lý do: port `:9000` của MinIO không còn expose ra public sau Feature
+   0046 (chỉ bind `127.0.0.1`). Browser sẽ load `<img src>` qua
+   nginx proxy ở `/attachments/<key>`.
+
+### §0046.2. Deploy sequence
+
+```bash
+git pull origin main
+docker compose build app nginx
+docker compose up -d --force-recreate app nginx minio db
+docker compose logs -f app   # tail until ready
+```
+
+Boot guard sẽ in `[auth] JWT_SECRET check failed` nếu env sai — sửa
+`.env` rồi `docker compose up -d app` lại.
+
+### §0046.3. Verify post-deploy
+
+```bash
+# Container 'app' chạy là uid != 0 (BR-0022)?
+docker exec zalo-crm-app id
+#   → uid=100(app) gid=101(app) groups=101(app)
+
+# MinIO chỉ bind loopback?
+docker port zalo-crm-minio
+#   → 9000/tcp -> 127.0.0.1:9000
+
+# nginx serve /attachments được?
+curl -I http://localhost:8080/healthz   # → 200 ok
+
+# Tạo API key mới và verify giá trị lưu trong DB là hash:
+docker exec zalo-crm-db psql -U crmuser zalocrm -c \
+  "SELECT length(value_plain), value_plain FROM app_settings WHERE setting_key='public_api_key';"
+#   → length 64 (= SHA-256 hex), không phải 53 (= zcrm_ prefix plaintext).
+```
+
+### §0046.4. Public API key lazy migration
+
+Tự động — không cần script. Mỗi org có sẵn public_api_key dạng plaintext
+sẽ được migrate sang SHA-256 hash trên request đầu tiên sau deploy.
+Idempotent. Sau khi mọi org đã gửi ít nhất 1 request, query
+`SELECT value_plain FROM app_settings WHERE setting_key='public_api_key'`
+chỉ còn rows dạng 64-char hex.
+
+### §0046.5. Login rate limit (BR-0018)
+
+- 5 failed login cùng email trong 15 phút → 429 + Retry-After.
+- Cleared on success.
+- Multi-process (Phase 2) đang out-of-scope; mỗi worker giữ Map riêng.
+- Operator muốn manual-clear (legit user bị khoá): restart container
+  `app` hoặc đợi 15 phút.
+
+### §0046.6. Rollback
+
+Bản này có 3 fix breaking-by-design:
+- JWT_SECRET rotation → toàn bộ user bị logout (mong muốn).
+- MinIO bind 127.0.0.1 + `S3_PUBLIC_URL` nginx → `<img src>` cũ chỉ
+  trỏ raw MinIO port sẽ bị broken cho đến khi browser refresh.
+- Dockerfile USER app → volume cũ uid=0 sẽ throw EACCES khi container
+  cố ghi. Fix: `docker exec -u 0 zalo-crm-app chown -R app:app /var/lib/zalo-crm/files`.
+
+Nếu rollback bằng `git revert <merge>` + `docker compose up -d --build app`:
+- JWT_SECRET cũ phải vẫn còn trong `.env` (giữ secrets vault).
+- MinIO/`S3_PUBLIC_URL` cũ phải vẫn còn trong `.env`.
+- Volume `file_storage` không cần chown ngược.
+
 ## 11. Tham khảo nhanh
 
 - Settings: `.env` (KHÔNG commit)

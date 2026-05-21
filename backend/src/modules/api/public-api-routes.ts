@@ -4,8 +4,15 @@
  * All routes prefixed /api/public/ — no JWT required, orgId injected from API key lookup.
  */
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { timingSafeEqual } from 'node:crypto';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
+import { trackBackground } from '../../shared/utils/background-tasks.js';
+import {
+  hashApiKey,
+  isHashedApiKey,
+  verifyApiKeyHash,
+} from '../../shared/crypto/hash-api-key.js';
 import {
   legacyTagsByName,
   setContactTags,
@@ -13,16 +20,81 @@ import {
 
 // ── API key auth middleware ────────────────────────────────────────────────────
 
+/**
+ * Authenticate the request against a `public_api_key` row in `app_settings`.
+ *
+ * Feature 0046 BR-0014/BR-0015: two acceptance paths, both constant-time:
+ *   (a) The presented key hashes to the stored value (already migrated).
+ *   (b) The presented key equals the stored value verbatim (legacy
+ *       plaintext from pre-0046 deployments).
+ *
+ * On a legacy-plaintext hit (path b), the row is rewritten with the hash
+ * via a fire-and-forget background task — idempotent because subsequent
+ * lookups take path (a) and the row is already in the migrated shape.
+ *
+ * The scan is O(N) over all `public_api_key` rows (one per org). That
+ * was already the case before this change — we only added per-row
+ * hashing, not a new dimension of fanout. With ~thousands of orgs this
+ * is still sub-ms per request.
+ */
 async function apiKeyAuth(request: FastifyRequest, reply: FastifyReply) {
   const apiKey = request.headers['x-api-key'] as string;
   if (!apiKey) return reply.status(401).send({ error: 'API key required' });
 
-  const setting = await prisma.appSetting.findFirst({
-    where: { settingKey: 'public_api_key', valuePlain: apiKey },
-  });
-  if (!setting) return reply.status(401).send({ error: 'Invalid API key' });
+  // Hash once, compare against every row in constant time.
+  const presentedHash = hashApiKey(apiKey);
 
-  (request as any).orgId = setting.orgId;
+  const candidates = await prisma.appSetting.findMany({
+    where: { settingKey: 'public_api_key' },
+    select: { id: true, orgId: true, valuePlain: true },
+  });
+
+  for (const row of candidates) {
+    const stored = row.valuePlain ?? '';
+    if (!stored) continue;
+
+    if (isHashedApiKey(stored)) {
+      // Path (a) — already migrated. Constant-time hash compare.
+      if (verifyApiKeyHash(presentedHash, stored)) {
+        (request as any).orgId = row.orgId;
+        return;
+      }
+    } else {
+      // Path (b) — legacy plaintext. Use timingSafeEqual on equal-length
+      // buffers to avoid leaking the position of the first divergent
+      // byte across orgs.
+      if (
+        stored.length === apiKey.length &&
+        timingSafeEqual(Buffer.from(stored, 'utf8'), Buffer.from(apiKey, 'utf8'))
+      ) {
+        (request as any).orgId = row.orgId;
+        // Fire-and-forget lazy migration. Idempotent — if another
+        // concurrent request triggers the same write, both end up with
+        // the same hash.
+        trackBackground(
+          prisma.appSetting
+            .update({
+              where: { id: row.id },
+              data: { valuePlain: presentedHash },
+            })
+            .then(() => {
+              logger.info(
+                `[public-api] migrated plaintext API key → SHA-256 hash for org ${row.orgId}`,
+              );
+            })
+            .catch((err) => {
+              logger.warn(
+                `[public-api] lazy hash migration failed for org ${row.orgId}:`,
+                err,
+              );
+            }),
+        );
+        return;
+      }
+    }
+  }
+
+  return reply.status(401).send({ error: 'Invalid API key' });
 }
 
 // ── Route registration ────────────────────────────────────────────────────────
