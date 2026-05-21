@@ -42,6 +42,9 @@ model Organization {
   // Feature 0037 — Workflow automation engine
   workflowDefinitions WorkflowDefinition[]
   workflowExecutions  WorkflowExecution[]
+  // Feature 0036 — AI reply suggestions (BYOK)
+  aiConfig            AiConfig?
+  aiSuggestionLogs    AiSuggestionLog[]
 
   @@map("organizations")
 }
@@ -874,4 +877,60 @@ model WorkflowExecution {
   // Cooldown re-trigger lookup: (workflow, contact) ordered by startedAt desc.
   @@index([workflowId, contactId, startedAt(sort: Desc)])
   @@map("workflow_executions")
+}
+
+// ─── Feature 0036 — AI reply suggestions (multi-provider, BYOK) ──────────────
+// Per-org AI configuration. We hold an encrypted (AES-256-GCM) provider API
+// key plus model + system prompt. The plaintext key NEVER leaves the encrypt-
+// config helper — every read decrypts on the fly. See encrypt-config.ts.
+// Suggestion CONTENT is never persisted; only metadata in AiSuggestionLog.
+// ─────────────────────────────────────────────────────────────────────────────
+model AiConfig {
+  id                   String   @id @default(uuid())
+  orgId                String   @unique @map("org_id")
+  // 'anthropic' | 'openai' | 'gemini' | 'qwen' | 'kimi' | 'ollama'
+  provider             String
+  // AES-256-GCM ciphertext (hex). Empty for providers that need no key (Ollama).
+  apiKeyCipher         String   @default("") @map("api_key_cipher")
+  apiKeyIv             String   @default("") @map("api_key_iv")
+  apiKeyTag            String   @default("") @map("api_key_tag")
+  // Optional override URL (Ollama local endpoint, self-hosted OpenAI-compat, …)
+  apiEndpoint          String?  @map("api_endpoint")
+  model                String
+  systemPrompt         String?  @map("system_prompt")
+  enabled              Boolean  @default(false)
+  maxSuggestionsPerDay Int      @default(1000) @map("max_suggestions_per_day")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("ai_configs")
+}
+
+model AiSuggestionLog {
+  id             String   @id @default(uuid())
+  orgId          String   @map("org_id")
+  userId         String   @map("user_id")
+  conversationId String   @map("conversation_id")
+  // The inbound message that triggered the suggestion (msg the rep is replying to).
+  triggerMsgId   String   @map("trigger_msg_id")
+  provider       String
+  model          String
+  tokensIn       Int      @map("tokens_in")
+  tokensOut      Int      @map("tokens_out")
+  // USD estimate (best-effort from per-provider rate table).
+  costEstimate   Float    @map("cost_estimate")
+  latencyMs      Int      @map("latency_ms")
+  // Null on success. On failure: 'provider_401' | 'provider_5xx' | 'timeout' | …
+  errorCode      String?  @map("error_code")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  // Daily quota count + usage aggregation (orgId + createdAt range).
+  @@index([orgId, createdAt])
+  // Per-user hourly soft cap (BR-0016).
+  @@index([userId, createdAt])
+  @@map("ai_suggestion_logs")
 }

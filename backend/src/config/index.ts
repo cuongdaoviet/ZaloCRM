@@ -45,4 +45,14 @@ export const config = {
     1,
     parseInt(process.env.FRIEND_ACTIVE_WINDOW_DAYS || '7', 10) || 7,
   ),
+
+  // Feature 0036 — AI reply suggestions (BYOK).
+  // 32-byte (64 hex char) master key used to derive per-org AES-256-GCM keys
+  // that encrypt provider API keys at rest. Losing this key = losing every
+  // configured provider key. Generate via `openssl rand -hex 32`.
+  // For tests we accept a dev default; production startup MUST fail when this
+  // is the literal placeholder — see assertAiMasterKey() in encrypt-config.ts.
+  aiConfigMasterKey:
+    process.env.AI_CONFIG_MASTER_KEY ||
+    '0000000000000000000000000000000000000000000000000000000000000000',
 };
