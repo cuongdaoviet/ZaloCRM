@@ -1,7 +1,13 @@
 <template>
-  <div>
-    <div class="d-flex align-center mb-4">
-      <h1 class="text-h5">Kết bạn</h1>
+  <div class="friends-page">
+    <div class="d-flex align-center mb-4 flex-wrap ga-2">
+      <h1 class="text-h5">Bạn bè</h1>
+      <v-chip
+        v-if="!loading && total > 0"
+        size="small"
+        variant="tonal"
+        color="primary"
+      >{{ total }} bạn</v-chip>
       <v-spacer />
       <v-btn
         variant="text"
@@ -14,20 +20,16 @@
     <!-- Filters -->
     <v-card class="pa-3 mb-3">
       <div class="d-flex flex-wrap ga-3">
-        <v-select
-          v-model="filterStates"
-          :items="STATE_OPTIONS"
-          item-title="title"
-          item-value="value"
-          label="Trạng thái"
+        <v-text-field
+          v-model="searchQuery"
+          label="Tìm tên / SĐT"
           density="compact"
           variant="outlined"
-          hide-details
-          multiple
-          chips
+          prepend-inner-icon="mdi-magnify"
           clearable
-          style="min-width: 280px; flex: 1 1 280px;"
-          @update:model-value="reload"
+          hide-details
+          style="min-width: 240px; flex: 1 1 240px;"
+          @update:model-value="onSearchChange"
         />
         <v-select
           v-model="filterAccount"
@@ -39,8 +41,8 @@
           variant="outlined"
           hide-details
           clearable
-          style="min-width: 240px; flex: 0 1 240px;"
-          @update:model-value="reload"
+          style="min-width: 220px; flex: 0 1 220px;"
+          @update:model-value="onFilterChange"
         />
       </div>
     </v-card>
@@ -51,99 +53,65 @@
       density="compact"
       closable
       class="mb-3"
-      @click:close="error = ''"
     >{{ error }}</v-alert>
 
-    <!-- Summary chips -->
-    <div class="d-flex flex-wrap ga-2 mb-3">
-      <v-chip
-        v-for="state in (Object.keys(STATE_LABELS) as FriendshipState[])"
-        :key="state"
-        :color="STATE_COLORS[state]"
-        :prepend-icon="STATE_ICONS[state]"
-        variant="tonal"
-        size="small"
-      >
-        {{ STATE_LABELS[state] }}: {{ stateCounts[state] ?? 0 }}
-      </v-chip>
-    </div>
-
-    <v-card>
-      <v-data-table
-        :headers="headers"
-        :items="attempts"
-        :loading="loading"
-        no-data-text="Chưa có lời mời kết bạn nào"
-        density="comfortable"
-      >
-        <template #item.contact="{ item }">
-          <div class="d-flex align-center">
-            <v-avatar size="32" class="mr-2">
-              <v-img v-if="item.contact?.avatarUrl" :src="item.contact.avatarUrl" />
-              <v-icon v-else>mdi-account-circle</v-icon>
-            </v-avatar>
-            <div class="d-flex flex-column">
-              <span class="text-body-2">{{ item.contact?.fullName ?? '—' }}</span>
-              <span class="text-caption text-medium-emphasis">{{ item.contact?.phone ?? '' }}</span>
-            </div>
-          </div>
-        </template>
-        <template #item.state="{ item }">
-          <v-chip
-            :color="STATE_COLORS[item.state]"
-            :prepend-icon="STATE_ICONS[item.state]"
-            size="small"
-            variant="flat"
-          >{{ STATE_LABELS[item.state] }}</v-chip>
-        </template>
-        <template #item.zaloAccount="{ item }">
-          {{ item.zaloAccount?.displayName ?? '—' }}
-        </template>
-        <template #item.createdBy="{ item }">
-          {{ item.createdBy?.fullName ?? 'Hệ thống' }}
-        </template>
-        <template #item.queuedAt="{ item }">
-          {{ formatDate(item.queuedAt) }}
-        </template>
-        <template #item.actions="{ item }">
-          <v-btn
-            v-if="canCancel(item.state)"
-            icon="mdi-close-circle"
-            size="small"
-            variant="text"
-            color="error"
-            title="Huỷ"
-            @click="confirmCancel(item)"
-          />
-        </template>
-      </v-data-table>
-
-      <!-- Pagination -->
-      <div v-if="totalPages > 1" class="d-flex justify-center pa-3">
-        <v-pagination
-          v-model="currentPage"
-          :length="totalPages"
-          :total-visible="7"
-          @update:model-value="reload"
-        />
-      </div>
+    <!-- Empty state -->
+    <v-card
+      v-if="!loading && friends.length === 0"
+      class="pa-8 text-center"
+      variant="outlined"
+    >
+      <v-icon size="64" color="grey">mdi-account-multiple-outline</v-icon>
+      <h2 class="text-h6 mt-3">Chưa có bạn bè nào</h2>
+      <p class="text-body-2 text-medium-emphasis mt-2">
+        Thêm tài khoản Zalo và bắt đầu kết bạn để hiển thị danh sách ở đây.
+      </p>
+      <v-btn
+        color="primary"
+        prepend-icon="mdi-plus"
+        class="mt-3"
+        to="/zalo-accounts"
+      >Thêm tài khoản Zalo</v-btn>
     </v-card>
 
-    <!-- Cancel confirm -->
-    <v-dialog v-model="cancelDialogOpen" max-width="420">
-      <v-card>
-        <v-card-title>Xác nhận huỷ</v-card-title>
-        <v-card-text>
-          Huỷ lời mời kết bạn tới
-          <strong>{{ cancelTarget?.contact?.fullName ?? '?' }}</strong>?
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn @click="cancelDialogOpen = false">Đóng</v-btn>
-          <v-btn color="error" :loading="cancelling" @click="doCancel">Huỷ lời mời</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <!-- Loading skeleton -->
+    <v-row v-else-if="loading && friends.length === 0" dense>
+      <v-col
+        v-for="i in 6"
+        :key="i"
+        cols="12"
+        sm="6"
+        lg="4"
+      >
+        <v-skeleton-loader type="card" />
+      </v-col>
+    </v-row>
+
+    <!-- Grid -->
+    <v-row v-else dense>
+      <v-col
+        v-for="friend in friends"
+        :key="friend.id"
+        cols="12"
+        sm="6"
+        lg="4"
+      >
+        <FriendCard
+          :friend="friend"
+          @create-contact="onCreateContact"
+        />
+      </v-col>
+    </v-row>
+
+    <!-- Pagination -->
+    <div v-if="pagination.totalPages > 1" class="d-flex justify-center mt-4">
+      <v-pagination
+        v-model="currentPage"
+        :length="pagination.totalPages"
+        :total-visible="7"
+        @update:model-value="reload"
+      />
+    </div>
 
     <v-snackbar v-model="toast.show" :color="toast.color" timeout="3000">
       {{ toast.text }}
@@ -152,104 +120,99 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
-import {
-  useFriendship,
-  STATE_LABELS,
-  STATE_COLORS,
-  STATE_ICONS,
-  type FriendshipAttempt,
-  type FriendshipState,
-} from '@/composables/use-friendship';
+import { computed, onMounted, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
+import FriendCard from '@/components/friends/FriendCard.vue';
+import { useFriends, type FriendListItem } from '@/composables/use-friends';
 import { useZaloAccounts } from '@/composables/use-zalo-accounts';
 
+const router = useRouter();
+
 const {
-  attempts,
-  totalPages,
+  friends,
+  pagination,
   loading,
   error,
-  fetchAttempts,
-  cancelAttempt,
-} = useFriendship();
+  total,
+  fetchFriends,
+} = useFriends();
 
 const { accounts, fetchAccounts } = useZaloAccounts();
 
-const filterStates = ref<FriendshipState[]>([]);
+const searchQuery = ref('');
 const filterAccount = ref<string | null>(null);
 const currentPage = ref(1);
-const cancelDialogOpen = ref(false);
-const cancelTarget = ref<FriendshipAttempt | null>(null);
-const cancelling = ref(false);
 const toast = ref({ show: false, text: '', color: 'success' });
 
-const STATE_OPTIONS = (Object.keys(STATE_LABELS) as FriendshipState[]).map((s) => ({
-  title: STATE_LABELS[s],
-  value: s,
-}));
-
-const accountOptions = computed(() => [
-  ...accounts.value.map((a) => ({
+const accountOptions = computed(() =>
+  accounts.value.map((a) => ({
     title: a.displayName ?? 'Không tên',
     value: a.id,
   })),
-]);
+);
 
-const headers = [
-  { title: 'Khách hàng', key: 'contact', sortable: false },
-  { title: 'Trạng thái', key: 'state' },
-  { title: 'Zalo', key: 'zaloAccount' },
-  { title: 'Người tạo', key: 'createdBy' },
-  { title: 'Tạo lúc', key: 'queuedAt' },
-  { title: '', key: 'actions', sortable: false, align: 'end' as const, width: 60 },
-];
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
-// Per-state counts derived from the current page (cheap; full counts would
-// require a separate aggregate endpoint).
-const stateCounts = computed(() => {
-  const out: Partial<Record<FriendshipState, number>> = {};
-  for (const a of attempts.value) {
-    out[a.state] = (out[a.state] ?? 0) + 1;
-  }
-  return out;
-});
-
-function canCancel(state: FriendshipState): boolean {
-  return state === 'queued' || state === 'looking_up';
+function onSearchChange() {
+  // Debounce search input → reset to page 1 then reload.
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    currentPage.value = 1;
+    reload();
+  }, 300);
 }
 
-function confirmCancel(item: FriendshipAttempt) {
-  cancelTarget.value = item;
-  cancelDialogOpen.value = true;
-}
-
-async function doCancel() {
-  if (!cancelTarget.value) return;
-  cancelling.value = true;
-  const r = await cancelAttempt(cancelTarget.value.id);
-  cancelling.value = false;
-  cancelDialogOpen.value = false;
-  if (r.ok) {
-    toast.value = { show: true, text: 'Đã huỷ lời mời', color: 'success' };
-    await reload();
-  } else {
-    toast.value = { show: true, text: r.error, color: 'error' };
-  }
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString('vi-VN');
+function onFilterChange() {
+  currentPage.value = 1;
+  reload();
 }
 
 async function reload() {
-  await fetchAttempts({
-    state: filterStates.value.length > 0 ? filterStates.value : undefined,
-    zaloAccountId: filterAccount.value ?? undefined,
+  await fetchFriends({
+    accountId: filterAccount.value ?? undefined,
+    search: searchQuery.value,
     page: currentPage.value,
-    limit: 50,
+    perPage: 24,
   });
 }
+
+function onCreateContact(friend: FriendListItem) {
+  // EC-0002 — friend without a CRM contact: send to Contacts page with
+  // a prefill payload so the user can fill in the rest. The Contacts page
+  // is in charge of handling the query string today; for now we just
+  // surface a hint and route them there.
+  toast.value = {
+    show: true,
+    text: 'Đang chuyển sang trang Khách hàng để tạo Contact mới…',
+    color: 'info',
+  };
+  router.push({
+    path: '/contacts',
+    query: {
+      prefillName: friend.displayName ?? '',
+      prefillZaloUid: friend.zaloUid,
+    },
+  });
+}
+
+// Re-sync the local page ref if the server rounds it down (e.g. last page
+// became empty after a search). Stays purely defensive.
+watch(
+  () => pagination.value.page,
+  (p) => {
+    currentPage.value = p;
+  },
+);
 
 onMounted(async () => {
   await Promise.all([fetchAccounts(), reload()]);
 });
 </script>
+
+<style scoped>
+.friends-page {
+  /* Keep the page comfortable on wide screens without ballooning card sizes. */
+  max-width: 1400px;
+  margin: 0 auto;
+}
+</style>

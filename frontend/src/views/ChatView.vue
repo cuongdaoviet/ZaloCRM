@@ -1,7 +1,13 @@
 <template>
-  <div class="chat-container d-flex" style="height: calc(100vh - 64px);">
-    <!-- Conversation list — resizable -->
-    <div class="chat-panel-left" :style="{ width: leftWidth + 'px' }">
+  <div
+    class="chat-container d-flex"
+    :class="{ 'chat-container--mobile-thread': isMobile && hasSelection }"
+    style="height: calc(100vh - 64px);"
+  >
+    <!-- Conversation list — fixed 320px rail (BR-0001, AC-0001). On mobile
+         (< 768px, EC-0003) the rail covers the full screen until a row is
+         selected; opening a conversation slides the thread into view. -->
+    <div class="chat-panel-left">
       <ConversationList
         :conversations="conversations"
         :selected-id="selectedConvId"
@@ -26,29 +32,41 @@
         @update:tab="onTabChange"
         @set-conv-tab="onSetConvTab"
       />
-      <!-- Resize handle -->
-      <div class="resize-handle" @mousedown="startResize('left', $event)" />
     </div>
 
-    <!-- Message thread — flexible center -->
-    <MessageThread
-      :conversation="selectedConv"
-      :messages="messages"
-      :loading="loadingMsgs"
-      :sending="sendingMsg"
-      :is-pinned="selectedConv ? pinnedIds.has(selectedConv.id) : false"
-      :self-user-id="selfUserId ?? null"
-      :on-react="addOrToggleReaction"
-      @send="sendMessage"
-      @send-attachment="onSendAttachment"
-      @toggle-contact-panel="showContactPanel = !showContactPanel"
-      @toggle-pin="onTogglePinHeader"
-      @appointment-suggest="onAppointmentSuggest"
-      @create-contact-from-zalo="onCreateContactFromZalo"
-      @open-contact="onOpenContactFromZalo"
-      :show-contact-panel="showContactPanel"
-      style="flex: 1; min-width: 300px;"
-    />
+    <!-- Message thread — flexible center.
+         Feature 0042: wrapped in .chat-panel-thread so the mobile back bar
+         (EC-0003) stacks above the thread. Preserves the Feature 0030 Zalo
+         popover handlers (@create-contact-from-zalo / @open-contact). -->
+    <div class="chat-panel-thread">
+      <!-- Mobile back button — only visible while the thread is in view -->
+      <div v-if="isMobile && hasSelection" class="chat-mobile-back-bar">
+        <v-btn
+          variant="text"
+          density="comfortable"
+          prepend-icon="mdi-arrow-left"
+          @click="onMobileBack"
+        >Cuộc trò chuyện</v-btn>
+      </div>
+      <MessageThread
+        :conversation="selectedConv"
+        :messages="messages"
+        :loading="loadingMsgs"
+        :sending="sendingMsg"
+        :is-pinned="selectedConv ? pinnedIds.has(selectedConv.id) : false"
+        :self-user-id="selfUserId ?? null"
+        :on-react="addOrToggleReaction"
+        @send="sendMessage"
+        @send-attachment="onSendAttachment"
+        @toggle-contact-panel="showContactPanel = !showContactPanel"
+        @toggle-pin="onTogglePinHeader"
+        @appointment-suggest="onAppointmentSuggest"
+        @create-contact-from-zalo="onCreateContactFromZalo"
+        @open-contact="onOpenContactFromZalo"
+        :show-contact-panel="showContactPanel"
+        style="flex: 1; min-width: 0;"
+      />
+    </div>
 
     <!-- Feature 0030 — reusing ContactDetailDialog for the "Tạo Contact" flow
          from the Zalo user popover so we don't duplicate the form logic. -->
@@ -61,7 +79,7 @@
 
     <!-- Contact panel — resizable -->
     <div v-if="showContactPanel && selectedConv?.contact" class="chat-panel-right" :style="{ width: rightWidth + 'px' }">
-      <div class="resize-handle resize-handle-left" @mousedown="startResize('right', $event)" />
+      <div class="resize-handle resize-handle-left" @mousedown="startResize($event)" />
       <ChatContactPanel
         :contact-id="selectedConv.contact.id"
         :conversation-id="selectedConv.id"
@@ -86,7 +104,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import ConversationList from '@/components/chat/ConversationList.vue';
 import MessageThread from '@/components/chat/MessageThread.vue';
@@ -225,18 +243,19 @@ async function onCreateConversation(params: { accountId: string; contactId: stri
   await createConversation(params.accountId, params.contactId);
 }
 
-// Resizable panel widths (restored from localStorage)
-const leftWidth = ref(parseInt(localStorage.getItem('chat-left-width') || '320'));
+// Feature 0042 — fixed 320px rail (BR-0001). Only the right contact panel
+// remains user-resizable (keeps message thread comfortable when you have
+// long contact notes).
 const rightWidth = ref(parseInt(localStorage.getItem('chat-right-width') || '320'));
 
-let resizing: 'left' | 'right' | null = null;
+let resizing = false;
 let startX = 0;
 let startWidth = 0;
 
-function startResize(panel: 'left' | 'right', e: MouseEvent) {
-  resizing = panel;
+function startResize(e: MouseEvent) {
+  resizing = true;
   startX = e.clientX;
-  startWidth = panel === 'left' ? leftWidth.value : rightWidth.value;
+  startWidth = rightWidth.value;
   document.addEventListener('mousemove', onResize);
   document.addEventListener('mouseup', stopResize);
   document.body.style.cursor = 'col-resize';
@@ -246,23 +265,34 @@ function startResize(panel: 'left' | 'right', e: MouseEvent) {
 function onResize(e: MouseEvent) {
   if (!resizing) return;
   const diff = e.clientX - startX;
-  if (resizing === 'left') {
-    leftWidth.value = Math.max(200, Math.min(500, startWidth + diff));
-  } else {
-    rightWidth.value = Math.max(250, Math.min(500, startWidth - diff));
-  }
+  // Drag handle is on the LEFT edge of the right panel, so growing the
+  // panel means dragging leftward (diff < 0).
+  rightWidth.value = Math.max(250, Math.min(500, startWidth - diff));
 }
 
 function stopResize() {
   if (resizing) {
-    localStorage.setItem('chat-left-width', String(leftWidth.value));
     localStorage.setItem('chat-right-width', String(rightWidth.value));
   }
-  resizing = null;
+  resizing = false;
   document.removeEventListener('mousemove', onResize);
   document.removeEventListener('mouseup', stopResize);
   document.body.style.cursor = '';
   document.body.style.userSelect = '';
+}
+
+// Feature 0042 — mobile pane switching (EC-0003). Under 768px the rail and
+// thread occupy the full screen one at a time. Selecting a row reveals the
+// thread; the back button clears the selection to slide back to the list.
+const isMobile = ref(false);
+const hasSelection = computed(() => selectedConvId.value !== null);
+
+function updateMobile() {
+  isMobile.value = typeof window !== 'undefined' && window.innerWidth < 768;
+}
+
+function onMobileBack() {
+  selectedConvId.value = null;
 }
 
 onMounted(() => {
@@ -272,8 +302,13 @@ onMounted(() => {
   fetchConversationCounts();
   fetchPinned();
   initSocket();
+  updateMobile();
+  window.addEventListener('resize', updateMobile);
 });
-onUnmounted(() => { destroySocket(); });
+onUnmounted(() => {
+  destroySocket();
+  window.removeEventListener('resize', updateMobile);
+});
 
 // Keep selfUserId in sync if auth profile lands AFTER ChatView mounts
 // (e.g. token rehydrate races with route navigation).
@@ -292,13 +327,32 @@ watch(searchQuery, () => {
 <style scoped>
 .chat-container {
   margin: -12px;
+  position: relative;
 }
 
+/* Feature 0042 — fixed 320px rail (BR-0001 / AC-0001). */
 .chat-panel-left {
   position: relative;
   flex-shrink: 0;
-  min-width: 200px;
-  max-width: 500px;
+  width: 320px;
+  border-right: 1px solid var(--smax-grey-200, rgba(0,0,0,0.08));
+  background: var(--smax-bg, #ffffff);
+}
+
+.chat-panel-thread {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.chat-mobile-back-bar {
+  display: none;
+  align-items: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--smax-grey-200, rgba(0,0,0,0.08));
+  background: var(--smax-bg, #ffffff);
 }
 
 .chat-panel-right {
@@ -308,11 +362,10 @@ watch(searchQuery, () => {
   max-width: 500px;
 }
 
-/* Resize handle — thin vertical line on the edge */
+/* Resize handle — thin vertical line on the left edge of the right panel */
 .resize-handle {
   position: absolute;
   top: 0;
-  right: -2px;
   width: 5px;
   height: 100%;
   cursor: col-resize;
@@ -327,7 +380,32 @@ watch(searchQuery, () => {
 }
 
 .resize-handle-left {
-  right: auto;
   left: -2px;
+}
+
+/* Feature 0042 — EC-0003 mobile breakpoint. Below 768px the rail and
+   thread fill the full viewport one at a time. The active mode is
+   controlled by the `chat-container--mobile-thread` modifier. */
+@media (max-width: 767.98px) {
+  .chat-panel-left {
+    width: 100%;
+    border-right: none;
+  }
+  .chat-panel-thread {
+    display: none;
+  }
+  .chat-panel-right {
+    display: none;
+  }
+  .chat-container--mobile-thread .chat-panel-left {
+    display: none;
+  }
+  .chat-container--mobile-thread .chat-panel-thread {
+    display: flex;
+    width: 100%;
+  }
+  .chat-mobile-back-bar {
+    display: flex;
+  }
 }
 </style>

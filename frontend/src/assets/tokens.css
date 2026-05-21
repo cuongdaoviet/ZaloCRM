@@ -56,6 +56,19 @@
   --smax-radius-lg: 9px;
   --smax-radius-xl: 13px;
   --smax-topnav-h: 52px;
+
+  /* Feature 0042 — primary-100 soft for active highlight (BR-0004) */
+  --smax-primary-100: #e3f2fd;
+
+  /* Feature 0042 — layout dimensions for the 3-page refactor */
+  --smax-chat-rail-w: 320px;        /* BR-0001 */
+  --smax-conv-row-h: 64px;          /* BR-0002 */
+  --smax-row-height-dense: 40px;    /* BR-0005 */
+
+  /* Feature 0042 — unread badge (BR-0003) */
+  --smax-badge-unread-bg: var(--smax-error);
+  --smax-badge-unread-fg: #ffffff;
+  --smax-badge-unread-size: 20px;
 }
 
 /* ════════ Helper utility classes ════════ */
