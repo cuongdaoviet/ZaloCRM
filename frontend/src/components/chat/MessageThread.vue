@@ -1677,7 +1677,6 @@ onBeforeUnmount(() =>
   height: 100%;
 }
 
-<<<<<<< HEAD
 /* ── Feature 0026 — mention chip render inside message bubble ──────────── */
 .message-text {
   white-space: pre-wrap;
@@ -1708,7 +1707,8 @@ onBeforeUnmount(() =>
 .bg-primary .mention-chip--unknown {
   background: rgba(255, 255, 255, 0.15);
   color: rgba(255, 255, 255, 0.75);
-=======
+}
+
 /* ── Feature 0028 — sticker composer + inline render ───────────────────── */
 .sticker-launcher {
   position: relative;
@@ -1729,7 +1729,6 @@ onBeforeUnmount(() =>
   max-height: 160px;
   display: block;
   background: transparent;
->>>>>>> c43f863 (feat: Feature 0028 — sticker support (finisher: picker + FE tests))
 }
 
 /* ── Feature 0031 — reply / quote bubble + composer banner ───────────────── */
