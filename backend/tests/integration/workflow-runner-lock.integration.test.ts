@@ -218,3 +218,156 @@ describe('AC-0005: workflow-runner uses FOR UPDATE SKIP LOCKED', () => {
     expect(lockedFinal?.currentStepIdx).toBe(1);
   }, 30_000);
 });
+
+describe('AC-0007: per-row error isolation inside the worker batch', () => {
+  beforeEach(async () => {
+    await resetDb(prisma);
+    vi.clearAllMocks();
+  });
+
+  /**
+   * SPEC 0045 §6 AC-0007 + BR-0005 — a single step failure inside the
+   * batch must NOT roll back the whole transaction. The batch commits
+   * with the per-row state changes still in place: rows that ran fine
+   * advance + complete, the failing row is marked `failed` with an
+   * error appended to its stepLog.
+   *
+   * Test shape: seed 3 due executions in the same org, force the
+   * middle row's step executor to throw, drive a single
+   * `runDueExecutions()`. Assert rows 1 and 3 are `completed` while
+   * row 2 is `failed` with a stepLog entry — proving the batch
+   * transaction committed all three updates atomically.
+   */
+  it(
+    'one failing row does not poison the other rows in the batch',
+    async () => {
+      const s = await seed('per-row-iso');
+
+      // Three workflows, three executions. Rows 1 and 3 run the
+      // (always-succeeding) add_tag step; row 2 runs send_message
+      // which is wired to throw via `sendMessageMock.mockRejectedValueOnce`.
+      const wfOk1 = await prisma.workflowDefinition.create({
+        data: {
+          orgId: s.orgId,
+          name: 'PerRowOk1',
+          isActive: true,
+          trigger: { type: 'inbound_message' },
+          steps: [{ type: 'add_tag', tag: 'iso-1' }],
+        },
+      });
+      const wfFail = await prisma.workflowDefinition.create({
+        data: {
+          orgId: s.orgId,
+          name: 'PerRowFail',
+          isActive: true,
+          trigger: { type: 'inbound_message' },
+          steps: [{ type: 'send_message', content: 'fail-here' }],
+        },
+      });
+      const wfOk2 = await prisma.workflowDefinition.create({
+        data: {
+          orgId: s.orgId,
+          name: 'PerRowOk2',
+          isActive: true,
+          trigger: { type: 'inbound_message' },
+          steps: [{ type: 'add_tag', tag: 'iso-3' }],
+        },
+      });
+
+      // Stagger `nextStepDueAt` so the ORDER BY next_step_due_at ASC
+      // claim returns the rows in (ok1, fail, ok2) order — matches the
+      // SPEC's "row 1, row 2, row 3" framing.
+      const now = Date.now();
+      const okId1 = (
+        await prisma.workflowExecution.create({
+          data: {
+            orgId: s.orgId,
+            workflowId: wfOk1.id,
+            contactId: s.contactId,
+            conversationId: s.conversationId,
+            status: 'running',
+            currentStepIdx: 0,
+            nextStepDueAt: new Date(now - 3000),
+          },
+        })
+      ).id;
+      const failId = (
+        await prisma.workflowExecution.create({
+          data: {
+            orgId: s.orgId,
+            workflowId: wfFail.id,
+            contactId: s.contactId,
+            conversationId: s.conversationId,
+            status: 'running',
+            currentStepIdx: 0,
+            nextStepDueAt: new Date(now - 2000),
+          },
+        })
+      ).id;
+      const okId2 = (
+        await prisma.workflowExecution.create({
+          data: {
+            orgId: s.orgId,
+            workflowId: wfOk2.id,
+            contactId: s.contactId,
+            conversationId: s.conversationId,
+            status: 'running',
+            currentStepIdx: 0,
+            nextStepDueAt: new Date(now - 1000),
+          },
+        })
+      ).id;
+
+      // Only the FAIL row's step calls sendMessage. mockRejectedValueOnce
+      // means the first (and only) call throws. The two add_tag rows
+      // don't touch zca-js at all.
+      sendMessageMock.mockRejectedValueOnce(new Error('boom in middle row'));
+
+      const { runDueExecutions } = await import(
+        '../../src/workers/workflow-runner.js'
+      );
+      await runDueExecutions();
+
+      // Row 1 (add_tag) — completed, step advanced.
+      const ok1 = await prisma.workflowExecution.findUnique({
+        where: { id: okId1 },
+      });
+      expect(ok1?.status).toBe('completed');
+      expect(ok1?.currentStepIdx).toBe(1);
+
+      // Row 2 (send_message that threw) — failed, stepLog has error entry.
+      const fail = await prisma.workflowExecution.findUnique({
+        where: { id: failId },
+      });
+      expect(fail?.status).toBe('failed');
+      const failLog = fail?.stepLog as unknown as Array<{
+        status: string;
+        error?: string;
+      }>;
+      expect(failLog).toHaveLength(1);
+      expect(failLog[0].status).toBe('failed');
+      expect(failLog[0].error).toContain('boom in middle row');
+
+      // Row 3 (add_tag) — completed, step advanced. THIS is the key
+      // assertion: the row AFTER the failing one still got committed,
+      // proving BR-0005's per-row error isolation works end-to-end.
+      const ok2 = await prisma.workflowExecution.findUnique({
+        where: { id: okId2 },
+      });
+      expect(ok2?.status).toBe('completed');
+      expect(ok2?.currentStepIdx).toBe(1);
+
+      // Belt-and-suspenders: the add_tag executor for each ok row should
+      // have created its ContactTag link, proving those writes also
+      // committed (i.e. the failing row didn't roll back the batch's
+      // tag writes either).
+      const tags = await prisma.crmTag.findMany({
+        where: { orgId: s.orgId },
+        select: { normalizedName: true },
+      });
+      const tagNames = tags.map((t) => t.normalizedName).sort();
+      expect(tagNames).toEqual(['iso-1', 'iso-3']);
+    },
+    30_000,
+  );
+});
