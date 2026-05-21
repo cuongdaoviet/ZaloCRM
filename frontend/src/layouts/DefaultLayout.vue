@@ -143,6 +143,7 @@ const menuItems: MenuItem[] = [
   { title: 'Đơn hàng', icon: 'mdi-cart-outline', path: '/orders' },
   { title: 'Báo cáo', icon: 'mdi-chart-arc', path: '/reports' },
   { title: 'KPI & Leaderboard', icon: 'mdi-trophy-outline', path: '/kpi', adminOnly: true },
+  { title: 'Phân tích nâng cao', icon: 'mdi-chart-timeline-variant', path: '/analytics', adminOnly: true },
   { title: 'Chiến dịch', icon: 'mdi-bullhorn-outline', path: '/campaigns', adminOnly: true },
   { title: 'Bạn bè', icon: 'mdi-account-multiple-outline', path: '/friends' },
   { title: 'Kết bạn', icon: 'mdi-account-multiple-plus-outline', path: '/friendship-attempts' },
