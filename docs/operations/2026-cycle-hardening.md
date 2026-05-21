@@ -269,49 +269,71 @@ token + every Telegram bot token.**
 
 ## Part 5 — Phase 2 backlog (captured here so we don't lose them)
 
-Each shipped feature has a "Phase 2" section in its SPEC. Highlights:
+**All 19 features from this cycle are SHIPPED.** This section lists
+*follow-up work* that each shipped feature explicitly deferred (see
+each feature's SPEC "Out of scope (Phase 2)" section). These are
+follow-ups to shipped features, not pending features.
 
-- **0027** — retention policy, orphan sweep, signed URLs, per-org buckets,
-  dedup, FE storage dashboard.
-- **0028** — full sticker catalogue browser, custom uploads, favorites,
-  search.
-- **0029** — outbound bank card composer, non-bank zinstants, QR scan.
-- **0031** — forward message, quote thread expansion, group reply with
-  @mention auto-add.
-- **0033** — denorm aggregates if perf drops; trend chart; per-user
-  breakdown.
-- **0034** — auto-merge on globalId match, backfill historical contacts.
-- **0035** — proxy health check, failover pool, org-level default,
-  audit log, encryption-at-rest.
-- **0037** — branching, time-based triggers, more step types, multi-
-  process worker (`SKIP LOCKED`).
-- **0040** — ML embedding score, time-decay weights, score history,
-  threshold alerts.
-- **0041** — report builder, cumulative funnel, CSV export, scheduled
-  email reports.
-- **0042** — drag-to-resize rails, custom column order, friends bulk
-  actions.
-- **0043** — service-worker offline cache, persistent prefetch across
-  reload, predictive prefetch.
-- **0036** — tone presets, per-rep prompt override, streaming responses,
-  suggestion ranking ML, voice transcription, image understanding,
-  master-key rotation tooling.
-- **0038** — Facebook Messenger, Zapier generic webhook, Slack,
-  WhatsApp Business, two-way Sheets sync, custom event templates,
-  cron-expression UI, couple workflow engine (0037) with integrations.
-- **0039** — PWA shell (manifest.json + service worker), offline mode +
-  outbound queue with conflict reconciliation, web push notifications,
-  native iOS/Android app (separate product call required).
+### Cross-cutting follow-ups (recommend first — they unblock scaling)
 
-### Cross-cutting phase-2 work
+These aren't tied to one feature but affect multiple shipped features:
 
-- **Master-key rotation** — `AI_CONFIG_MASTER_KEY` rotation requires
-  bulk re-encrypt migration today. Build tooling.
-- **Multi-process worker locks** — Features 0037 and 0038 both use
-  module-level `tickRunning` singleton flag. Migrate to Postgres
-  `SELECT FOR UPDATE SKIP LOCKED` when we scale to >1 backend process.
-- **API.md refresh** — many new endpoints from this cycle aren't in
-  the design doc yet.
+- **Master-key rotation tooling** — `AI_CONFIG_MASTER_KEY` rotation
+  today requires a bulk re-encrypt migration. Build proper rotation
+  flow (dual-key read window, batched re-encrypt, retirement). Loss
+  of this key forfeits every BYOK provider key + OAuth refresh token
+  + Telegram bot token.
+- **Multi-process worker locks** — Features 0037 (workflow runner) and
+  0038 (integration runner) both use module-level `tickRunning`
+  singleton flag. Works for 1 backend process; breaks silently with
+  2+. Migrate to Postgres `SELECT FOR UPDATE SKIP LOCKED` before
+  horizontal scaling.
+- **API.md refresh** — Many new endpoints from this cycle aren't in
+  `docs/design/API.md` yet (see Part 4 for the list).
+
+### Follow-ups to shipped features
+
+Format: `<feature-id> — <feature name>: <deferred items>`.
+
+- **0027 (MinIO attachment mirror)** — retention policy, orphan sweep
+  job, signed URLs, per-org buckets, dedup, FE storage dashboard,
+  backfill of pre-0027 Zalo CDN URLs.
+- **0028 (Sticker support)** — full catalogue browser, custom uploads,
+  favorites, search.
+- **0029 (Bank/QR zinstant render)** — outbound composer, non-bank
+  zinstants, QR scan.
+- **0031 (Reply/quote)** — forward message, quote thread expansion,
+  group reply with @mention auto-add.
+- **0033 (Friend aggregates)** — denormalize aggregates if perf drops,
+  trend chart, per-user breakdown.
+- **0034 (Contact merge by globalId)** — auto-merge on match (today is
+  detection-only), backfill historical contacts.
+- **0035 (Per-account proxy)** — proxy health check, failover pool,
+  org-level default, audit log, encryption-at-rest for proxy URL.
+- **0036 (AI suggestions)** — tone presets, per-rep prompt override,
+  streaming responses, suggestion ranking ML, voice transcription,
+  image understanding.
+- **0037 (Workflow engine)** — branching (if/else), time-based triggers
+  (`after_no_reply_24h`), more step types (create_appointment,
+  webhook_call), workflow templates marketplace.
+- **0038 (Integration Hub)** — Facebook Messenger connector (biggest
+  scope), Zapier generic webhook, Slack, WhatsApp Business, two-way
+  Sheets sync, custom event templates, cron-expression UI, **couple
+  workflow engine (0037) actions with integrations** (3.0 missed this).
+- **0039 (Mobile responsive)** — PWA shell (manifest.json + service
+  worker), offline mode + outbound queue with conflict reconciliation,
+  web push notifications, native iOS/Android app (separate product
+  call required — PWA is a half-measure).
+- **0040 (Lead scoring)** — ML embedding score, time-decay weights,
+  score history, threshold alerts.
+- **0041 (Advanced analytics)** — report builder (visual query
+  designer), cumulative funnel with status history, CSV/Excel export,
+  scheduled email reports.
+- **0042 (UI refactor Smax)** — drag-to-resize rails, custom column
+  order on Contacts, friends bulk actions.
+- **0043 (Conversation switching perf)** — service-worker offline
+  cache, persistent prefetch across reload, predictive prefetch (which
+  conversation is the rep likely to open next).
 
 ---
 
