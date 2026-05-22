@@ -104,6 +104,33 @@ html, body {
 .v-application .v-btn--size-x-small { font-size: 12px; }
 .v-application .v-btn--size-small   { font-size: 13px; }
 
+/* v-btn-toggle — Vuetify default collapses adjacent borders + radii so
+   the children look like a fused segmented control. User wanted each
+   button to read as its own pill. Apply globally so every toggle group
+   (KPI leaderboard metric, WebhookDebugPanel status filter, Campaign
+   status filter, …) gets consistent breathing room. */
+.v-application .v-btn-toggle {
+  gap: 6px;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.v-application .v-btn-toggle > .v-btn {
+  border-radius: 7px !important;
+  margin: 0 !important;
+  border: 1px solid rgba(var(--v-border-color), 0.4) !important;
+  min-width: auto;
+}
+.v-application .v-btn-toggle > .v-btn--active {
+  border-color: rgb(var(--v-theme-primary)) !important;
+}
+/* Dark theme — soften the border against the dark surface */
+.v-theme--legacy-dark .v-btn-toggle > .v-btn {
+  border-color: var(--dark-border) !important;
+}
+.v-theme--legacy-dark .v-btn-toggle > .v-btn--active {
+  border-color: var(--dark-primary) !important;
+}
+
 /* Card titles — Vuetify default 1.25rem (20px) bold. That equals our
    page title, which means dialog titles compete with the H1 above them.
    Drop card-title to 16px / 600 so dialog headers read as a section,
