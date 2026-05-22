@@ -217,7 +217,7 @@ const menuGroups: MenuGroup[] = [
   },
   {
     id: 'marketing',
-    label: 'Marketing & Automation',
+    label: 'Marketing',
     icon: 'mdi-bullhorn-outline',
     items: [
       { title: 'Chiến dịch', icon: 'mdi-bullhorn-outline', path: '/campaigns', adminOnly: true },
