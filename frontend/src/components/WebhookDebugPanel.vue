@@ -87,7 +87,8 @@
               <span v-if="detail.errorMessage" class="text-error"> · {{ detail.errorMessage }}</span><br>
             <strong>Duration:</strong> {{ detail.durationMs != null ? `${detail.durationMs}ms` : '—' }}<br>
             <strong>Signature:</strong>
-            <code style="font-size: 11px;">{{ detail.signature || '—' }}</code>
+            <!-- Feature 0052b — bumped from inline 11px to text-caption (12px). -->
+            <code class="text-caption">{{ detail.signature || '—' }}</code>
           </div>
           <div class="text-body-2"><strong>Payload:</strong></div>
           <pre class="payload-pre">{{ prettyJson(detail.payload) }}</pre>
@@ -169,10 +170,11 @@ onMounted(() => reload(1));
 
 <style scoped>
 .payload-pre {
+  /* Feature 0052b — bumped from 11px to 12px (text-caption floor). */
   background: rgba(0, 0, 0, 0.04);
   padding: 8px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 12px;
   max-height: 400px;
   overflow: auto;
   white-space: pre-wrap;

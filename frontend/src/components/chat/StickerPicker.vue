@@ -201,7 +201,8 @@ onMounted(loadCatalogues);
   overflow-x: auto;
 }
 .sticker-picker__tab {
-  font-size: 0.75rem;
+  /* Feature 0052b — 0.75rem == 12px (text-caption). Pinned to px. */
+  font-size: 12px;
   padding: 4px 10px;
   border-radius: 999px;
   border: 1px solid rgba(0, 0, 0, 0.08);
@@ -248,7 +249,8 @@ onMounted(loadCatalogues);
   display: block;
 }
 .sticker-picker__placeholder {
-  font-size: 0.65rem;
+  /* Feature 0052b — bumped 0.65rem (10.4px) → 12px (text-caption floor). */
+  font-size: 12px;
   color: rgba(0, 0, 0, 0.5);
 }
 

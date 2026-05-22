@@ -61,7 +61,9 @@
     <v-card>
       <v-card-title class="text-body-1">API Documentation</v-card-title>
       <v-card-text>
-        <pre style="font-size: 12px; overflow-x: auto; white-space: pre-wrap;">Header: X-API-Key: your-key
+        <!-- Feature 0052b — moved inline font-size:12px (caption) into a
+             scoped class so the API docs block is on the scale. -->
+        <pre class="api-docs-pre">Header: X-API-Key: your-key
 
 GET  /api/public/contacts
 POST /api/public/contacts
@@ -176,3 +178,12 @@ onMounted(async () => {
   await Promise.all([loadApiKey(), loadWebhook()]);
 });
 </script>
+
+<style scoped>
+/* Feature 0052b — caption-floor (12px) for the API docs <pre>. */
+.api-docs-pre {
+  font-size: 12px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+</style>

@@ -208,7 +208,7 @@
           >
             <v-icon size="16">mdi-pin-outline</v-icon>
           </v-btn>
-          <span v-if="conv.zaloAccount?.displayName" class="text-caption text-grey-darken-1 ml-1" style="font-size: 0.65rem; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+          <span v-if="conv.zaloAccount?.displayName" class="text-caption text-grey-darken-1 ml-1 conv-zalo-name">
             {{ conv.zaloAccount.displayName }}
           </span>
         </template>
@@ -568,10 +568,12 @@ function formatTime(dateStr: string | null): string {
   opacity: 1;
 }
 
-/* Feature 0023 — tighten the tab bar so it fits the slim Smax-light header. */
+/* Feature 0023 — tighten the tab bar so it fits the slim Smax-light header.
+   Feature 0052b — font-size pinned to text-body-2 (14px) so the tab labels
+   sit on the typography scale instead of the prior 13.6px ad-hoc value. */
 .conv-tabs :deep(.v-tab) {
   min-width: 0;
-  font-size: 0.85rem;
+  font-size: 14px;
   letter-spacing: 0;
   text-transform: none;
 }
@@ -631,8 +633,21 @@ function formatTime(dateStr: string | null): string {
   pointer-events: none;
 }
 
+/* Feature 0052b — 12px is text-caption (in-scale). Kept as a class-scoped
+   rule (not inline) so the rest of the list row keeps the body-2 default. */
 .conversation-preview {
   max-width: 220px;
   font-size: 12px;
+}
+
+/* Feature 0052b — the muted Zalo account name next to the row title used
+   to be inline `font-size: 0.65rem` (10.4px), well below the 12px caption
+   floor. The text-caption class on the span owns the size now (12px); this
+   class only constrains its width so it can't blow out the row. */
+.conv-zalo-name {
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>
