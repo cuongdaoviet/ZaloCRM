@@ -133,6 +133,7 @@
                       </div>
                       <v-btn v-if="getFileInfo(msg)!.href" icon size="x-small" variant="text" @click="openFile(getFileInfo(msg)!.href)">
                         <v-icon size="16">mdi-download</v-icon>
+                        <v-tooltip activator="parent" location="top" text="Tải file" />
                       </v-btn>
                     </div>
                     <div v-else-if="msg.contentType === 'sticker'">🏷️ Sticker</div>
@@ -279,6 +280,7 @@
                   </div>
                   <v-btn v-if="getFileInfo(msg)!.href" icon size="x-small" variant="text" @click="openFile(getFileInfo(msg)!.href)">
                     <v-icon size="16">mdi-download</v-icon>
+                    <v-tooltip activator="parent" location="top" text="Tải file" />
                   </v-btn>
                 </div>
                 <!-- Sticker (feature 0028) — render inline image when we
@@ -480,6 +482,7 @@
           </div>
           <v-btn icon size="small" variant="text" @click="clearPending" :disabled="sending">
             <v-icon>mdi-close</v-icon>
+            <v-tooltip activator="parent" location="top" text="Bỏ file đính kèm" />
           </v-btn>
         </v-card>
       </div>

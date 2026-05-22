@@ -45,8 +45,9 @@
       <v-btn color="primary" class="mr-2" :loading="loading" @click="reload">
         Áp dụng
       </v-btn>
-      <v-btn icon variant="text" :loading="loading" title="Tải lại" @click="reload">
+      <v-btn icon variant="text" :loading="loading" @click="reload">
         <v-icon>mdi-refresh</v-icon>
+        <v-tooltip activator="parent" location="bottom" text="Tải lại" />
       </v-btn>
     </div>
 

@@ -51,45 +51,50 @@
              color="primary" because it's the active CTA when an account isn't
              yet connected. -->
         <template #item.actions="{ item }">
-          <v-btn v-if="authStore.isAdmin" icon variant="text" size="small" title="Phân quyền truy cập" @click="openAccess(item)">
+          <v-btn v-if="authStore.isAdmin" icon variant="text" size="small" @click="openAccess(item)">
             <v-icon size="20">mdi-shield-account</v-icon>
+            <v-tooltip activator="parent" location="top" text="Phân quyền truy cập" />
           </v-btn>
-          <v-btn icon variant="text" size="small" @click="syncContacts(item.id)" title="Đồng bộ danh bạ Zalo" :loading="syncing === item.id">
+          <v-btn icon variant="text" size="small" @click="syncContacts(item.id)" :loading="syncing === item.id">
             <v-icon size="20">mdi-account-sync</v-icon>
+            <v-tooltip activator="parent" location="top" text="Đồng bộ danh bạ Zalo" />
           </v-btn>
           <v-btn
             v-if="authStore.isAdmin"
             icon variant="text" size="small"
             @click="openHistoryDialog(item)"
-            title="Đồng bộ lịch sử nhóm chat"
             :disabled="item.liveStatus !== 'connected'"
             :loading="syncingHistory === item.id">
             <v-icon size="20">mdi-history</v-icon>
+            <v-tooltip activator="parent" location="top" text="Đồng bộ lịch sử nhóm chat" />
           </v-btn>
           <v-btn
             v-if="authStore.isAdmin"
             icon variant="text" size="small"
             @click="openAutoReplyDialog(item)"
-            title="Cấu hình auto-reply ngoài giờ"
           >
             <v-icon size="20">mdi-message-reply-text-outline</v-icon>
+            <v-tooltip activator="parent" location="top" text="Cấu hình auto-reply ngoài giờ" />
           </v-btn>
           <v-btn
             v-if="authStore.isAdmin"
             icon variant="text" size="small"
             @click="openProxyDialog(item)"
-            title="Cấu hình proxy (HTTP/SOCKS5)"
           >
             <v-icon size="20">mdi-shield-link-variant-outline</v-icon>
+            <v-tooltip activator="parent" location="top" text="Cấu hình proxy (HTTP/SOCKS5)" />
           </v-btn>
-          <v-btn v-if="item.liveStatus !== 'connected'" icon variant="text" size="small" color="primary" @click="loginAccount(item.id)" title="Đăng nhập QR">
+          <v-btn v-if="item.liveStatus !== 'connected'" icon variant="text" size="small" color="primary" @click="loginAccount(item.id)">
             <v-icon size="20">mdi-qrcode</v-icon>
+            <v-tooltip activator="parent" location="top" text="Đăng nhập QR" />
           </v-btn>
-          <v-btn v-if="item.liveStatus === 'disconnected' && item.sessionData" icon variant="text" size="small" @click="reconnectAccount(item.id)" title="Kết nối lại">
+          <v-btn v-if="item.liveStatus === 'disconnected' && item.sessionData" icon variant="text" size="small" @click="reconnectAccount(item.id)">
             <v-icon size="20">mdi-refresh</v-icon>
+            <v-tooltip activator="parent" location="top" text="Kết nối lại" />
           </v-btn>
-          <v-btn icon variant="text" size="small" color="error" @click="confirmDelete(item)" title="Xóa">
+          <v-btn icon variant="text" size="small" color="error" @click="confirmDelete(item)">
             <v-icon size="20">mdi-delete</v-icon>
+            <v-tooltip activator="parent" location="top" text="Xóa" />
           </v-btn>
         </template>
       </v-data-table>

@@ -106,7 +106,10 @@
         <v-card-title class="d-flex align-center">
           Tạo lịch hẹn
           <v-spacer />
-          <v-btn icon="mdi-close" variant="text" @click="showCreateDialog = false" />
+          <v-btn variant="text" @click="showCreateDialog = false">
+            <v-icon>mdi-close</v-icon>
+            <v-tooltip activator="parent" location="bottom" text="Đóng" />
+          </v-btn>
         </v-card-title>
         <v-divider />
         <v-card-text>

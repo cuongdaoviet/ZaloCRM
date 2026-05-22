@@ -78,6 +78,7 @@
         </v-chip>
         <v-btn icon size="x-small" variant="text" color="primary" @click="startEdit(apt)">
           <v-icon size="12">mdi-pencil</v-icon>
+          <v-tooltip activator="parent" location="top" text="Sửa lịch hẹn" />
         </v-btn>
       </div>
 

@@ -54,6 +54,7 @@
               <template #append-inner>
                 <v-btn icon size="x-small" variant="text" @click="showApiKey = !showApiKey">
                   <v-icon>{{ showApiKey ? 'mdi-eye-off' : 'mdi-eye' }}</v-icon>
+                  <v-tooltip activator="parent" location="top" :text="showApiKey ? 'Ẩn API key' : 'Hiện API key'" />
                 </v-btn>
               </template>
             </v-text-field>

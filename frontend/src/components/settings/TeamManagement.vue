@@ -29,11 +29,13 @@
             </v-chip>
             <v-spacer />
             <template v-if="authStore.isAdmin">
-              <v-btn icon size="x-small" variant="text" class="mr-1" @click.stop="openEdit(team)" title="Sửa">
+              <v-btn icon size="x-small" variant="text" class="mr-1" @click.stop="openEdit(team)">
                 <v-icon>mdi-pencil</v-icon>
+                <v-tooltip activator="parent" location="top" text="Sửa" />
               </v-btn>
-              <v-btn icon size="x-small" variant="text" color="error" @click.stop="openDelete(team)" title="Xóa">
+              <v-btn icon size="x-small" variant="text" color="error" @click.stop="openDelete(team)">
                 <v-icon>mdi-delete</v-icon>
+                <v-tooltip activator="parent" location="top" text="Xóa" />
               </v-btn>
             </template>
           </div>

@@ -4,7 +4,10 @@
       <v-card-title class="d-flex align-center">
         <span>{{ isNew ? 'Thêm khách hàng' : 'Chi tiết khách hàng' }}</span>
         <v-spacer />
-        <v-btn icon="mdi-close" variant="text" @click="close" />
+        <v-btn variant="text" @click="close">
+          <v-icon>mdi-close</v-icon>
+          <v-tooltip activator="parent" location="bottom" text="Đóng" />
+        </v-btn>
       </v-card-title>
 
       <v-divider />

@@ -10,6 +10,7 @@
       <v-spacer />
       <v-btn icon size="small" variant="text" @click="$emit('close')">
         <v-icon>mdi-close</v-icon>
+        <v-tooltip activator="parent" location="left" text="Đóng" />
       </v-btn>
     </div>
 

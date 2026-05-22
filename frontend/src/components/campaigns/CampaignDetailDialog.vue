@@ -13,6 +13,7 @@
         <v-spacer />
         <v-btn icon variant="text" @click="$emit('update:modelValue', false)">
           <v-icon>mdi-close</v-icon>
+          <v-tooltip activator="parent" location="bottom" text="Đóng" />
         </v-btn>
       </v-card-title>
 
@@ -126,9 +127,11 @@
             </span>
             <v-btn icon size="small" variant="text" :disabled="targetsPage <= 1" @click="loadTargets(targetsPage - 1)">
               <v-icon>mdi-chevron-left</v-icon>
+              <v-tooltip activator="parent" location="top" text="Trang trước" />
             </v-btn>
             <v-btn icon size="small" variant="text" :disabled="targetsPage >= targetsTotalPages" @click="loadTargets(targetsPage + 1)">
               <v-icon>mdi-chevron-right</v-icon>
+              <v-tooltip activator="parent" location="top" text="Trang sau" />
             </v-btn>
           </div>
         </v-card>

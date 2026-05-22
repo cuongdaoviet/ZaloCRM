@@ -39,9 +39,11 @@
       <NotificationBell />
       <v-btn icon variant="text" @click="toggleTheme">
         <v-icon>{{ isDark ? 'mdi-weather-sunny' : 'mdi-weather-night' }}</v-icon>
+        <v-tooltip activator="parent" location="bottom" :text="isDark ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'" />
       </v-btn>
       <v-btn icon variant="text" @click="logout">
         <v-icon>mdi-logout</v-icon>
+        <v-tooltip activator="parent" location="bottom" text="Đăng xuất" />
       </v-btn>
     </v-app-bar>
 
