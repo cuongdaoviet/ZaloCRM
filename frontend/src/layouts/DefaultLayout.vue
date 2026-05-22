@@ -329,4 +329,13 @@ function logout() {
 .sidebar-group-activator :deep(.v-list-item-title) {
   font-weight: 600;
 }
+
+/* Tighten the nested sub-menu indent. Vuetify defaults give child
+   v-list-items a 64px padding-inline-start vs the parent activator's
+   8px, which pushes the sub-menu icons ~56px deeper than the rail —
+   too far for the eye to associate the children with their parent.
+   24px keeps a clear step-in without exiling the row to the gutter. */
+:deep(.v-list-group__items .v-list-item) {
+  padding-inline-start: 24px !important;
+}
 </style>
