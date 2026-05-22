@@ -3,10 +3,14 @@
    Used by DefaultLayout (top nav), ChatView, ContactsView, FriendsView.
    ════════════════════════════════════════════════════════════ */
 :root {
-  /* Brand palette */
-  --smax-primary: #2962ff;
-  --smax-primary-hover: #1565c0;
-  --smax-primary-soft: #e3f2fd;
+  /* Brand palette — Feature 0057. The original #2962ff bright blue and
+     #00F2FF electric cyan (legacy-dark) were both too loud / consumer-y
+     for a B2B CRM. Picked variant A from /design-shotgun 2026-05-22:
+     Slate + Indigo. Same primary across both themes for brand consistency
+     (just shifted lightness for dark mode legibility). */
+  --smax-primary: #4f46e5;        /* indigo-600 — light mode primary */
+  --smax-primary-hover: #4338ca;  /* indigo-700 */
+  --smax-primary-soft: #eef0ff;   /* light primary bg for chips, active rows */
   --smax-success: #00c853;
   --smax-warning: #ff9100;
   --smax-info: #2196f3;
@@ -71,8 +75,9 @@
   --smax-radius-xl: 13px;
   --smax-topnav-h: 52px;
 
-  /* Feature 0042 — primary-100 soft for active highlight (BR-0004) */
-  --smax-primary-100: #e3f2fd;
+  /* Feature 0042 — primary-100 soft for active highlight (BR-0004).
+     Updated Feature 0057 to match the new indigo primary-soft. */
+  --smax-primary-100: #eef0ff;
 
   /* Feature 0042 — layout dimensions for the 3-page refactor */
   --smax-chat-rail-w: 320px;        /* BR-0001 */

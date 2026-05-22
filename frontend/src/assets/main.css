@@ -295,58 +295,51 @@ html, body {
 }
 .message-bubble { animation: fade-slide-up 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
 
-/* ════════ Legacy dark theme (kept for fallback) ════════ */
-.v-theme--legacy-dark {
-  --navy-deep: #0A192F;
-  --navy-light: #112240;
-  --cyan-electric: #00F2FF;
-  --card-glass: rgba(17, 34, 64, 0.7);
-  --liquid-ease: cubic-bezier(0.4, 0, 0.2, 1);
-  --border-glow: rgba(0, 242, 255, 0.1);
-}
+/* ════════ Dark theme — Charcoal + Indigo (Feature 0057) ════════
+   The old palette (navy #0A192F + electric cyan #00F2FF, animated
+   gradients, "liquid morph" blobs) was loud and consumer-y. Now: a flat
+   charcoal surface with indigo accents — same brand color family as
+   smax-light, just shifted in lightness for dark mode legibility.
 
-.v-theme--legacy-dark.liquid-bg {
-  background: linear-gradient(-45deg, #0A192F, #112240, #004d7a, #008fb3) !important;
-  background-size: 400% 400% !important;
-  animation: flow-bg 15s ease infinite;
-}
-@keyframes flow-bg {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-@keyframes liquid-morph {
-  0%, 100% { border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%; }
-  50% { border-radius: 30% 60% 70% 30% / 50% 60% 30% 50%; }
-}
-.v-theme--legacy-dark .ai-core-orb {
-  animation: liquid-morph 8s infinite var(--liquid-ease);
-  box-shadow: 0 0 30px rgba(0, 242, 255, 0.2);
+   Theme key stays `legacy-dark` so the existing toggle in DefaultLayout
+   (writes 'dark' to localStorage → mapped to 'legacy-dark' in vuetify.ts)
+   doesn't break. */
+.v-theme--legacy-dark {
+  --dark-bg: #0b0d12;
+  --dark-surface: #14171f;
+  --dark-elev: #1a1e28;
+  --dark-border: #232834;
+  --dark-text: #e6e8ee;
+  --dark-muted: #8b94a3;
+  --dark-primary: #818cf8;          /* indigo-400 */
+  --dark-primary-hover: #a5b4fc;
+  --dark-primary-soft: #1e1f3d;
 }
 
 .v-theme--legacy-dark .v-card {
-  background: var(--card-glass) !important;
-  border: 1px solid var(--border-glow) !important;
-  backdrop-filter: blur(12px);
+  background: var(--dark-surface) !important;
+  border: 1px solid var(--dark-border) !important;
+  backdrop-filter: none;
 }
-.v-theme--legacy-dark ::-webkit-scrollbar { width: 4px; }
+.v-theme--legacy-dark ::-webkit-scrollbar { width: 8px; height: 8px; }
+.v-theme--legacy-dark ::-webkit-scrollbar-track { background: transparent; }
 .v-theme--legacy-dark ::-webkit-scrollbar-thumb {
-  background: rgba(0, 242, 255, 0.2); border-radius: 10px;
+  background: var(--dark-border);
+  border-radius: 4px;
 }
-.v-theme--legacy-dark ::-webkit-scrollbar-thumb:hover { background: rgba(0, 242, 255, 0.4); }
-.v-theme--legacy-dark .v-list-item:hover { background: rgba(0, 242, 255, 0.05) !important; }
+.v-theme--legacy-dark ::-webkit-scrollbar-thumb:hover { background: var(--dark-muted); }
+
+.v-theme--legacy-dark .v-list-item:hover {
+  background: var(--dark-elev) !important;
+}
 .v-theme--legacy-dark .v-list-item--active {
-  background: rgba(0, 242, 255, 0.08) !important;
-  border-left: 3px solid var(--cyan-electric);
+  background: var(--dark-primary-soft) !important;
+  color: var(--dark-primary) !important;
 }
-.v-theme--legacy-dark .v-field { border-radius: 16px !important; }
+.v-theme--legacy-dark .v-field { border-radius: 7px !important; }
 .v-theme--legacy-dark .v-field--focused {
-  border-color: var(--cyan-electric) !important;
-  box-shadow: 0 0 12px rgba(0, 242, 255, 0.15);
-}
-.v-theme--legacy-dark .v-btn--variant-flat:hover {
-  box-shadow: 0 0 16px rgba(0, 242, 255, 0.2);
-  transform: translateY(-1px);
+  border-color: var(--dark-primary) !important;
+  box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.18);
 }
 
 /* ════════ Chat-specific styles (used by MessageThread + ConversationList) ════════ */
@@ -392,53 +385,54 @@ html, body {
   border: 1px solid var(--smax-primary) !important;
 }
 
-/* ════════ Legacy-dark chat styles (preserve old look when user toggles to dark) ════════ */
+/* ════════ Dark chat styles (Feature 0057) ════════
+   Flat surfaces matching the new charcoal+indigo palette. No more
+   cyan glow, no more backdrop-filter blur — that look was distinctive
+   but loud. Indigo self-bubble, dark surface contact-bubble. */
 .v-theme--legacy-dark .message-bubble {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: none;
 }
 .v-theme--legacy-dark .message-bubble.bg-primary {
-  background: linear-gradient(135deg, #0077B6, #005f8a) !important;
-  color: #FFFFFF !important;
-  border-radius: 24px 24px 4px 24px !important;
+  background: var(--dark-primary-soft) !important;
+  color: var(--dark-text) !important;
+  border: 1px solid rgba(129, 140, 248, 0.25) !important;
+  border-radius: 16px 16px 4px 16px !important;
 }
 .v-theme--legacy-dark .message-bubble:not(.bg-primary) {
-  background: linear-gradient(135deg, rgba(0, 242, 255, 0.08), rgba(0, 242, 255, 0.03)) !important;
-  border: 1px solid rgba(0, 242, 255, 0.15) !important;
-  border-radius: 4px 24px 24px 24px !important;
-  color: #E6F1FF !important;
+  background: var(--dark-surface) !important;
+  border: 1px solid var(--dark-border) !important;
+  border-radius: 4px 16px 16px 16px !important;
+  color: var(--dark-text) !important;
 }
 .v-theme--legacy-dark .msg-time-self {
-  color: rgba(255, 255, 255, 0.65) !important;
+  color: rgba(230, 232, 238, 0.6) !important;
 }
 .v-theme--legacy-dark .msg-time-contact {
-  color: #6a7ea0 !important;
+  color: var(--dark-muted) !important;
 }
 .v-theme--legacy-dark .chat-input-area {
-  border-top: 1px solid var(--border-glow, rgba(0,242,255,0.1));
-  background: rgba(17, 34, 64, 0.5);
-  backdrop-filter: blur(8px);
+  border-top: 1px solid var(--dark-border);
+  background: var(--dark-surface);
 }
 .v-theme--legacy-dark .chat-messages-area {
-  background: rgba(10, 25, 47, 0.3);
+  background: var(--dark-bg);
 }
 .v-theme--legacy-dark .chat-header {
-  border-bottom: 1px solid var(--border-glow);
-  background: rgba(17, 34, 64, 0.3);
+  border-bottom: 1px solid var(--dark-border);
+  background: var(--dark-surface);
 }
 .v-theme--legacy-dark .conversation-list {
-  background: rgba(17, 34, 64, 0.3);
+  background: var(--dark-surface);
 }
 .v-theme--legacy-dark .conversation-active {
-  background: rgba(0, 242, 255, 0.05);
-  border: 1px solid rgba(0, 242, 255, 0.2) !important;
+  background: var(--dark-primary-soft);
+  border: 1px solid var(--dark-primary) !important;
 }
 .v-theme--legacy-dark .v-navigation-drawer {
-  background: rgba(17, 34, 64, 0.5) !important;
-  backdrop-filter: blur(16px) !important;
-  border-right: 1px solid var(--border-glow) !important;
+  background: var(--dark-surface) !important;
+  border-right: 1px solid var(--dark-border) !important;
 }
 .v-theme--legacy-dark .v-app-bar {
-  background: rgba(10, 25, 47, 0.6) !important;
-  backdrop-filter: blur(16px) !important;
-  border-bottom: 1px solid var(--border-glow) !important;
+  background: var(--dark-surface) !important;
+  border-bottom: 1px solid var(--dark-border) !important;
 }
