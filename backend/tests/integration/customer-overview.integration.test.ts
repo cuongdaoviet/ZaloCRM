@@ -390,8 +390,11 @@ describe('Customer 360 overview', () => {
     });
     expect(res.statusCode).toBe(200);
 
-    // Fire-and-forget — give it a beat
-    await new Promise((r) => setTimeout(r, 100));
+    // Fire-and-forget — drain the tracked background tasks instead of a
+    // wall-clock sleep so we don't depend on CI runner speed. (Was a 100ms
+    // setTimeout — flaked under load on PR #123's run.)
+    const { flushBackgroundTasks } = await import('../../src/shared/utils/background-tasks.js');
+    await flushBackgroundTasks();
     const activities = await prisma.activityLog.findMany({
       where: { entityType: 'contact', entityId: contact.id, action: 'contact.status_changed' },
     });
@@ -416,7 +419,8 @@ describe('Customer 360 overview', () => {
     });
     expect(res.statusCode).toBe(200);
 
-    await new Promise((r) => setTimeout(r, 100));
+    const { flushBackgroundTasks } = await import('../../src/shared/utils/background-tasks.js');
+    await flushBackgroundTasks();
     const activities = await prisma.activityLog.findMany({
       where: { entityType: 'contact', entityId: contact.id, action: 'contact.assigned' },
     });
