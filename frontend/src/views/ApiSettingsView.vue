@@ -108,10 +108,16 @@ function showSnack(text: string, color: string | undefined = 'success') {
   snack.value = { show: true, text, color: color ?? 'success' };
 }
 
+// Backend response shape is `{ key, url, secret }` (see
+// backend/src/modules/api/webhook-settings-routes.ts). We previously read
+// `res.data.apiKey / webhookUrl / webhookSecret` — those names never existed
+// on the response, so every field rendered empty. User-visible symptom:
+// click "Tạo key mới", server creates the key fine, but the input stays
+// blank because `undefined ?? ''` = ''.
 async function loadApiKey() {
   try {
     const res = await api.get('/settings/api-key');
-    apiKey.value = res.data.apiKey ?? '';
+    apiKey.value = res.data.key ?? '';
   } catch {
     apiKey.value = '';
   }
@@ -120,8 +126,8 @@ async function loadApiKey() {
 async function loadWebhook() {
   try {
     const res = await api.get('/settings/webhook');
-    webhookUrl.value = res.data.webhookUrl ?? '';
-    webhookSecret.value = res.data.webhookSecret ?? '';
+    webhookUrl.value = res.data.url ?? '';
+    webhookSecret.value = res.data.secret ?? '';
   } catch {
     webhookUrl.value = '';
     webhookSecret.value = '';
@@ -132,7 +138,7 @@ async function generateKey() {
   generatingKey.value = true;
   try {
     const res = await api.post('/settings/api-key/generate');
-    apiKey.value = res.data.apiKey ?? '';
+    apiKey.value = res.data.key ?? '';
     showSnack('API key mới đã được tạo');
   } catch {
     showSnack('Tạo key thất bại', 'error');
@@ -150,9 +156,13 @@ async function copyKey() {
 async function saveWebhook() {
   saving.value = true;
   try {
+    // Backend reads `{ url, secret }` from the body — see
+    // webhook-settings-routes.ts:43. Previously sent webhookUrl/webhookSecret
+    // which the backend silently ignored (Zod-free destructure), so the form
+    // appeared to save but nothing changed in the DB.
     await api.put('/settings/webhook', {
-      webhookUrl: webhookUrl.value,
-      webhookSecret: webhookSecret.value,
+      url: webhookUrl.value,
+      secret: webhookSecret.value,
     });
     showSnack('Đã lưu cấu hình webhook');
   } catch {
