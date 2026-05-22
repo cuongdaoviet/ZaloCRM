@@ -22,19 +22,20 @@
 
       <v-spacer />
 
-      <!-- Status indicator -->
-      <div
-        class="d-flex align-center mr-4 px-3 py-1 rounded-pill"
-        style="background: rgba(76,175,80,0.1); border: 1px solid rgba(76,175,80,0.2);"
-      >
+      <!-- Feature 0053 F16 — the old ONLINE pill (filled green oval, bold
+           letter-spaced label) was the third-loudest element in the top bar
+           and competed with the page title for attention. Now a small green
+           status dot sits next to the username; same information, none of
+           the visual weight. -->
+      <div v-if="authStore.user" class="d-flex align-center mr-3">
         <span
-          class="status-dot bg-success"
-          style="width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px;"
+          aria-hidden="true"
+          title="Đang online"
+          class="status-dot bg-success mr-2"
+          style="width: 8px; height: 8px; border-radius: 50%; display: inline-block;"
         ></span>
-        <span class="text-caption text-success font-weight-bold" style="letter-spacing: 1px;">ONLINE</span>
+        <span class="text-body-2">{{ authStore.user.fullName }}</span>
       </div>
-
-      <span class="text-body-2 mr-3" v-if="authStore.user">{{ authStore.user.fullName }}</span>
       <NotificationBell />
       <v-btn icon variant="text" @click="toggleTheme">
         <v-icon>{{ isDark ? 'mdi-weather-sunny' : 'mdi-weather-night' }}</v-icon>

@@ -3,6 +3,7 @@
  * Sources: unreplied conversations, today/tomorrow appointments, disconnected Zalo accounts.
  */
 import type { FastifyInstance } from 'fastify';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { authMiddleware } from '../auth/auth-middleware.js';
 import { zaloPool } from '../zalo/zalo-pool.js';
@@ -88,9 +89,35 @@ export async function notificationRoutes(app: FastifyInstance) {
       });
     }
 
-    // 4. Disconnected Zalo accounts
+    // 4. Disconnected Zalo accounts — Feature 0053 F18.
+    //
+    // The previous query emitted a notification for EVERY account whose
+    // `zaloPool.getStatus()` wasn't 'connected'. That returns 'disconnected'
+    // for two completely different states:
+    //   (a) Account was logged in earlier, then dropped — real notification.
+    //   (b) Account was just created and has never been QR-scanned —
+    //       expected state, NOT a notification.
+    // The bell would show a stale "1" on a fresh org because of (b).
+    //
+    // Two fixes:
+    //   - Only flag accounts with non-null `sessionData` (= they were
+    //     connected at some point, so a drop is meaningful).
+    //   - For members, only flag accounts they actually have access to via
+    //     the zalo_account_access ACL; otherwise the bell shows alerts about
+    //     accounts the member can't even see.
+    const accountWhere: Prisma.ZaloAccountWhereInput = {
+      orgId: user.orgId,
+      sessionData: { not: Prisma.JsonNull },
+    };
+    if (user.role === 'member') {
+      const accessRows = await prisma.zaloAccountAccess.findMany({
+        where: { userId: user.id },
+        select: { zaloAccountId: true },
+      });
+      accountWhere.id = { in: accessRows.map((a) => a.zaloAccountId) };
+    }
     const accounts = await prisma.zaloAccount.findMany({
-      where: { orgId: user.orgId },
+      where: accountWhere,
       select: { id: true, displayName: true },
     });
     for (const acc of accounts) {
