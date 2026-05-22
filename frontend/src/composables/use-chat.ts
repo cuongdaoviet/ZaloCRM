@@ -100,6 +100,34 @@ const DEFAULT_FILTERS: ConversationFilters = {
   tab: 'main',
 };
 
+/**
+ * Feature 0050 — pure merge function used by catch-up. Takes the existing
+ * thread (asc by sentAt) and a batch of newer messages from the server,
+ * returns a new array that:
+ *   - keeps existing messages in place,
+ *   - appends new ones in asc sentAt order,
+ *   - dedupes by id (the socket may also have delivered some of the
+ *     incoming batch, so the catch-up response can overlap).
+ *
+ * Exported so the unit test can pin the behavior without mounting the
+ * full composable. Pure — no Vue refs, no side effects.
+ */
+export function mergeIncomingMessages(
+  existing: readonly Message[],
+  incoming: readonly Message[],
+): Message[] {
+  if (incoming.length === 0) return [...existing];
+  const seen = new Set(existing.map((m) => m.id));
+  const additions = incoming.filter((m) => !seen.has(m.id));
+  if (additions.length === 0) return [...existing];
+  // Sort additions asc by sentAt so they slot in chronologically even if
+  // the server returned them in a different order.
+  const sortedAdditions = [...additions].sort(
+    (a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime(),
+  );
+  return [...existing, ...sortedAdditions];
+}
+
 export function useChat() {
   const conversations = ref<Conversation[]>([]);
   const selectedConvId = ref<string | null>(null);
@@ -355,12 +383,87 @@ export function useChat() {
         params: { limit: 100 },
       });
       messages.value = res.data.messages;
+      updateLastSynced();
     } catch (err) {
       if (!opts.silent) {
         console.error('Failed to fetch messages:', err);
       }
     } finally {
       if (!opts.silent) loadingMsgs.value = false;
+    }
+  }
+
+  // ── Feature 0050 — chat catch-up after socket drop / tab unfocus ───────
+  //
+  // Three pieces working together:
+  // 1. `lastSyncedMessageId` — the newest message id we know about for the
+  //    currently-open conversation. Updated on initial fetch + socket events.
+  // 2. `catchUpMessages` — fires GET ?sinceMessageId=<that> and merges the
+  //    response (dedup by id). Idempotent; safe to call repeatedly.
+  // 3. Trigger sources (wired in `initSocket` below): socket reconnect,
+  //    tab visibility return after >30s hidden.
+  //
+  // Why not poll: socket-driven sync is sub-second under normal conditions.
+  // Polling on a fixed interval just adds backend load for the case the
+  // socket already handles. Catch-up only fires when there's been a gap.
+
+  // Bump every time something downstream wants a fresh sync ref read.
+  // null = no synced anchor yet (initial fetch hasn't completed).
+  let lastSyncedMessageId: string | null = null;
+  let lastCatchUpAt = 0; // ms epoch — used for the 5s debounce per BR-edge-case.
+  let lastHiddenAt = 0;  // ms epoch — populated by visibilitychange handler.
+
+  function updateLastSynced(): void {
+    // The newest message is the last one in our asc-sorted array.
+    if (messages.value.length === 0) {
+      lastSyncedMessageId = null;
+      return;
+    }
+    lastSyncedMessageId = messages.value[messages.value.length - 1].id;
+  }
+
+  async function catchUpMessages(convId: string): Promise<void> {
+    if (!convId || !lastSyncedMessageId) return;
+    // 5s debounce. Network flapping fires reconnect repeatedly; we don't
+    // want N catch-ups storm-firing in 2 seconds.
+    const now = Date.now();
+    if (now - lastCatchUpAt < 5_000) return;
+    lastCatchUpAt = now;
+    const cursorAtRequest = lastSyncedMessageId;
+    try {
+      const res = await api.get(`/conversations/${convId}/messages`, {
+        params: { sinceMessageId: cursorAtRequest, limit: 200 },
+      });
+      // BR-0007 / EC: if the user switched conversations while the request
+      // was in flight, discard the response so we don't pollute the new
+      // thread with stale messages.
+      if (selectedConvId.value !== convId) return;
+      const newMessages = (res.data?.messages ?? []) as Message[];
+      if (newMessages.length === 0) return;
+      messages.value = mergeIncomingMessages(messages.value, newMessages);
+      updateLastSynced();
+      // If the catch-up window was clipped (>200 missed), do a full reload
+      // since we can't know what's in the gap.
+      if (res.data?.truncated) {
+        await fetchMessages(convId, { silent: true });
+        updateLastSynced();
+      }
+    } catch (err: unknown) {
+      // 400 INVALID_CURSOR → the cursor message was deleted on the server.
+      // Fall back to a full reload of the thread so the user isn't stuck.
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 400) {
+        try {
+          await fetchMessages(convId, { silent: true });
+          updateLastSynced();
+        } catch {
+          // Swallow secondary failure — the user can refresh manually.
+        }
+        return;
+      }
+      // Network / 5xx — silent. Next reconnect or visibility return will
+      // try again. We don't want to nag the user with toasts.
+      console.warn('[chat] catch-up failed', err);
     }
   }
 
@@ -460,6 +563,9 @@ export function useChat() {
         // Avoid duplicates
         if (!messages.value.find(m => m.id === data.message.id)) {
           messages.value.push(data.message);
+          // Feature 0050 — keep the catch-up cursor in sync with what
+          // the socket has actually delivered.
+          updateLastSynced();
         }
       }
       // Feature 0043 — drop the stale cached snapshot so the next switch
@@ -467,6 +573,16 @@ export function useChat() {
       prefetch.invalidate(data.conversationId);
       // Refresh conversation list to update last message / unread count
       fetchConversations();
+    });
+
+    // Feature 0050 BR-0006 — catch up after a socket drop. Socket.IO emits
+    // `reconnect` once the connection is restored. We only fire catch-up
+    // for the currently-open conversation; the list will refresh via the
+    // chat:message events that arrive naturally after.
+    socket.on('reconnect', () => {
+      if (selectedConvId.value) {
+        void catchUpMessages(selectedConvId.value);
+      }
     });
 
     socket.on('chat:deleted', (data: { msgId: string }) => {
@@ -503,9 +619,28 @@ export function useChat() {
 
     // Feature 0021 — reactions live-merge from BE listener / other clients
     reactions.subscribe(socket);
+
+    // Feature 0050 BR-0007 — catch up when the tab regains focus after a
+    // hidden period. 30s threshold avoids firing on quick alt-tabs.
+    document.addEventListener('visibilitychange', onVisibilityChange);
+  }
+
+  function onVisibilityChange(): void {
+    if (document.visibilityState === 'hidden') {
+      lastHiddenAt = Date.now();
+      return;
+    }
+    // visibility === 'visible'
+    const hiddenFor = lastHiddenAt > 0 ? Date.now() - lastHiddenAt : 0;
+    lastHiddenAt = 0;
+    if (hiddenFor < 30_000) return;
+    if (selectedConvId.value) {
+      void catchUpMessages(selectedConvId.value);
+    }
   }
 
   function destroySocket() {
+    document.removeEventListener('visibilitychange', onVisibilityChange);
     socket?.disconnect();
     socket = null;
   }

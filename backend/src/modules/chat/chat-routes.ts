@@ -368,7 +368,7 @@ export async function chatRoutes(app: FastifyInstance) {
   app.get('/api/v1/conversations/:id/messages', { preHandler: requireZaloAccess('read') }, async (request: FastifyRequest, reply: FastifyReply) => {
     const user = request.user!;
     const { id } = request.params as { id: string };
-    const { page = '1', limit = '50' } = request.query as QueryParams;
+    const { page = '1', limit = '50', sinceMessageId } = request.query as QueryParams & { sinceMessageId?: string };
 
     const conversation = await prisma.conversation.findFirst({
       where: { id, orgId: user.orgId },
@@ -376,9 +376,37 @@ export async function chatRoutes(app: FastifyInstance) {
     });
     if (!conversation) return reply.status(404).send({ error: 'Conversation not found' });
 
+    // Feature 0050 BR-0001..0004 — catch-up cursor. When `sinceMessageId`
+    // is present, the FE wants messages strictly newer than that one for
+    // background reconciliation after a socket drop / tab unfocus.
+    // Validate that the cursor belongs to *this* conversation so callers
+    // can't probe other conversations' message ids.
+    let sinceFilter: { gt: Date } | undefined;
+    if (sinceMessageId) {
+      const cursorMsg = await prisma.message.findUnique({
+        where: { id: sinceMessageId },
+        select: { conversationId: true, sentAt: true },
+      });
+      if (!cursorMsg || cursorMsg.conversationId !== id) {
+        return reply.status(400).send({
+          error: 'Cursor invalid — refetch full thread',
+          code: 'INVALID_CURSOR',
+        });
+      }
+      sinceFilter = { gt: cursorMsg.sentAt };
+    }
+
+    // BR-0002 — cap catch-up window so a rep who left the tab open for
+    // hours doesn't pull 10k messages on reconnect.
+    const cappedLimit = sinceMessageId ? Math.min(parseInt(limit) || 200, 200) : parseInt(limit);
+    const messagesWhere = {
+      conversationId: id,
+      ...(sinceFilter ? { sentAt: sinceFilter } : {}),
+    };
+
     const [messages, total] = await Promise.all([
       prisma.message.findMany({
-        where: { conversationId: id },
+        where: messagesWhere,
         // Feature 0021 — reactions are returned inline so MessageThread
         // doesn't need a round-trip per message. Other relations stay
         // implicit (Prisma includes scalar fields by default).
@@ -410,8 +438,10 @@ export async function chatRoutes(app: FastifyInstance) {
           },
         },
         orderBy: { sentAt: 'desc' },
-        skip: (parseInt(page) - 1) * parseInt(limit),
-        take: parseInt(limit),
+        // For catch-up requests we ignore page and just take the newest N
+        // matching messages (which are the ones the FE actually missed).
+        skip: sinceMessageId ? 0 : (parseInt(page) - 1) * parseInt(limit),
+        take: cappedLimit,
       }),
       prisma.message.count({ where: { conversationId: id } }),
     ]);
@@ -426,7 +456,16 @@ export async function chatRoutes(app: FastifyInstance) {
         : null,
     }));
 
-    return { messages: projected.reverse(), total, page: parseInt(page), limit: parseInt(limit) };
+    // Feature 0050 — let the FE know if the catch-up window was clipped
+    // (it hit the 200-message cap) so they can fall back to a full reload.
+    const truncated = sinceMessageId ? projected.length >= cappedLimit : false;
+    return {
+      messages: projected.reverse(),
+      total,
+      page: parseInt(page),
+      limit: cappedLimit,
+      ...(sinceMessageId ? { sinceCursor: sinceMessageId, truncated } : {}),
+    };
   });
 
   // ── Send message ─────────────────────────────────────────────────────────
