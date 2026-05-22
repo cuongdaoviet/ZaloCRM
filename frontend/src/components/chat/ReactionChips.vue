@@ -67,7 +67,8 @@ function displayEmoji(emoji: string): string {
   /* Smax-light: ~15% opacity surface, no glow. */
   background: rgba(0, 0, 0, 0.05);
   border: 1px solid rgba(0, 0, 0, 0.06);
-  font-size: 13px;
+  /* Feature 0052b — bumped 13px → 14px (text-body-2). */
+  font-size: 14px;
   line-height: 1.2;
   cursor: pointer;
   transition: background-color 0.12s ease, border-color 0.12s ease;

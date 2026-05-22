@@ -85,7 +85,9 @@ const chipStyle = computed(() => ({
   max-width: 100%;
 }
 .emoji {
-  font-size: 13px;
+  /* Feature 0052b — bumped 13px → 14px (text-body-2) to match the chip's
+     label scale step. */
+  font-size: 14px;
   line-height: 1;
 }
 .name {

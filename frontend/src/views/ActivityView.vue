@@ -166,10 +166,11 @@ onMounted(() => reload(1));
   border-bottom: 1px solid rgba(0, 0, 0, 0.04);
 }
 .details-json {
+  /* Feature 0052b — 0.75rem == 12px (text-caption). Pinned to px. */
   background: rgba(0, 0, 0, 0.04);
   padding: 8px;
   border-radius: 4px;
-  font-size: 0.75rem;
+  font-size: 12px;
   margin-top: 4px;
   overflow-x: auto;
   max-width: 100%;

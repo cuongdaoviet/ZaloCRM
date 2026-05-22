@@ -192,7 +192,9 @@
                         <template v-else>{{ part.text }}</template>
                       </template>
                     </div>
-                    <div class="text-caption mt-1 msg-time" :class="msg.senderType === 'self' ? 'msg-time-self' : 'msg-time-contact'" style="font-size: 0.7rem;">
+                    <!-- Feature 0052b — timestamp uses text-caption (12px),
+                         removed the inline 0.7rem (11.2px) override. -->
+                    <div class="text-caption mt-1 msg-time" :class="msg.senderType === 'self' ? 'msg-time-self' : 'msg-time-contact'">
                       {{ formatMessageTime(msg.sentAt) }}
                     </div>
                   </div>
@@ -1630,7 +1632,8 @@ onBeforeUnmount(() =>
 .message-bubble { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); }
 .reminder-card { padding: 8px 12px; border-left: 3px solid rgb(var(--v-theme-warning)); border-radius: 8px; background: rgba(var(--v-theme-warning), 0.08); }
 .file-card { display: flex; align-items: center; padding: 8px 12px; border-radius: 8px; background: rgba(0, 242, 255, 0.05); border: 1px solid rgba(0, 242, 255, 0.1); }
-.zinstant-fallback { display: inline-flex; align-items: center; opacity: 0.65; font-style: italic; font-size: 0.85rem; }
+/* Feature 0052b — bumped from 0.85rem (13.6px) to 14px (text-body-2). */
+.zinstant-fallback { display: inline-flex; align-items: center; opacity: 0.65; font-style: italic; font-size: 14px; }
 .chat-image { max-width: 100%; max-height: 300px; border-radius: 12px; cursor: pointer; transition: transform 0.2s; }
 .chat-image:hover { transform: scale(1.02); }
 .chat-video { max-width: 100%; max-height: 360px; border-radius: 12px; background: #000; display: block; }
@@ -1809,7 +1812,8 @@ onBeforeUnmount(() =>
   margin-left: auto;
 }
 .quote-bubble__author {
-  font-size: 0.7rem;
+  /* Feature 0052b — bumped from 0.7rem (11.2px) to 12px (text-caption floor). */
+  font-size: 12px;
   font-weight: 600;
   color: rgb(var(--v-theme-primary));
   margin-bottom: 2px;
@@ -1818,7 +1822,8 @@ onBeforeUnmount(() =>
   color: rgba(0, 0, 0, 0.55);
 }
 .quote-bubble__text {
-  font-size: 0.8rem;
+  /* Feature 0052b — bumped from 0.8rem (12.8px) to 14px (text-body-2). */
+  font-size: 14px;
   color: rgba(0, 0, 0, 0.7);
   overflow: hidden;
   text-overflow: ellipsis;

@@ -41,7 +41,9 @@
          Dropped the local border-left: 3px (AI-slop decoration) and the
          delta arrow-up/down icons (sign in the text is already semantic).
          Delta line now goes through MetricCard's `delta` prop for a
-         single render path across the app. -->
+         single render path across the app. Typography (label = body-2,
+         number = h4, delta = caption) lives inside MetricCard per the
+         0052b scale. -->
     <v-row v-if="summary" dense>
       <v-col v-for="card in cards" :key="card.key" cols="12" sm="6" md="4">
         <MetricCard

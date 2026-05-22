@@ -403,11 +403,13 @@ onMounted(() => {
   height: var(--smax-row-height-dense, 40px);
 }
 .contacts-dense-table :deep(tbody td) {
+  /* Feature 0052b — table cells bumped from 13px → 14px (text-body-2). */
   padding-top: 0;
   padding-bottom: 0;
-  font-size: 13px;
+  font-size: 14px;
 }
 .contacts-dense-table :deep(thead th) {
+  /* Feature 0052b — header at 12px (text-caption) — eyebrow / column label. */
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0;

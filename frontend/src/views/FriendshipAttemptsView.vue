@@ -54,7 +54,11 @@
       @click:close="error = ''"
     >{{ error }}</v-alert>
 
-    <!-- Summary chips -->
+    <!-- Summary chips — Feature 0052b: bump from size="small" (~12px Vuetify
+         default + globally overridden in vuetify.ts defaults.VChip) up to
+         default size + explicit text-body-2 (14px) so Vietnamese diacritics
+         on "Đã gửi"/"Hệ thống huỷ" are readable without leaning toward the
+         monitor (user report 2026-05-22). -->
     <div class="d-flex flex-wrap ga-2 mb-3">
       <v-chip
         v-for="state in (Object.keys(STATE_LABELS) as FriendshipState[])"
@@ -62,7 +66,8 @@
         :color="STATE_COLORS[state]"
         :prepend-icon="STATE_ICONS[state]"
         variant="tonal"
-        size="small"
+        size="default"
+        class="text-body-2"
       >
         {{ STATE_LABELS[state] }}: {{ stateCounts[state] ?? 0 }}
       </v-chip>

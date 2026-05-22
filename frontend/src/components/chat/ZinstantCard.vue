@@ -126,10 +126,11 @@ async function copy(value: string, label: string) {
   max-width: 320px;
 }
 .zinstant-header {
+  /* Feature 0052b — bumped from 0.95rem (15.2px) to 16px (text-body-1). */
   display: flex;
   align-items: center;
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 16px;
   color: rgb(var(--v-theme-primary));
   padding-bottom: 4px;
   border-bottom: 1px solid rgba(0, 242, 255, 0.15);
@@ -144,13 +145,17 @@ async function copy(value: string, label: string) {
   gap: 2px;
 }
 .zinstant-label {
-  font-size: 0.72rem;
+  /* Feature 0052b — bumped from 0.72rem (11.5px) to 12px (text-caption floor).
+     This is the "Số tài khoản" / "Chủ tài khoản" uppercase eyebrow above each
+     row value — caption is the right scale step for an eyebrow label. */
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   opacity: 0.65;
 }
 .zinstant-value {
-  font-size: 0.9rem;
+  /* Feature 0052b — bumped from 0.9rem (14.4px) to 14px (text-body-2). */
+  font-size: 14px;
   font-weight: 500;
 }
 .zinstant-account {
@@ -164,8 +169,10 @@ async function copy(value: string, label: string) {
   color: inherit;
 }
 .zinstant-account-number {
+  /* Feature 0052b — bumped from 1.1rem (17.6px) to 18px (text-h6/title).
+     This is the primary value on the card — match `title` token. */
   font-family: 'JetBrains Mono', 'Menlo', 'Consolas', monospace;
-  font-size: 1.1rem;
+  font-size: 18px;
   font-weight: 700;
   letter-spacing: 0.04em;
 }
@@ -181,12 +188,14 @@ async function copy(value: string, label: string) {
   color: inherit;
 }
 .zinstant-amount {
-  font-size: 1rem;
+  /* Feature 0052b — 1rem == 16px (text-body-1). Pinned to px for clarity. */
+  font-size: 16px;
   font-weight: 600;
   color: rgb(var(--v-theme-success, 76 175 80));
 }
 .zinstant-desc {
-  font-size: 0.9rem;
+  /* Feature 0052b — bumped from 0.9rem (14.4px) to 14px (text-body-2). */
+  font-size: 14px;
   word-break: break-word;
 }
 .zinstant-qr-wrap {
