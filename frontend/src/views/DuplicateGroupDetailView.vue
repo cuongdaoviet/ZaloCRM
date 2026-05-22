@@ -3,6 +3,7 @@
     <div class="d-flex align-center mb-4" style="gap: 12px;">
       <v-btn icon variant="text" @click="router.back()">
         <v-icon>mdi-arrow-left</v-icon>
+        <v-tooltip activator="parent" location="bottom" text="Quay lại" />
       </v-btn>
       <h1 class="text-h5">Chi tiết nhóm trùng</h1>
       <v-spacer />

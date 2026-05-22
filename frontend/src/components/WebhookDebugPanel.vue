@@ -51,15 +51,17 @@
           <span class="text-body-2">{{ formatDate(item.createdAt) }}</span>
         </template>
         <template #item.actions="{ item }">
-          <v-btn icon size="x-small" variant="text" @click="openDetail(item.id)" title="Chi tiết">
+          <v-btn icon size="x-small" variant="text" @click="openDetail(item.id)">
             <v-icon size="16">mdi-eye</v-icon>
+            <v-tooltip activator="parent" location="top" text="Chi tiết" />
           </v-btn>
           <v-btn
             icon size="x-small" variant="text" color="primary"
             :loading="replayingId === item.id"
-            @click="onReplay(item.id)" title="Replay"
+            @click="onReplay(item.id)"
           >
             <v-icon size="16">mdi-replay</v-icon>
+            <v-tooltip activator="parent" location="top" text="Gửi lại" />
           </v-btn>
         </template>
       </v-data-table>
@@ -67,10 +69,12 @@
       <div v-if="totalPages > 1" class="d-flex justify-end align-center mt-2">
         <v-btn icon size="small" variant="text" :disabled="page <= 1" @click="reload(page - 1)">
           <v-icon>mdi-chevron-left</v-icon>
+          <v-tooltip activator="parent" location="top" text="Trang trước" />
         </v-btn>
         <span class="text-body-2 mx-2">{{ page }} / {{ totalPages }}</span>
         <v-btn icon size="small" variant="text" :disabled="page >= totalPages" @click="reload(page + 1)">
           <v-icon>mdi-chevron-right</v-icon>
+          <v-tooltip activator="parent" location="top" text="Trang sau" />
         </v-btn>
       </div>
     </v-card-text>

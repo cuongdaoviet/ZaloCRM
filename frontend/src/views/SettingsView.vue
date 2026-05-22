@@ -39,14 +39,17 @@
                  action group. Color on hover (via :hover) communicates
                  destructive intent without a permanently red square. -->
             <template #item.actions="{ item }">
-              <v-btn v-if="authStore.isAdmin" icon variant="text" size="small" title="Chỉnh sửa" @click="openEdit(item)">
+              <v-btn v-if="authStore.isAdmin" icon variant="text" size="small" @click="openEdit(item)">
                 <v-icon size="20">mdi-pencil</v-icon>
+                <v-tooltip activator="parent" location="top" text="Chỉnh sửa" />
               </v-btn>
-              <v-btn v-if="authStore.isAdmin" icon variant="text" size="small" title="Đặt lại mật khẩu" @click="openPassword(item)">
+              <v-btn v-if="authStore.isAdmin" icon variant="text" size="small" @click="openPassword(item)">
                 <v-icon size="20">mdi-lock-reset</v-icon>
+                <v-tooltip activator="parent" location="top" text="Đặt lại mật khẩu" />
               </v-btn>
-              <v-btn v-if="authStore.isOwner && item.id !== authStore.user?.id" icon variant="text" size="small" color="error" title="Vô hiệu hóa" @click="confirmDelete(item)">
+              <v-btn v-if="authStore.isOwner && item.id !== authStore.user?.id" icon variant="text" size="small" color="error" @click="confirmDelete(item)">
                 <v-icon size="20">mdi-delete</v-icon>
+                <v-tooltip activator="parent" location="top" text="Vô hiệu hóa" />
               </v-btn>
             </template>
           </v-data-table>

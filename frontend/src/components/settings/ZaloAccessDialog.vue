@@ -41,6 +41,7 @@
                 />
                 <v-btn icon size="x-small" color="error" variant="text" @click="handleRemoveAccess(a.id)">
                   <v-icon>mdi-delete</v-icon>
+                  <v-tooltip activator="parent" location="top" text="Thu hồi quyền truy cập" />
                 </v-btn>
               </template>
             </v-list-item>

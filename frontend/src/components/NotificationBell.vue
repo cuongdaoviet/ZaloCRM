@@ -10,6 +10,7 @@
         >
           <v-icon>mdi-bell-outline</v-icon>
         </v-badge>
+        <v-tooltip activator="parent" location="bottom" text="Thông báo" />
       </v-btn>
     </template>
     <v-card style="max-height: 400px; overflow-y: auto;">

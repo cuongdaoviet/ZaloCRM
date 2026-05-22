@@ -84,9 +84,11 @@
             <td>
               <v-btn icon size="x-small" variant="text" @click="openEdit(o)">
                 <v-icon size="16">mdi-pencil</v-icon>
+                <v-tooltip activator="parent" location="top" text="Chỉnh sửa" />
               </v-btn>
               <v-btn icon size="x-small" variant="text" color="error" @click="confirmDelete(o.id)">
                 <v-icon size="16">mdi-delete</v-icon>
+                <v-tooltip activator="parent" location="top" text="Xóa" />
               </v-btn>
             </td>
           </tr>

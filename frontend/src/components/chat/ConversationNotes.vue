@@ -53,11 +53,13 @@
           <p v-else class="text-body-2 mt-1 note-content" style="white-space: pre-wrap;">{{ note.content }}</p>
         </div>
         <div v-if="canEdit(note) && editingId !== note.id" class="ml-1">
-          <v-btn icon size="x-small" variant="text" @click="startEdit(note)" title="Sửa">
+          <v-btn icon size="x-small" variant="text" @click="startEdit(note)">
             <v-icon size="14">mdi-pencil</v-icon>
+            <v-tooltip activator="parent" location="top" text="Sửa" />
           </v-btn>
-          <v-btn icon size="x-small" variant="text" color="error" @click="onDelete(note.id)" title="Xoá">
+          <v-btn icon size="x-small" variant="text" color="error" @click="onDelete(note.id)">
             <v-icon size="14">mdi-delete</v-icon>
+            <v-tooltip activator="parent" location="top" text="Xoá" />
           </v-btn>
         </div>
       </div>
