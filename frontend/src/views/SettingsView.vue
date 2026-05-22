@@ -45,7 +45,7 @@
               <v-btn v-if="authStore.isAdmin" icon variant="text" size="small" title="Đặt lại mật khẩu" @click="openPassword(item)">
                 <v-icon size="20">mdi-lock-reset</v-icon>
               </v-btn>
-              <v-btn v-if="authStore.isOwner && item.id !== authStore.user?.id" icon variant="text" size="small" color="error" title="Vô hiệu hóa" class="row-danger-btn" @click="confirmDelete(item)">
+              <v-btn v-if="authStore.isOwner && item.id !== authStore.user?.id" icon variant="text" size="small" color="error" title="Vô hiệu hóa" @click="confirmDelete(item)">
                 <v-icon size="20">mdi-delete</v-icon>
               </v-btn>
             </template>

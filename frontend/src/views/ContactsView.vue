@@ -253,7 +253,7 @@ const ALWAYS_VISIBLE_KEYS = new Set(['avatarUrl', 'fullName', 'leadScore', 'stat
 
 function columnHasData(key: string): boolean {
   if (!contacts.value?.length) return true; // empty table: show everything
-  const accessor = (c: { phone?: string | null; email?: string | null; source?: string | null; assignedUser?: { fullName?: string | null } | null }): unknown => {
+  const accessor = (c: Contact): unknown => {
     switch (key) {
       case 'phone': return c.phone;
       case 'email': return c.email;
@@ -263,8 +263,8 @@ function columnHasData(key: string): boolean {
     }
   };
   // "Has data" = at least 1 non-empty value in the current page.
-  return contacts.value.some((c) => {
-    const v = accessor(c as never);
+  return contacts.value.some((c: Contact) => {
+    const v = accessor(c);
     return v !== null && v !== undefined && v !== '';
   });
 }

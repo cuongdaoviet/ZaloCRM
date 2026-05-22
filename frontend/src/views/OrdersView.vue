@@ -84,7 +84,7 @@
                    "+ Tạo đơn" button in the page header is 600+px away
                    from the empty table; surfacing it here saves a long
                    eye-jump. -->
-              <v-icon size="36" color="grey-lighten-1" class="mb-2">mdi-cart-outline</v-icon>
+              <v-icon size="40" color="grey-lighten-1" class="mb-2">mdi-cart-outline</v-icon>
               <div class="text-body-2 text-medium-emphasis">Chưa có đơn hàng nào</div>
               <v-btn color="primary" variant="tonal" size="small" prepend-icon="mdi-plus" class="mt-3" @click="openCreate">
                 Tạo đơn đầu tiên

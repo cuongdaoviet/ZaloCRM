@@ -38,7 +38,7 @@
              in the page header. -->
         <template #no-data>
           <div class="text-center pa-8">
-            <v-icon size="36" color="grey-lighten-1" class="mb-2">mdi-bullhorn-outline</v-icon>
+            <v-icon size="40" color="grey-lighten-1" class="mb-2">mdi-bullhorn-outline</v-icon>
             <div class="text-body-2 text-medium-emphasis">Chưa có chiến dịch nào</div>
             <v-btn color="primary" variant="tonal" size="small" prepend-icon="mdi-plus" class="mt-3" @click="openCreateDialog">
               Tạo chiến dịch đầu tiên
