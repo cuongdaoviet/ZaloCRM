@@ -228,6 +228,16 @@
     border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
   }
 }
+
+/* Strip the default v-table cell border-bottom — on this page the rows
+   are input groups (hours + points + delete), not tabular data, so the
+   horizontal rules between rows just add visual noise around the input
+   fields. `:deep` reaches past the scoped attribute selector into
+   Vuetify's internal table markup. */
+:deep(.v-table td),
+:deep(.v-table th) {
+  border-bottom: 0 !important;
+}
 </style>
 
 <script setup lang="ts">
