@@ -113,7 +113,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import ConversationList from '@/components/chat/ConversationList.vue';
 import MessageThread from '@/components/chat/MessageThread.vue';
 import ChatContactPanel from '@/components/chat/ChatContactPanel.vue';
@@ -218,6 +218,37 @@ const showNewChatDialog = ref(false);
 
 // ── Feature 0030 — Zalo user popover → "Tạo Contact" / "Xem trong CRM" ──
 const router = useRouter();
+const route = useRoute();
+
+// Deep-link: open the conversation referenced by `?conversationId=` in the
+// URL. Used by MessageSearchView and GlobalSearch when the user clicks a
+// search result. We can't call selectConversation immediately because the
+// conversation list hasn't loaded yet on first mount — instead we watch
+// both the route query AND the conversations array; the first time both
+// are ready, we select. The watcher also fires when the user clicks a
+// different search result while ChatView is already open (route changes
+// but the component stays mounted).
+function trySelectFromRoute() {
+  const id = route.query.conversationId;
+  if (!id || typeof id !== 'string') return;
+  if (selectedConvId.value === id) return;
+  // Conversations not yet loaded — bail; the watcher below picks it up
+  // when the list resolves.
+  if (conversations.value.length === 0) return;
+  // The conversation must exist in our visible list (the ACL filter on
+  // the BE may have hidden it for a member without grants). If it's not
+  // there, do nothing — the search result wouldn't have surfaced it in
+  // the first place under normal use.
+  const match = conversations.value.find((c) => c.id === id);
+  if (!match) return;
+  selectConversation(id);
+}
+
+watch(
+  () => [route.query.conversationId, conversations.value.length],
+  () => trySelectFromRoute(),
+  { immediate: true },
+);
 const showZaloContactDialog = ref(false);
 const zaloContactPrefill = ref<ContactPrefill | null>(null);
 
