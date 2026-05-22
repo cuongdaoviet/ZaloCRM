@@ -17,8 +17,15 @@
               <template #prepend>
                 <v-icon color="cyan">mdi-account</v-icon>
               </template>
-              <v-list-item-title>{{ a.fullName }}</v-list-item-title>
-              <v-list-item-subtitle>{{ a.email }}</v-list-item-subtitle>
+              <!-- Backend returns `{ id, userId, permission, user: { fullName, email, role } }`
+                   so we read the nested user. Previously the template referenced
+                   `a.fullName` directly which was always undefined → blank rows. -->
+              <v-list-item-title>{{ a.user?.fullName || a.user?.email || '(unknown user)' }}</v-list-item-title>
+              <v-list-item-subtitle>
+                {{ a.user?.email }}
+                <span v-if="a.user?.role === 'owner'" class="text-caption text-primary ml-1">(owner)</span>
+                <span v-else-if="a.user?.role === 'admin'" class="text-caption text-info ml-1">(admin)</span>
+              </v-list-item-subtitle>
               <template #append>
                 <v-select
                   :model-value="a.permission"
@@ -91,12 +98,18 @@ import { ref, computed, watch } from 'vue';
 import { api } from '@/api/index';
 import { useUsers } from '@/composables/use-users';
 
+// Wire shape returned by GET /api/v1/zalo-accounts/:id/access — backend
+// nests the user under `user`, not flattened on the access row.
 interface AccessEntry {
   id: string;
   userId: string;
-  fullName: string;
-  email: string;
   permission: string;
+  user?: {
+    id: string;
+    fullName: string;
+    email: string;
+    role: 'owner' | 'admin' | 'member';
+  };
 }
 
 const props = defineProps<{
