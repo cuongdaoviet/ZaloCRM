@@ -1,13 +1,34 @@
 <template>
   <div>
-    <div class="d-flex align-center mb-4">
-      <h1 class="text-h5">Tài khoản Zalo</h1>
+    <!-- Feature 0053 F22 — page header was just the title + a far-right CTA
+         with acres of empty space between. Now uses the band as a real toolbar:
+         title on the left, inline status filter + search to fill the middle,
+         CTA stays right-anchored. Matches OrdersView and ContactsView. -->
+    <div class="d-flex align-center mb-4 ga-3 flex-wrap">
+      <h1 class="text-h5 mb-0">Tài khoản Zalo</h1>
+      <v-select
+        v-model="statusFilter"
+        :items="STATUS_FILTER_OPTIONS"
+        item-title="title" item-value="value"
+        density="compact" variant="outlined" hide-details
+        prepend-inner-icon="mdi-filter-variant"
+        clearable
+        style="max-width: 200px;"
+      />
+      <v-text-field
+        v-model="search"
+        placeholder="Tìm theo tên, UID, SĐT…"
+        density="compact" variant="outlined" hide-details
+        prepend-inner-icon="mdi-magnify"
+        clearable
+        style="max-width: 280px;"
+      />
       <v-spacer />
       <v-btn color="primary" prepend-icon="mdi-plus" @click="showAddDialog = true">Thêm Zalo</v-btn>
     </div>
 
     <v-card>
-      <v-data-table :headers="headers" :items="accounts" :loading="loading" no-data-text="Chưa có tài khoản Zalo nào">
+      <v-data-table :headers="headers" :items="filteredAccounts" :loading="loading" no-data-text="Không tìm thấy tài khoản phù hợp">
         <template #item.status="{ item }">
           <v-chip :color="statusColor(item.liveStatus || item.status)" size="small" variant="flat">
             {{ statusText(item.liveStatus || item.status) }}
@@ -23,46 +44,52 @@
             </template>
           </v-tooltip>
         </template>
+        <!-- Feature 0053 F21 — row actions follow the F12 (Feature 0049) pattern:
+             ghost icon buttons (variant="text", no color) so the row no longer
+             reads as a rainbow of saturated squares. Destructive delete keeps
+             color="error" so it stays distinguishable; QR-login keeps
+             color="primary" because it's the active CTA when an account isn't
+             yet connected. -->
         <template #item.actions="{ item }">
-          <v-btn v-if="authStore.isAdmin" icon size="small" color="cyan" title="Phân quyền truy cập" @click="openAccess(item)">
-            <v-icon>mdi-shield-account</v-icon>
+          <v-btn v-if="authStore.isAdmin" icon variant="text" size="small" title="Phân quyền truy cập" @click="openAccess(item)">
+            <v-icon size="20">mdi-shield-account</v-icon>
           </v-btn>
-          <v-btn icon size="small" color="success" @click="syncContacts(item.id)" title="Đồng bộ danh bạ Zalo" :loading="syncing === item.id">
-            <v-icon>mdi-account-sync</v-icon>
+          <v-btn icon variant="text" size="small" @click="syncContacts(item.id)" title="Đồng bộ danh bạ Zalo" :loading="syncing === item.id">
+            <v-icon size="20">mdi-account-sync</v-icon>
           </v-btn>
           <v-btn
             v-if="authStore.isAdmin"
-            icon size="small" color="warning"
+            icon variant="text" size="small"
             @click="openHistoryDialog(item)"
             title="Đồng bộ lịch sử nhóm chat"
             :disabled="item.liveStatus !== 'connected'"
             :loading="syncingHistory === item.id">
-            <v-icon>mdi-history</v-icon>
+            <v-icon size="20">mdi-history</v-icon>
           </v-btn>
           <v-btn
             v-if="authStore.isAdmin"
-            icon size="small" color="purple"
+            icon variant="text" size="small"
             @click="openAutoReplyDialog(item)"
             title="Cấu hình auto-reply ngoài giờ"
           >
-            <v-icon>mdi-message-reply-text-outline</v-icon>
+            <v-icon size="20">mdi-message-reply-text-outline</v-icon>
           </v-btn>
           <v-btn
             v-if="authStore.isAdmin"
-            icon size="small" color="indigo"
+            icon variant="text" size="small"
             @click="openProxyDialog(item)"
             title="Cấu hình proxy (HTTP/SOCKS5)"
           >
-            <v-icon>mdi-shield-link-variant-outline</v-icon>
+            <v-icon size="20">mdi-shield-link-variant-outline</v-icon>
           </v-btn>
-          <v-btn v-if="item.liveStatus !== 'connected'" icon size="small" color="primary" @click="loginAccount(item.id)" title="Đăng nhập QR">
-            <v-icon>mdi-qrcode</v-icon>
+          <v-btn v-if="item.liveStatus !== 'connected'" icon variant="text" size="small" color="primary" @click="loginAccount(item.id)" title="Đăng nhập QR">
+            <v-icon size="20">mdi-qrcode</v-icon>
           </v-btn>
-          <v-btn v-if="item.liveStatus === 'disconnected' && item.sessionData" icon size="small" color="info" @click="reconnectAccount(item.id)" title="Kết nối lại">
-            <v-icon>mdi-refresh</v-icon>
+          <v-btn v-if="item.liveStatus === 'disconnected' && item.sessionData" icon variant="text" size="small" @click="reconnectAccount(item.id)" title="Kết nối lại">
+            <v-icon size="20">mdi-refresh</v-icon>
           </v-btn>
-          <v-btn icon size="small" color="error" @click="confirmDelete(item)" title="Xóa">
-            <v-icon>mdi-delete</v-icon>
+          <v-btn icon variant="text" size="small" color="error" @click="confirmDelete(item)" title="Xóa">
+            <v-icon size="20">mdi-delete</v-icon>
           </v-btn>
         </template>
       </v-data-table>
@@ -299,6 +326,29 @@ const deleteTarget = ref<ZaloAccount | null>(null);
 const accessTarget = ref<ZaloAccount | null>(null);
 const autoReplyTarget = ref<ZaloAccount | null>(null);
 const historyTarget = ref<ZaloAccount | null>(null);
+
+// Feature 0053 F22 — toolbar filter state.
+const search = ref('');
+const statusFilter = ref<string | null>(null);
+const STATUS_FILTER_OPTIONS = [
+  { title: 'Đang kết nối', value: 'connected' },
+  { title: 'Mất kết nối', value: 'disconnected' },
+  { title: 'Chưa đăng nhập', value: 'pending' },
+];
+
+const filteredAccounts = computed(() => {
+  const q = search.value.trim().toLowerCase();
+  const status = statusFilter.value;
+  return accounts.value.filter((a) => {
+    if (status && (a.liveStatus || a.status) !== status) return false;
+    if (!q) return true;
+    return (
+      (a.displayName ?? '').toLowerCase().includes(q) ||
+      (a.zaloUid ?? '').toLowerCase().includes(q) ||
+      (a.phone ?? '').toLowerCase().includes(q)
+    );
+  });
+});
 const historyGroupId = ref('');
 const historyCount = ref(50);
 const historyResult = ref<
