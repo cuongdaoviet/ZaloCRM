@@ -10,7 +10,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { authMiddleware } from '../auth/auth-middleware.js';
-import { validateSearchInput, buildSnippet } from './search-helpers.js';
+import { validateSearchInput, buildSnippet, stripJsonEnvelope } from './search-helpers.js';
 
 export async function searchRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authMiddleware);
@@ -43,6 +43,11 @@ export async function searchRoutes(app: FastifyInstance) {
         select: {
           id: true,
           content: true,
+          // Include contentType so the FE preview formatter can short-circuit
+          // attachment types ('image', 'sticker', 'voice', etc.) before
+          // attempting to JSON-parse the body. Without this, the dropdown
+          // would render the raw JSON / file metadata as a string.
+          contentType: true,
           senderName: true,
           sentAt: true,
           conversation: { select: { id: true, contact: { select: { fullName: true } } } },
@@ -144,8 +149,12 @@ export async function searchRoutes(app: FastifyInstance) {
       prisma.message.count({ where }),
     ]);
 
+    // Also strip the JSON envelope from `content` itself before returning,
+    // so any FE consumer that displays raw content (not just snippet) sees
+    // the human label too. Mirrors what `buildSnippet` does internally.
     const messages = rows.map((r) => ({
       ...r,
+      content: stripJsonEnvelope(r.content),
       snippet: buildSnippet(r.content, f.q),
     }));
 

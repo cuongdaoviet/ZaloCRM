@@ -45,7 +45,10 @@
           >
             <template #prepend><v-icon size="18" color="info">mdi-chat</v-icon></template>
             <v-list-item-title class="text-truncate" style="max-width: 300px;">
-              {{ truncate(m.content, 60) }}
+              <!-- Use the shared preview formatter so JSON-stringified Zalo
+                   payloads (reminder cards, link cards, etc.) render their
+                   human label instead of the raw {"title":"…"} blob. -->
+              {{ formatMessagePreview(m.content, m.contentType, { maxChars: 60 }) }}
             </v-list-item-title>
             <v-list-item-subtitle>{{ m.senderName }} · {{ formatDate(m.sentAt) }}</v-list-item-subtitle>
           </v-list-item>
@@ -80,6 +83,7 @@
 import { ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '@/api/index';
+import { formatMessagePreview } from '@/composables/use-message-preview';
 
 interface ContactResult {
   id: string;
@@ -92,6 +96,10 @@ interface ContactResult {
 interface MessageResult {
   id: string;
   content: string | null;
+  /** Zalo content type hint so the preview formatter can short-circuit
+   *  attachment types ('image', 'sticker', 'voice', etc.) before trying
+   *  to parse the JSON body. */
+  contentType: string | null;
   senderName: string | null;
   sentAt: string;
   conversation?: { id: string; contact?: { fullName: string | null } } | null;
@@ -159,10 +167,6 @@ function goTo(path: string, id?: string) {
     return;
   }
   router.push(path);
-}
-
-function truncate(s: string | null, len: number): string {
-  return s && s.length > len ? s.slice(0, len) + '...' : s || '';
 }
 
 function formatDate(d: string): string {

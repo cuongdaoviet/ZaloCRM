@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   validateSearchInput,
   buildSnippet,
+  stripJsonEnvelope,
 } from '../../src/modules/search/search-helpers.js';
 
 describe('validateSearchInput', () => {
@@ -136,5 +137,63 @@ describe('buildSnippet', () => {
     const s = buildSnippet(long, 'not-found-anywhere');
     expect(s.length).toBeLessThanOrEqual(81); // 80 + the ellipsis
     expect(s.endsWith('…')).toBe(true);
+  });
+});
+
+describe('stripJsonEnvelope', () => {
+  it('returns plain text unchanged', () => {
+    expect(stripJsonEnvelope('hello world')).toBe('hello world');
+  });
+
+  it('returns empty for null / undefined / empty', () => {
+    expect(stripJsonEnvelope(null)).toBe('');
+    expect(stripJsonEnvelope(undefined)).toBe('');
+    expect(stripJsonEnvelope('')).toBe('');
+  });
+
+  it('extracts reminder title for msginfo.actionlist payloads', () => {
+    const raw = JSON.stringify({ action: 'msginfo.actionlist', title: 'Họp 9 giờ' });
+    expect(stripJsonEnvelope(raw)).toBe('Họp 9 giờ');
+  });
+
+  it('extracts generic title field from Zalo card payloads', () => {
+    const raw = '{"title":"Thầy Việt xin phép gửi tới các bậc phụ huynh","action":"none"}';
+    expect(stripJsonEnvelope(raw)).toBe('Thầy Việt xin phép gửi tới các bậc phụ huynh');
+  });
+
+  it('falls back to text/description/name when title missing', () => {
+    expect(stripJsonEnvelope('{"text":"abc"}')).toBe('abc');
+    expect(stripJsonEnvelope('{"description":"xyz"}')).toBe('xyz');
+    expect(stripJsonEnvelope('{"name":"def"}')).toBe('def');
+  });
+
+  it('returns raw when JSON has no recognizable label fields', () => {
+    const raw = '{"foo":"bar","baz":123}';
+    expect(stripJsonEnvelope(raw)).toBe(raw);
+  });
+
+  it('returns raw when content starts with { but is not valid JSON', () => {
+    const raw = '{not really json';
+    expect(stripJsonEnvelope(raw)).toBe(raw);
+  });
+
+  it('ignores non-string title fields (guards against object/array)', () => {
+    const raw = JSON.stringify({ title: { nested: 'yes' }, text: 'fallback' });
+    expect(stripJsonEnvelope(raw)).toBe('fallback');
+  });
+
+  it('preserves leading whitespace check via trimStart', () => {
+    const raw = '   {"title":"trimmed"}';
+    expect(stripJsonEnvelope(raw)).toBe('trimmed');
+  });
+});
+
+describe('buildSnippet — JSON envelope handling', () => {
+  it('extracts the label before snippetting', () => {
+    const raw = '{"title":"Chào buổi sáng anh chị nhé"}';
+    const snippet = buildSnippet(raw, 'chào');
+    // Should match against the extracted text, not the raw JSON
+    expect(snippet).toContain('**Chào**');
+    expect(snippet).not.toContain('{"title"');
   });
 });
