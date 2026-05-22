@@ -30,7 +30,7 @@
          we fit ~6 columns on a 1280px viewport without horizontal scroll. -->
     <v-data-table
       v-model="selected"
-      :headers="headers"
+      :headers="visibleHeaders"
       :items="contacts"
       :loading="loading"
       :items-per-page="pagination.limit"
@@ -241,6 +241,37 @@ const headers = [
   { title: 'Ngày tiếp nhận', key: 'firstContactDate', sortable: true },
   { title: 'Sale', key: 'assignedUser', sortable: false },
 ];
+
+// Feature 0049 F9 — hide columns where the current page of contacts has
+// no data. SDT / Email / Nguồn / Sale columns were rendering "—" for
+// every row, eating ~60% of the table width while contributing nothing.
+// Keep the always-on columns (avatar, name, lead, status, dates) visible
+// even when their values happen to be empty, so the table doesn't collapse
+// to two columns on an empty page. The user can re-enable hidden columns
+// via "Cột" (Columns) when data starts flowing in — future enhancement.
+const ALWAYS_VISIBLE_KEYS = new Set(['avatarUrl', 'fullName', 'leadScore', 'status', 'nextAppointment', 'firstContactDate']);
+
+function columnHasData(key: string): boolean {
+  if (!contacts.value?.length) return true; // empty table: show everything
+  const accessor = (c: Contact): unknown => {
+    switch (key) {
+      case 'phone': return c.phone;
+      case 'email': return c.email;
+      case 'source': return c.source;
+      case 'assignedUser': return c.assignedUser?.fullName;
+      default: return true;
+    }
+  };
+  // "Has data" = at least 1 non-empty value in the current page.
+  return contacts.value.some((c: Contact) => {
+    const v = accessor(c);
+    return v !== null && v !== undefined && v !== '';
+  });
+}
+
+const visibleHeaders = computed(() =>
+  headers.filter((h) => ALWAYS_VISIBLE_KEYS.has(h.key) || columnHasData(h.key)),
+);
 
 function sourceLabel(value: string) {
   return SOURCE_OPTIONS.find(o => o.value === value)?.text ?? value;

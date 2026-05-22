@@ -33,6 +33,18 @@
         @click:row="(_e: unknown, ctx: { item: Campaign }) => openDetail(ctx.item)"
         density="comfortable"
       >
+        <!-- Feature 0049 F2 — replace the bare "no data" cell with an
+             inline CTA so users don't have to hunt for the create button
+             in the page header. -->
+        <template #no-data>
+          <div class="text-center pa-8">
+            <v-icon size="40" color="grey-lighten-1" class="mb-2">mdi-bullhorn-outline</v-icon>
+            <div class="text-body-2 text-medium-emphasis">Chưa có chiến dịch nào</div>
+            <v-btn color="primary" variant="tonal" size="small" prepend-icon="mdi-plus" class="mt-3" @click="openCreateDialog">
+              Tạo chiến dịch đầu tiên
+            </v-btn>
+          </div>
+        </template>
         <template #item.status="{ item }">
           <v-chip :color="STATUS_COLORS[item.status]" size="small" variant="flat">
             {{ STATUS_LABELS[item.status] }}

@@ -3,7 +3,13 @@
     <v-card-title class="text-body-1">Trạng thái lịch hẹn</v-card-title>
     <v-card-text>
       <Pie v-if="chartData" :data="chartData" :options="chartOptions" style="height: 250px;" />
-      <div v-else class="text-center pa-8 text-grey">Không có dữ liệu</div>
+      <div v-else class="text-center pa-8">
+        <v-icon size="40" color="grey-lighten-1" class="mb-2">mdi-calendar-clock-outline</v-icon>
+        <div class="text-body-2 text-medium-emphasis">Chưa có lịch hẹn</div>
+        <v-btn variant="text" color="primary" size="small" class="mt-2" to="/appointments">
+          Tạo lịch hẹn
+        </v-btn>
+      </div>
     </v-card-text>
   </v-card>
 </template>

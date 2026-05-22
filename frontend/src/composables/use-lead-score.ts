@@ -48,12 +48,16 @@ export function bandForScore(score: number): LeadScoreBand {
   return 'cold';
 }
 
-/** Vuetify color + VN label per band (BR-0011). */
+/** Vuetify color + VN label per band (BR-0011).
+ * Feature 0049 F10 — pulled the band palette apart so users can
+ * distinguish hot/warm/normal/cold from across the room. Previously
+ * `warm`=orange and `normal`=amber were nearly identical reds, making
+ * the badge feel like decoration instead of information. */
 export const bandMeta: Record<LeadScoreBand, { color: string; label: string }> = {
-  hot: { color: 'red', label: 'Nóng' },
-  warm: { color: 'orange', label: 'Ấm' },
-  normal: { color: 'amber', label: 'Bình thường' },
-  cold: { color: 'grey', label: 'Nguội' },
+  hot: { color: 'red-darken-2', label: 'Nóng' },        // saturated red — pull eye
+  warm: { color: 'orange-darken-1', label: 'Ấm' },      // mid orange — distinct from red
+  normal: { color: 'blue-grey-lighten-1', label: 'Bình thường' }, // cool muted neutral
+  cold: { color: 'grey-lighten-1', label: 'Nguội' },    // lightest, fades into row
 };
 
 /** Default config — used as a placeholder before the GET resolves. */

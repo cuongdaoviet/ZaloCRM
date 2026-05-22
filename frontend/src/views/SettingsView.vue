@@ -34,15 +34,19 @@
                 {{ item.isActive ? 'Hoạt động' : 'Vô hiệu' }}
               </v-chip>
             </template>
+            <!-- Feature 0049 F12 — all three row actions now use the
+                 same ghost-icon visual treatment so the row reads as one
+                 action group. Color on hover (via :hover) communicates
+                 destructive intent without a permanently red square. -->
             <template #item.actions="{ item }">
-              <v-btn v-if="authStore.isAdmin" icon size="small" title="Chỉnh sửa" @click="openEdit(item)">
-                <v-icon>mdi-pencil</v-icon>
+              <v-btn v-if="authStore.isAdmin" icon variant="text" size="small" title="Chỉnh sửa" @click="openEdit(item)">
+                <v-icon size="20">mdi-pencil</v-icon>
               </v-btn>
-              <v-btn v-if="authStore.isAdmin" icon size="small" title="Đặt lại mật khẩu" @click="openPassword(item)">
-                <v-icon>mdi-lock-reset</v-icon>
+              <v-btn v-if="authStore.isAdmin" icon variant="text" size="small" title="Đặt lại mật khẩu" @click="openPassword(item)">
+                <v-icon size="20">mdi-lock-reset</v-icon>
               </v-btn>
-              <v-btn v-if="authStore.isOwner && item.id !== authStore.user?.id" icon size="small" color="error" title="Vô hiệu hóa" @click="confirmDelete(item)">
-                <v-icon>mdi-delete</v-icon>
+              <v-btn v-if="authStore.isOwner && item.id !== authStore.user?.id" icon variant="text" size="small" color="error" title="Vô hiệu hóa" @click="confirmDelete(item)">
+                <v-icon size="20">mdi-delete</v-icon>
               </v-btn>
             </template>
           </v-data-table>
@@ -163,10 +167,13 @@ const headers = [
   { title: 'Hành động', key: 'actions', sortable: false, align: 'end' as const },
 ];
 
+// Feature 0049 F11 — role pills must all read as solid, visible chips.
+// Returning 'default' for member produced a ghost pill that disappeared
+// against the white row background.
 function roleColor(role: string) {
   if (role === 'owner') return 'primary';
   if (role === 'admin') return 'info';
-  return 'default';
+  return 'grey-darken-1';
 }
 
 function roleLabel(role: string) {

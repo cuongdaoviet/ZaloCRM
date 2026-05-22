@@ -12,11 +12,16 @@
     </div>
 
     <v-form @submit.prevent="handleLogin">
+      <!-- Feature 0049 F7 — switched to outlined variant + dropped the
+           prepend icons. The default filled variant + leading icon read
+           too much like a placeholder-only field; outlined keeps the label
+           visible in the notch above the field once focused / filled. -->
       <v-text-field
         v-model="email"
         label="Email"
         type="email"
-        prepend-inner-icon="mdi-email-outline"
+        variant="outlined"
+        autocomplete="email"
         required
         class="mb-3"
       />
@@ -24,12 +29,12 @@
         v-model="password"
         label="Mật khẩu"
         type="password"
-        prepend-inner-icon="mdi-lock-outline"
+        variant="outlined"
+        autocomplete="current-password"
         required
         class="mb-5"
       />
       <v-btn type="submit" color="primary" block size="large" :loading="loading" rounded="xl">
-        <v-icon start>mdi-login</v-icon>
         Đăng nhập
       </v-btn>
     </v-form>

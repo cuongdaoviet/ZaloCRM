@@ -7,3 +7,4 @@ backups/
 # Feature 0046 BR-0026 — gstack working dir (security reports, draft
 # audit transcripts). Never commit.
 .gstack/
+.gstack-design-audit-*/

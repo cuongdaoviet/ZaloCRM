@@ -1,14 +1,13 @@
 <template>
   <div>
-    <h1 class="text-h5 mb-2">
+    <!-- Feature 0049 F14 — dropped the 3-sentence happy-talk paragraph
+         that explained the page and reiterated encryption guarantees.
+         The form is self-evident; the encryption note moved to a
+         tooltip on the API key field below. -->
+    <h1 class="text-h5 mb-4">
       <v-icon class="mr-2" color="primary">mdi-robot-outline</v-icon>
       Gợi ý AI (BYOK)
     </h1>
-    <p class="text-body-2 text-grey mb-4">
-      Cấu hình provider AI (Anthropic, OpenAI, Gemini, Qwen, Kimi, Ollama).
-      ZaloCRM không lưu API key dạng plaintext — mọi key đều được mã hoá AES-256-GCM
-      với key suy ra theo từng org. Nội dung gợi ý KHÔNG bao giờ được lưu trong DB.
-    </p>
 
     <v-alert v-if="topError" type="error" closable density="compact" class="mb-3" @click:close="topError = ''">
       {{ topError }}
@@ -47,7 +46,7 @@
               :label="apiKeyLabel"
               :type="showApiKey ? 'text' : 'password'"
               :placeholder="config.apiKeyConfigured ? 'Đã cấu hình — để trống nếu không đổi' : 'Nhập API key'"
-              :hint="config.apiKeyConfigured ? 'Để trống = giữ nguyên key cũ. Nhập null để xoá.' : ''"
+              :hint="config.apiKeyConfigured ? 'Để trống = giữ nguyên key cũ. Nhập null để xoá.' : 'Mã hoá AES-256-GCM với key per-org. Không bao giờ lưu plaintext.'"
               persistent-hint
               density="comfortable"
               class="mb-2"
@@ -93,21 +92,35 @@
               hide-details
             />
           </v-card-text>
-          <v-card-actions>
+          <v-card-actions class="d-flex align-center">
             <v-btn
               color="primary"
               variant="elevated"
               :loading="saving"
               :disabled="!canSave"
               data-testid="ai-config-save"
+              :title="canSave ? '' : 'Cần chọn provider, model và nhập API key trước khi lưu'"
               @click="onSave"
             >
               <v-icon start>mdi-content-save</v-icon>
               Lưu &amp; kiểm tra kết nối
             </v-btn>
+            <!-- Feature 0049 F6 — disabled-state hint. The save button is
+                 legitimately disabled at first render (no API key yet), but
+                 the faded primary-color disabled state was reading as "save
+                 is enabled but muted" instead of "missing input". Surface the
+                 reason inline so the user knows what to do. -->
+            <span
+              v-if="!canSave"
+              class="text-caption text-medium-emphasis ml-3"
+            >
+              Cần nhập API key để lưu
+            </span>
+            <v-spacer />
             <v-btn
-              variant="text"
+              variant="outlined"
               color="error"
+              size="small"
               :disabled="!config.apiKeyConfigured"
               @click="onClear"
             >
