@@ -416,14 +416,33 @@ function lastMessagePreview(conv: Conversation): string {
     case 'link': return prefix + '🔗 Liên kết';
   }
 
-  // Reminder/calendar messages
-  if (msg.content) {
+  // Card / structured-payload messages: Zalo sends some message types as
+  // a JSON-stringified payload (reminders, banking cards, group info
+  // shares, etc.) where the human-readable label lives in a `title` or
+  // `text` field. Without parsing, the raw JSON leaks into the row
+  // preview ("{\"title\":\"🍀 Ngân Hàng...\"}") which looks broken.
+  // Feature 0049 F5 — handle the generic "JSON payload with a label"
+  // case alongside the specific reminder shape.
+  if (msg.content && msg.content.trimStart().startsWith('{')) {
     try {
       const p = JSON.parse(msg.content);
-      if (p.action === 'msginfo.actionlist' && p.title) {
-        return prefix + '📅 ' + p.title.slice(0, 50);
+      if (p?.action === 'msginfo.actionlist' && p?.title) {
+        return prefix + '📅 ' + String(p.title).slice(0, 50);
       }
-    } catch { /* not JSON */ }
+      // Generic fallback: pull any human-readable label from common
+      // fields. Tried in order of how rich the label usually is.
+      const label =
+        (typeof p?.title === 'string' && p.title) ||
+        (typeof p?.text === 'string' && p.text) ||
+        (typeof p?.description === 'string' && p.description) ||
+        (typeof p?.name === 'string' && p.name) ||
+        '';
+      if (label) {
+        return prefix + label.slice(0, 50);
+      }
+      // No label found — show a placeholder instead of the raw JSON.
+      return prefix + '[Tin nhắn dạng đặc biệt]';
+    } catch { /* not JSON after all — fall through to plain text */ }
   }
 
   const text = msg.content || '';

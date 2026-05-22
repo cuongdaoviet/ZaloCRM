@@ -3,7 +3,16 @@
     <v-card-title class="text-body-1">Pipeline khách hàng</v-card-title>
     <v-card-text>
       <Doughnut v-if="chartData" :data="chartData" :options="chartOptions" style="height: 250px;" />
-      <div v-else class="text-center pa-8 text-grey">Không có dữ liệu</div>
+      <!-- Feature 0049 F2 — warmer empty state with a "do this next" hint
+           rather than a bare "no data" cell. Pipeline data flows from
+           contacts → status field, so point users there. -->
+      <div v-else class="empty-state text-center pa-8">
+        <v-icon size="40" color="grey-lighten-1" class="mb-2">mdi-chart-donut</v-icon>
+        <div class="text-body-2 text-medium-emphasis">Chưa có khách hàng nào</div>
+        <v-btn variant="text" color="primary" size="small" class="mt-2" to="/contacts">
+          Đi tới Khách hàng
+        </v-btn>
+      </div>
     </v-card-text>
   </v-card>
 </template>

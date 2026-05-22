@@ -44,8 +44,11 @@
       </v-btn>
     </v-app-bar>
 
-    <!-- Sidebar navigation -->
-    <v-navigation-drawer v-model="drawer" :rail="rail" permanent @click="rail = false">
+    <!-- Sidebar navigation. Width bumped from Vuetify default 256→280 so the
+         longer Vietnamese group labels ("Marketing & Automation",
+         "KPI & Leaderboard", "Workflow tự động", "Auto-tag keyword") fit
+         without mid-word truncation. Feature 0049. -->
+    <v-navigation-drawer v-model="drawer" :rail="rail" :width="280" permanent @click="rail = false">
       <v-list
         v-model:opened="openedGroups"
         density="compact"

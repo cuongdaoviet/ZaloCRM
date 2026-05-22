@@ -79,7 +79,17 @@
         </thead>
         <tbody>
           <tr v-if="!loading && orders.length === 0">
-            <td colspan="7" class="text-center text-grey py-6">Không có đơn hàng</td>
+            <td colspan="7" class="text-center py-8">
+              <!-- Feature 0049 F2 — empty-state with inline CTA. The
+                   "+ Tạo đơn" button in the page header is 600+px away
+                   from the empty table; surfacing it here saves a long
+                   eye-jump. -->
+              <v-icon size="36" color="grey-lighten-1" class="mb-2">mdi-cart-outline</v-icon>
+              <div class="text-body-2 text-medium-emphasis">Chưa có đơn hàng nào</div>
+              <v-btn color="primary" variant="tonal" size="small" prepend-icon="mdi-plus" class="mt-3" @click="openCreate">
+                Tạo đơn đầu tiên
+              </v-btn>
+            </td>
           </tr>
           <tr v-for="o in orders" :key="o.id">
             <td class="text-caption font-weight-medium">{{ o.orderCode }}</td>

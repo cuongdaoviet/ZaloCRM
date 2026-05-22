@@ -3,7 +3,13 @@
     <v-card-title class="text-body-1">Nguồn khách hàng</v-card-title>
     <v-card-text>
       <Pie v-if="chartData" :data="chartData" :options="chartOptions" style="height: 250px;" />
-      <div v-else class="text-center pa-8 text-grey">Không có dữ liệu</div>
+      <div v-else class="text-center pa-8">
+        <v-icon size="40" color="grey-lighten-1" class="mb-2">mdi-chart-pie</v-icon>
+        <div class="text-body-2 text-medium-emphasis">Chưa có dữ liệu nguồn</div>
+        <div class="text-caption text-medium-emphasis mt-1">
+          Gán trường "Nguồn" cho khách hàng để xem phân bố tại đây.
+        </div>
+      </div>
     </v-card-text>
   </v-card>
 </template>
