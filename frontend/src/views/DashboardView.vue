@@ -14,7 +14,7 @@
         <v-card variant="outlined">
           <v-card-text class="text-center pa-3">
             <v-icon icon="mdi-cart-outline" color="primary" size="28" class="mb-1" />
-            <div class="text-h5 font-weight-bold">{{ orderStats?.totalOrders ?? '—' }}</div>
+            <div class="text-h4 font-weight-bold">{{ orderStats?.totalOrders ?? '—' }}</div>
             <div class="text-caption text-grey">Đơn hàng mới</div>
           </v-card-text>
         </v-card>

@@ -28,6 +28,191 @@ html, body {
    system fallback instead of system → … → Jakarta. */
 .v-application {
   font-family: var(--smax-font-stack);
+  font-size: var(--smax-font-base);
+}
+
+/* ════════════════════════════════════════════════════════════
+   Feature 0054 — unified typography scale (variant C).
+   ════════════════════════════════════════════════════════════
+   Before this block, Vuetify defaults pushed inputs to 16px, table cells
+   to 14px, list rows to 14px, and h5 titles to 22px/500 — so any page had
+   3–4 different sizes for "regular text". This forces every non-title
+   surface down to one body size (14px) so the only intentional contrast
+   is title vs body. */
+
+/* Page title utility — replaces ad-hoc `<h1 class="text-h5">` across
+   25+ views. Kept as both class and CSS variable so dialog titles /
+   card titles can opt in. */
+.page-title,
+.v-application .text-page-title {
+  font-size: var(--smax-font-title);
+  font-weight: var(--smax-font-title-w);
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+/* Vuetify form fields — VTextField / VSelect / VAutocomplete / VTextarea
+   all wrap their visible text in `.v-field__input`. The default rule is
+   `font-size: 16px` (Material spec) which makes inputs visibly bigger
+   than body text. Pin to body size. */
+.v-application .v-field__input,
+.v-application .v-field input,
+.v-application .v-field textarea,
+.v-application .v-field .v-select__selection-text {
+  font-size: var(--smax-font-base);
+}
+.v-application .v-field .v-label {
+  font-size: var(--smax-font-base);
+}
+.v-application .v-field--variant-outlined .v-label--floating {
+  font-size: 12px;
+}
+
+/* List rows — sidebar nav, settings menus, dropdown menus. Vuetify ships
+   `.v-list-item-title` at 1rem (~16px) and `.v-list-item-subtitle` at
+   0.875rem (14px). We want both pinned to body so the sidebar doesn't
+   look bigger than the table next to it. */
+.v-application .v-list-item-title {
+  font-size: var(--smax-font-base);
+  line-height: 1.4;
+}
+.v-application .v-list-item-subtitle {
+  font-size: var(--smax-font-tiny);
+}
+
+/* Data tables — Vuetify gives `th` 0.75rem (12px) bold by default. That
+   reads like a footnote next to 14px body cells. Lift to 13px / 600 so
+   the header is distinguishable but not jarring. */
+.v-application .v-data-table th,
+.v-application .v-data-table-header__content {
+  font-size: var(--smax-font-small);
+  font-weight: 600;
+  color: var(--smax-grey-700);
+}
+.v-application .v-data-table td {
+  font-size: var(--smax-font-base);
+}
+
+/* Buttons — pin to body size; Vuetify defaults to 14.875px-ish depending
+   on size variant which leaves CTAs slightly bigger than table text. */
+.v-application .v-btn {
+  font-size: var(--smax-font-base);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.v-application .v-btn--size-x-small { font-size: 12px; }
+.v-application .v-btn--size-small   { font-size: 13px; }
+
+/* Card titles — Vuetify default 1.25rem (20px) bold. That equals our
+   page title, which means dialog titles compete with the H1 above them.
+   Drop card-title to 16px / 600 so dialog headers read as a section,
+   not as a sibling of the page title. */
+.v-application .v-card-title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.v-application .v-card-subtitle {
+  font-size: var(--smax-font-small);
+}
+
+/* Vuetify's `text-h5` is widely used today as the page-title class.
+   Re-route it through our token until we sweep every <h1 class="text-h5">
+   to `.page-title`. (The sweep happens in the same PR, but keeping the
+   override means downstream code that still ships text-h5 in the future
+   doesn't drift from the scale.) */
+.v-application .text-h5 {
+  font-size: var(--smax-font-title);
+  font-weight: var(--smax-font-title-w);
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.v-application .text-h6 {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+/* Numeric emphasis class (KPI numbers, stat counters). Slightly larger
+   than the page title because numbers are the focal point of a stat
+   card. Used by MetricCard and the few in-card stat displays. */
+.v-application .text-h4 {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+/* Body / subtitle / caption — Vuetify defaults push body-1 and
+   subtitle-1 to 16px (Material spec), which is the same problem as
+   the input default. Pin everything to the same scale so a paragraph
+   in body-1 doesn't visibly outweigh a table cell in body-2. The
+   `text-body-2` and `text-caption` rules are mostly no-ops (Vuetify
+   already ships these at 14/12) — we set them explicitly so future
+   Vuetify upgrades can't silently drift the scale. */
+.v-application .text-body-1 {
+  font-size: var(--smax-font-base);
+  font-weight: 400;
+  line-height: var(--smax-line-height);
+}
+.v-application .text-body-2 {
+  font-size: var(--smax-font-base);
+  font-weight: 400;
+  line-height: var(--smax-line-height);
+}
+.v-application .text-caption {
+  font-size: var(--smax-font-tiny);
+  font-weight: 400;
+  line-height: 1.4;
+}
+.v-application .text-subtitle-1 {
+  font-size: var(--smax-font-base);
+  font-weight: 500;
+  line-height: 1.4;
+}
+.v-application .text-subtitle-2 {
+  font-size: var(--smax-font-small);
+  font-weight: 500;
+  line-height: 1.4;
+}
+.v-application .text-overline {
+  font-size: var(--smax-font-tiny);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* App bar / toolbar titles — Vuetify defaults render `.v-toolbar-title`
+   at 1.25rem (20px) which matches our page-title, so leave that alone.
+   But the top-bar in DefaultLayout uses a custom span — that's already
+   bounded to var(--smax-font-base). This rule just guarantees v-toolbar
+   spans don't drift if a future feature uses one. */
+.v-application .v-toolbar-title,
+.v-application .v-app-bar-title {
+  font-size: var(--smax-font-title);
+  font-weight: var(--smax-font-title-w);
+  letter-spacing: 0;
+}
+
+/* Tabs / chips — pin to body so they don't outweigh table rows. */
+.v-application .v-tab {
+  font-size: var(--smax-font-base);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.v-application .v-chip {
+  font-size: var(--smax-font-tiny);
+}
+.v-application .v-chip--size-small  { font-size: var(--smax-font-tiny); }
+.v-application .v-chip--size-large  { font-size: var(--smax-font-small); }
+
+/* Alerts — Vuetify defaults to 16px body. Pin to scale. */
+.v-application .v-alert {
+  font-size: var(--smax-font-base);
+}
+.v-application .v-alert-title {
+  font-size: var(--smax-font-small);
+  font-weight: 600;
 }
 
 /* ════════ Smax light theme — defaults for v-* components ════════ */

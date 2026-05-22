@@ -33,25 +33,25 @@
           <v-col cols="3">
             <v-card variant="outlined" class="pa-3 text-center">
               <div class="text-caption text-grey">Tổng</div>
-              <div class="text-h5">{{ campaign.totalTargets }}</div>
+              <div class="text-h4">{{ campaign.totalTargets }}</div>
             </v-card>
           </v-col>
           <v-col cols="3">
             <v-card variant="outlined" class="pa-3 text-center">
               <div class="text-caption text-success">Đã gửi</div>
-              <div class="text-h5 text-success">{{ campaign.sentCount }}</div>
+              <div class="text-h4 text-success">{{ campaign.sentCount }}</div>
             </v-card>
           </v-col>
           <v-col cols="3">
             <v-card variant="outlined" class="pa-3 text-center">
               <div class="text-caption text-error">Lỗi</div>
-              <div class="text-h5 text-error">{{ campaign.failedCount }}</div>
+              <div class="text-h4 text-error">{{ campaign.failedCount }}</div>
             </v-card>
           </v-col>
           <v-col cols="3">
             <v-card variant="outlined" class="pa-3 text-center">
               <div class="text-caption text-grey">Bỏ qua</div>
-              <div class="text-h5">{{ campaign.skippedCount }}</div>
+              <div class="text-h4">{{ campaign.skippedCount }}</div>
             </v-card>
           </v-col>
         </v-row>

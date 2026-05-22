@@ -356,7 +356,7 @@
                   </template>
                 </div>
                 <!-- Timestamp -->
-                <div class="text-caption mt-1 msg-time" :class="msg.senderType === 'self' ? 'msg-time-self' : 'msg-time-contact'" style="font-size: 0.7rem;">
+                <div class="text-caption mt-1 msg-time" :class="msg.senderType === 'self' ? 'msg-time-self' : 'msg-time-contact'">
                   {{ formatMessageTime(msg.sentAt) }}
                 </div>
               </div>
