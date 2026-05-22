@@ -1,5 +1,5 @@
 <template>
-  <div style="width: 280px;">
+  <div style="width: 100%; max-width: 520px; min-width: 280px;">
     <v-text-field
       v-model="query"
       placeholder="Tìm kiếm..."

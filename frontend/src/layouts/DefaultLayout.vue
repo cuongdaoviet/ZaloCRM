@@ -17,9 +17,13 @@
         </v-app-bar-title>
       </div>
 
-      <!-- Global search -->
-      <GlobalSearch class="mx-2" />
-
+      <!-- Global search — centered between the brand on the left and the
+           user/notification cluster on the right by sandwiching the
+           component between two v-spacers. Width is fluid (max 520px,
+           min 280px) so the input grows on wider viewports without
+           crowding the action cluster. -->
+      <v-spacer />
+      <GlobalSearch class="mx-4" style="flex: 0 1 520px;" />
       <v-spacer />
 
       <!-- Feature 0053 F16 — the old ONLINE pill (filled green oval, bold
