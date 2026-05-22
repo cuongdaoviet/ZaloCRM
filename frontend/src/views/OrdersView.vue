@@ -9,43 +9,22 @@
       <v-btn color="primary" prepend-icon="mdi-plus" @click="openCreate">Tạo đơn</v-btn>
     </div>
 
-    <!-- Stats cards -->
+    <!-- Stats cards — Feature 0052a, refactored to <MetricCard>.
+         Dropped the 4 colored-icon-in-card decorations (mdi-cart, check-circle,
+         currency-usd, calendar-today). Same AI-slop pattern Dashboard removed
+         in PR #104 / Feature 0049 F13 but missed here. -->
     <v-row class="mb-4">
       <v-col cols="6" sm="3">
-        <v-card variant="outlined">
-          <v-card-text class="text-center pa-3">
-            <v-icon icon="mdi-cart" color="primary" size="28" class="mb-1" />
-            <div class="text-h5 font-weight-bold">{{ stats?.totalOrders ?? '—' }}</div>
-            <div class="text-caption text-grey">Tổng đơn</div>
-          </v-card-text>
-        </v-card>
+        <MetricCard :value="stats?.totalOrders ?? '—'" label="Tổng đơn" />
       </v-col>
       <v-col cols="6" sm="3">
-        <v-card variant="outlined">
-          <v-card-text class="text-center pa-3">
-            <v-icon icon="mdi-check-circle" color="green" size="28" class="mb-1" />
-            <div class="text-h5 font-weight-bold">{{ stats?.completedOrders ?? '—' }}</div>
-            <div class="text-caption text-grey">Hoàn thành</div>
-          </v-card-text>
-        </v-card>
+        <MetricCard :value="stats?.completedOrders ?? '—'" label="Hoàn thành" />
       </v-col>
       <v-col cols="6" sm="3">
-        <v-card variant="outlined">
-          <v-card-text class="text-center pa-3">
-            <v-icon icon="mdi-currency-usd" color="teal" size="28" class="mb-1" />
-            <div class="text-h6 font-weight-bold">{{ formatVND(stats?.totalRevenue ?? 0) }}</div>
-            <div class="text-caption text-grey">Doanh thu</div>
-          </v-card-text>
-        </v-card>
+        <MetricCard :value="formatVND(stats?.totalRevenue ?? 0)" label="Doanh thu" />
       </v-col>
       <v-col cols="6" sm="3">
-        <v-card variant="outlined">
-          <v-card-text class="text-center pa-3">
-            <v-icon icon="mdi-calendar-today" color="orange" size="28" class="mb-1" />
-            <div class="text-h6 font-weight-bold">{{ formatVND(stats?.todayRevenue ?? 0) }}</div>
-            <div class="text-caption text-grey">Doanh thu hôm nay</div>
-          </v-card-text>
-        </v-card>
+        <MetricCard :value="formatVND(stats?.todayRevenue ?? 0)" label="Doanh thu hôm nay" />
       </v-col>
     </v-row>
 
@@ -147,6 +126,7 @@ import { ref, reactive, onMounted } from 'vue';
 import { useOrders, ORDER_STATUS_OPTIONS } from '@/composables/use-orders';
 import type { Order } from '@/composables/use-orders';
 import OrderStaffTable from '@/components/orders/OrderStaffTable.vue';
+import MetricCard from '@/components/shared/MetricCard.vue';
 
 const {
   orders, loading, saving, stats, staffStats,
