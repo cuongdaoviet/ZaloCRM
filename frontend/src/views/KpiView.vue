@@ -37,26 +37,22 @@
       Khoảng: <strong>{{ summary.range.label }}</strong> ({{ formatDate(summary.range.from) }} → {{ formatDate(summary.range.to) }})
     </p>
 
-    <!-- KPI cards -->
+    <!-- KPI cards — Feature 0052a, refactored to <MetricCard>.
+         Dropped the local border-left: 3px (AI-slop decoration) and the
+         delta arrow-up/down icons (sign in the text is already semantic).
+         Delta line now goes through MetricCard's `delta` prop for a
+         single render path across the app. -->
     <v-row v-if="summary" dense>
       <v-col v-for="card in cards" :key="card.key" cols="12" sm="6" md="4">
-        <v-card class="pa-4 kpi-card">
-          <div class="text-caption text-grey">{{ card.label }}</div>
-          <div class="text-h4 font-weight-bold my-1">{{ card.formatted }}</div>
-          <div class="d-flex align-center text-caption">
-            <v-icon
-              size="14"
-              :color="deltaColor(card.delta)"
-              class="mr-1"
-            >
-              {{ deltaIcon(card.delta) }}
-            </v-icon>
-            <span :class="`text-${deltaColor(card.delta)}`">
-              {{ formatDelta(card.delta) }}
-            </span>
-            <span class="text-grey ml-2">so với kỳ trước</span>
-          </div>
-        </v-card>
+        <MetricCard
+          :value="card.formatted"
+          :label="card.label"
+          :delta="{
+            text: formatDelta(card.delta),
+            color: deltaColor(card.delta),
+            suffix: 'so với kỳ trước',
+          }"
+        />
       </v-col>
     </v-row>
 
@@ -107,6 +103,7 @@ import {
   type LeaderboardMetric,
   type MetricCell,
 } from '@/composables/use-kpi';
+import MetricCard from '@/components/shared/MetricCard.vue';
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -167,12 +164,6 @@ function deltaColor(delta: number | null): string {
   if (delta < 0) return 'error';
   return 'grey';
 }
-function deltaIcon(delta: number | null): string {
-  if (delta === null) return 'mdi-minus';
-  if (delta > 0) return 'mdi-arrow-up';
-  if (delta < 0) return 'mdi-arrow-down';
-  return 'mdi-minus';
-}
 function formatDelta(delta: number | null): string {
   if (delta === null) return '—';
   const sign = delta > 0 ? '+' : '';
@@ -207,9 +198,3 @@ async function reloadLeaderboard() {
 
 onMounted(() => reload());
 </script>
-
-<style scoped>
-.kpi-card {
-  border-left: 3px solid rgba(0, 242, 255, 0.4);
-}
-</style>
