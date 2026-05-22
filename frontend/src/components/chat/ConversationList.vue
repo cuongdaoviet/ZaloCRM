@@ -214,12 +214,18 @@
         </template>
       </v-list-item>
 
-      <!-- Feature 0051 — branched empty-state. Case 1 (member with 0 ACL rows)
-           gets a different icon + message + no CTA, because /zalo-accounts
-           is admin-only (Feature 0048) so the rep can't self-serve. Case 2/3
-           (owner/admin org-wide OR member with grants but no chats) gets the
-           softer "waiting for messages" copy. The 40px muted icon + body-2
-           text pattern matches the Feature 0049 F2 empty-state polish. -->
+      <!-- Feature 0051 — branched empty-state. Three cases ordered by
+           severity:
+             1. Member with 0 ACL rows (no Zalo accounts granted) → shield
+                icon + "ask admin" copy. No CTA (admin-only fix).
+             2. Empty on the "Khác" tab → tell the user they may be looking
+                at the wrong tab AND surface the "+ Chat mới" CTA so they
+                can start a conversation. Reproduced when sale1 (or anyone)
+                gets their tab pref stuck on "other" with nothing archived.
+             3. Owner/admin org-wide OR member with grants but no chats →
+                softer "waiting for messages" copy + CTA to start a new chat
+                proactively. Was passive-only before — users misread it as
+                "wait" rather than "you can act now". -->
       <div
         v-if="!loading && conversations.length === 0"
         class="empty-state text-center pa-8"
@@ -235,6 +241,29 @@
             Hãy hỏi quản trị viên để được cấp quyền.
           </div>
         </template>
+        <template v-else-if="activeTab === 'other'">
+          <v-icon size="40" color="grey-lighten-1" class="mb-2">
+            mdi-archive-outline
+          </v-icon>
+          <div class="text-body-2 text-medium-emphasis">
+            Tab Khác đang trống
+          </div>
+          <div class="text-caption text-medium-emphasis mt-1">
+            Đây là nơi chứa hội thoại đã ẩn. Bấm
+            <span class="font-weight-medium">Chính</span> để xem tin nhắn,
+            hoặc bắt đầu cuộc trò chuyện mới.
+          </div>
+          <v-btn
+            variant="tonal"
+            color="primary"
+            size="small"
+            class="mt-3"
+            prepend-icon="mdi-message-plus"
+            @click="$emit('new-chat')"
+          >
+            Chat mới với khách hàng
+          </v-btn>
+        </template>
         <template v-else>
           <v-icon size="40" color="grey-lighten-1" class="mb-2">
             mdi-chat-outline
@@ -244,7 +273,18 @@
           </div>
           <div class="text-caption text-medium-emphasis mt-1">
             Khi khách hàng nhắn tin Zalo, hội thoại sẽ xuất hiện ở đây.
+            Bạn cũng có thể bắt đầu trước.
           </div>
+          <v-btn
+            variant="tonal"
+            color="primary"
+            size="small"
+            class="mt-3"
+            prepend-icon="mdi-message-plus"
+            @click="$emit('new-chat')"
+          >
+            Chat mới với khách hàng
+          </v-btn>
         </template>
       </div>
     </v-list>
