@@ -44,10 +44,17 @@
   --smax-chip-yellow: #fbc02d;         --smax-chip-yellow-text: #f57f17;
   --smax-chip-yellow-active: #f9a825;
 
-  /* Typography (mockup uses 14.3px base — +10% from 13px) */
-  --smax-font-base: 14.3px;
-  --smax-font-small: 12px;
-  --smax-font-tiny: 11px;
+  /* Typography — Feature 0054 unified scale (variant C from design-shotgun
+     20260522). Body / input / sidebar / table-cell all share --smax-font-base
+     (14px) so there's exactly one body size across the app. Title (page H1)
+     sits one step up at 20px / 600. Table-head 13px / 600 and chip 12px are
+     the only intentionally smaller sizes — anything else this small was
+     visual noise. Ratio title:body = 1.43 (vs. 1.54 before). */
+  --smax-font-title: 20px;
+  --smax-font-title-w: 600;
+  --smax-font-base: 14px;
+  --smax-font-small: 13px;   /* table head, helper labels */
+  --smax-font-tiny: 12px;    /* chips, status pills, captions */
   --smax-line-height: 1.45;
 
   /* Feature 0052c — promote Plus Jakarta Sans (already loaded via Google
