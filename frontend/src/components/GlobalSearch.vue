@@ -143,9 +143,21 @@ function debouncedSearch(val: string | null) {
   }, 300);
 }
 
-function goTo(path: string, _id?: string) {
+function goTo(path: string, id?: string) {
   showResults.value = false;
   query.value = '';
+  // Forward the result id so the destination page can auto-focus the
+  // selected item. Previously the id was dropped, so users landed on
+  // the chat list with nothing selected — same bug as the search-page
+  // path before ChatView learned to read ?conversationId=.
+  if (id && path === '/chat') {
+    router.push({ path, query: { conversationId: id } });
+    return;
+  }
+  if (id && path === '/contacts') {
+    router.push(`/contacts/${id}`);
+    return;
+  }
   router.push(path);
 }
 
