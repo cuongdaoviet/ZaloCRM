@@ -10,7 +10,9 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Plus Jakarta Sans", Roboto, sans-serif;
+  /* Feature 0052c — Plus Jakarta Sans first (loaded via Google Fonts above).
+     See tokens.css `--smax-font-stack` for the source of truth. */
+  font-family: var(--smax-font-stack);
   scroll-behavior: smooth;
   background: var(--smax-grey-100);
   color: var(--smax-text);
@@ -19,6 +21,14 @@ html, body {
 }
 
 #app { height: 100%; }
+
+/* Feature 0052c — make sure every Vuetify component picks up our stack
+   too. Vuetify's own stylesheet sets `font-family` on `.v-application` to
+   its default; we override here so the cascade goes Plus Jakarta Sans →
+   system fallback instead of system → … → Jakarta. */
+.v-application {
+  font-family: var(--smax-font-stack);
+}
 
 /* ════════ Smax light theme — defaults for v-* components ════════ */
 .v-theme--smax-light .v-card {
