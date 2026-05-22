@@ -19,6 +19,7 @@
         :unreplied-total="unrepliedTotal"
         :main-unread="mainUnread"
         :other-unread="otherUnread"
+        :accessible-account-count="accessibleAccountCount"
         :on-hover="onConversationHover"
         :on-hover-leave="onConversationHoverLeave"
         v-model:search="searchQuery"
@@ -134,6 +135,8 @@ const {
   filters, hasActiveFilters, unreadTotal, unrepliedTotal,
   // Feature 0023 — per-tab badges + tab mutator
   mainUnread, otherUnread, setConversationTab,
+  // Feature 0051 — member-with-no-ACL signal for ConversationList empty state
+  accessibleAccountCount,
   resetFilters, fetchConversationCounts,
   fetchConversations, selectConversation, sendMessage, sendAttachment, sendSticker, createConversation,
   initSocket, destroySocket, addOrToggleReaction,
