@@ -215,6 +215,25 @@ html, body {
   font-weight: 600;
 }
 
+/* Tooltips — Feature 0056. Vuetify 3 ships .v-tooltip with
+   `--v-theme-surface-variant` background. In our smax-light theme that
+   resolves to #fafbfc (near white) and the text color stays default
+   `--v-theme-on-surface-variant` which also reads as faint grey on white
+   — the tooltip becomes invisible. Pin to the header-bar dark surface
+   (#1f2330) with white text so tooltips read everywhere. */
+.v-application .v-tooltip > .v-overlay__content {
+  background: var(--smax-header-bg);
+  color: #ffffff;
+  font-size: var(--smax-font-small);
+  font-weight: 500;
+  line-height: 1.4;
+  padding: 6px 10px;
+  border-radius: var(--smax-radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  opacity: 1;
+  max-width: 320px;
+}
+
 /* ════════ Smax light theme — defaults for v-* components ════════ */
 .v-theme--smax-light .v-card {
   background: var(--smax-bg) !important;
