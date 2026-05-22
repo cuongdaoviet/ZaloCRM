@@ -121,13 +121,20 @@ export async function chatRoutes(app: FastifyInstance) {
       }
     }
 
-    // Members can only see conversations from Zalo accounts they have access to
+    // Members can only see conversations from Zalo accounts they have access to.
+    // Feature 0051 BR-0001..0003 — also count the number of accessible accounts
+    // so the FE can distinguish "no grants" (case 1) from "no conversations yet"
+    // (case 2) in the empty-state copy. Owners/admins bypass the ACL entirely,
+    // so we omit the field for them (BR-0002) — `null` here means "don't ship
+    // it" downstream.
+    let accessibleAccountCount: number | null = null;
     if (user.role === 'member') {
       const accessibleAccounts = await prisma.zaloAccountAccess.findMany({
         where: { userId: user.id },
         select: { zaloAccountId: true },
       });
       const accessibleIds = accessibleAccounts.map((a) => a.zaloAccountId);
+      accessibleAccountCount = accessibleIds.length;
       if (accountId && accessibleIds.includes(accountId)) {
         where.zaloAccountId = accountId;
       } else {
@@ -157,7 +164,15 @@ export async function chatRoutes(app: FastifyInstance) {
       prisma.conversation.count({ where }),
     ]);
 
-    return { conversations, total, page: parseInt(page), limit: parseInt(limit) };
+    // Feature 0051 BR-0002 — omit `accessibleAccountCount` for owner/admin so
+    // the FE branches on `null` (unknown) vs. `0` (member with no grants).
+    return {
+      conversations,
+      total,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      ...(accessibleAccountCount !== null ? { accessibleAccountCount } : {}),
+    };
   });
 
   // ── Conversation filter counts (unread, unreplied, total) — feature 0022 ─

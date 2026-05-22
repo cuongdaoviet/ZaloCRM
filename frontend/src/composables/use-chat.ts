@@ -157,6 +157,13 @@ export function useChat() {
   const mainUnread = ref(0);
   const otherUnread = ref(0);
 
+  // Feature 0051 — distinguishes "member with no ACL grants" (case 1) from
+  // "no conversations yet" (case 2) in the chat empty-state. `null` means
+  // unknown — either owner/admin (BE omits the field) or before the first
+  // fetch completes. `0` means a member with zero rows in zalo_account_access
+  // → render the "ask admin for access" copy. `>0` falls back to case 2.
+  const accessibleAccountCount = ref<number | null>(null);
+
   // Feature 0026 — group member cache for mention render + composer picker.
   // Keyed by conversationId. Fetched once when a group conversation is opened
   // (selectConversation calls fetchGroupMembers). Backend already caches for
@@ -304,6 +311,9 @@ export function useChat() {
       };
       const res = await api.get('/conversations', { params });
       conversations.value = res.data.conversations;
+      // Feature 0051 — BE ships `accessibleAccountCount` only for members.
+      // For owner/admin the field is omitted → coerce to `null` (unknown).
+      accessibleAccountCount.value = res.data?.accessibleAccountCount ?? null;
     } catch (err) {
       console.error('Failed to fetch conversations:', err);
     } finally {
@@ -751,6 +761,8 @@ export function useChat() {
     mainUnread,
     otherUnread,
     setConversationTab,
+    // Feature 0051 — empty-state branching (member with 0 grants vs. case 2/3)
+    accessibleAccountCount,
     resetFilters,
     fetchConversationCounts,
     fetchConversations,

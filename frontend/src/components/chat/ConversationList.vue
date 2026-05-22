@@ -214,8 +214,38 @@
         </template>
       </v-list-item>
 
-      <div v-if="!loading && conversations.length === 0" class="text-center pa-8 text-grey">
-        Chưa có cuộc trò chuyện nào
+      <!-- Feature 0051 — branched empty-state. Case 1 (member with 0 ACL rows)
+           gets a different icon + message + no CTA, because /zalo-accounts
+           is admin-only (Feature 0048) so the rep can't self-serve. Case 2/3
+           (owner/admin org-wide OR member with grants but no chats) gets the
+           softer "waiting for messages" copy. The 40px muted icon + body-2
+           text pattern matches the Feature 0049 F2 empty-state polish. -->
+      <div
+        v-if="!loading && conversations.length === 0"
+        class="empty-state text-center pa-8"
+      >
+        <template v-if="accessibleAccountCount === 0">
+          <v-icon size="40" color="grey-lighten-1" class="mb-2">
+            mdi-shield-alert-outline
+          </v-icon>
+          <div class="text-body-2 text-medium-emphasis">
+            Bạn chưa được cấp quyền truy cập tài khoản Zalo nào
+          </div>
+          <div class="text-caption text-medium-emphasis mt-1">
+            Hãy hỏi quản trị viên để được cấp quyền.
+          </div>
+        </template>
+        <template v-else>
+          <v-icon size="40" color="grey-lighten-1" class="mb-2">
+            mdi-chat-outline
+          </v-icon>
+          <div class="text-body-2 text-medium-emphasis">
+            Chưa có cuộc trò chuyện nào
+          </div>
+          <div class="text-caption text-medium-emphasis mt-1">
+            Khi khách hàng nhắn tin Zalo, hội thoại sẽ xuất hiện ở đây.
+          </div>
+        </template>
       </div>
     </v-list>
 
@@ -275,6 +305,16 @@ const props = defineProps<{
   // Feature 0023 — per-tab badge counts (sourced from /conversations/counts)
   mainUnread?: number;
   otherUnread?: number;
+  /**
+   * Feature 0051 — number of Zalo accounts a member has access to, sourced
+   * from GET /conversations.
+   *   - `null`     → owner/admin (BE omits the field) OR pre-first-fetch.
+   *   - `0`        → member with no ACL grants → render "ask admin" empty
+   *                  state instead of the generic "no chats yet" copy.
+   *   - `>0`       → member has grants; treat empty list as "no chats yet".
+   * Only consumed by the empty-state template — does not affect list render.
+   */
+  accessibleAccountCount?: number | null;
   /**
    * Feature 0043 — hover prefetch callbacks. The parent owns the cache so
    * we hand off the conversationId on hover and let the composable decide
