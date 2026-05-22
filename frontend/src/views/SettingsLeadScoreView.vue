@@ -238,6 +238,24 @@
 :deep(.v-table th) {
   border-bottom: 0 !important;
 }
+
+/* Each <v-text-field> in the bucket tables defaults to the global
+   `outlined` variant (set in vuetify.ts), which draws a 1px box around
+   every input. Side by side in a table, those boxes read as "table cell
+   borders" — the original complaint. Flatten the inputs inside this
+   page's v-tables only: drop the outline, drop the inset shadow, keep
+   the input usable on focus by tinting the background. */
+:deep(.v-table .v-field) {
+  background: transparent;
+  box-shadow: none !important;
+}
+:deep(.v-table .v-field__outline) {
+  display: none;
+}
+:deep(.v-table .v-field--focused) {
+  background: rgba(var(--v-theme-primary), 0.06);
+  border-radius: 6px;
+}
 </style>
 
 <script setup lang="ts">
