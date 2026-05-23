@@ -1,21 +1,24 @@
 <template>
-  <v-card class="pa-8" style="backdrop-filter: blur(20px);" elevation="0">
-    <div class="text-center mb-8">
-      <div
-        class="ai-core-orb mx-auto mb-4 d-flex align-center justify-center"
-        style="width: 64px; height: 64px; background: linear-gradient(135deg, #00F2FF, #0077B6);"
-      >
-        <v-icon size="32" color="white">mdi-robot</v-icon>
-      </div>
-      <h1 class="text-h5 font-weight-bold">Zalo<span class="text-primary">CRM</span></h1>
-      <p class="text-caption mt-1" style="color: #8892b0;">Liquid Silicon • Multi-Account Zalo Management</p>
+  <!-- Feature 0061 — variant C login.
+       Hero line above a translucent (glass) form floating on the indigo
+       gradient backdrop from AuthLayout. The cyan-blue orb + English
+       "Liquid Silicon" tagline from the legacy version are gone — they
+       were pre-Feature-0057 palette + didn't match the Vietnamese-first
+       product voice. -->
+  <div class="text-center mb-6 hero-block">
+    <div class="logo-mark mx-auto mb-4">
+      <span>Z</span>
     </div>
+    <h1 class="text-h4 font-weight-bold mb-2" style="color: #ffffff; letter-spacing: -0.01em;">
+      Zalo<span style="color: #c7d2fe;">CRM</span>
+    </h1>
+    <p class="text-body-1 mb-0" style="color: rgba(255,255,255,0.82);">
+      Bán hàng qua Zalo, có hệ thống.
+    </p>
+  </div>
 
+  <v-card class="login-card pa-7" elevation="0">
     <v-form @submit.prevent="handleLogin">
-      <!-- Feature 0049 F7 — switched to outlined variant + dropped the
-           prepend icons. The default filled variant + leading icon read
-           too much like a placeholder-only field; outlined keeps the label
-           visible in the notch above the field once focused / filled. -->
       <v-text-field
         v-model="email"
         label="Email"
@@ -34,7 +37,7 @@
         required
         class="mb-5"
       />
-      <v-btn type="submit" color="primary" block size="large" :loading="loading" rounded="xl">
+      <v-btn type="submit" color="primary" block size="large" :loading="loading" rounded="lg">
         Đăng nhập
       </v-btn>
     </v-form>
@@ -43,7 +46,41 @@
       {{ error }}
     </v-alert>
   </v-card>
+
+  <p class="text-center mt-5 text-caption" style="color: rgba(255,255,255,0.5);">
+    © 2026 ZaloCRM — CRM cho đội Sales bán hàng qua Zalo
+  </p>
 </template>
+
+<style scoped>
+.hero-block {
+  position: relative;
+  z-index: 1;
+}
+.logo-mark {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 24px rgba(79, 70, 229, 0.4);
+}
+.logo-mark span {
+  color: white;
+  font-weight: 700;
+  font-size: 28px;
+  letter-spacing: -0.04em;
+}
+.login-card {
+  background: rgba(255, 255, 255, 0.96) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 24px 60px rgba(13, 12, 34, 0.45), 0 2px 8px rgba(13, 12, 34, 0.12) !important;
+  position: relative;
+  z-index: 1;
+}
+</style>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
