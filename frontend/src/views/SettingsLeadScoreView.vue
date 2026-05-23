@@ -24,7 +24,7 @@
     </v-alert>
 
     <v-card class="mb-4 pa-4">
-      <div class="text-h6 mb-2">Recency — Tin nhắn inbound gần nhất (tối đa 40)</div>
+      <h3 class="text-h6 mt-0 mb-2">Recency — Tin nhắn inbound gần nhất (tối đa 40)</h3>
       <p class="text-body-2 text-medium-emphasis mb-3">
         Mỗi dòng: nếu inbound cuối ≤ <code>hours</code>, cộng <code>points</code> điểm.
         Hệ thống chọn dòng đầu tiên khớp (đã sắp xếp tăng dần theo giờ).
@@ -82,7 +82,7 @@
     </v-card>
 
     <v-card class="mb-4 pa-4">
-      <div class="text-h6 mb-2">Engagement — Số tin inbound 30 ngày (tối đa 30)</div>
+      <h3 class="text-h6 mt-0 mb-2">Engagement — Số tin inbound 30 ngày (tối đa 30)</h3>
       <p class="text-body-2 text-medium-emphasis mb-3">
         1 điểm / tin, cap tại giá trị dưới.
       </p>
@@ -97,7 +97,7 @@
     </v-card>
 
     <v-card class="mb-4 pa-4">
-      <div class="text-h6 mb-2">Status — Điểm theo pipeline (tối đa 20)</div>
+      <h3 class="text-h6 mt-0 mb-2">Status — Điểm theo pipeline (tối đa 20)</h3>
       <v-row dense>
         <v-col
           v-for="status in STATUS_KEYS"
@@ -117,7 +117,7 @@
     </v-card>
 
     <v-card class="mb-4 pa-4">
-      <div class="text-h6 mb-2">Appointment — Lịch hẹn sắp tới (tối đa 10)</div>
+      <h3 class="text-h6 mt-0 mb-2">Appointment — Lịch hẹn sắp tới (tối đa 10)</h3>
       <p class="text-body-2 text-medium-emphasis mb-3">
         Mỗi dòng: nếu lịch hẹn gần nhất ≤ <code>daysWindow</code> ngày,
         cộng <code>points</code> điểm.
