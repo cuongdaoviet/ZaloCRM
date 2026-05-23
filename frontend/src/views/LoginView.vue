@@ -50,33 +50,64 @@
 
       <v-card class="login-card pa-6" elevation="0">
         <v-form @submit.prevent="handleLogin">
+          <!-- Match mockup: label is ABOVE the field as static text +
+               placeholder inside. Vuetify's floating-label outlined
+               variant doesn't match the design — used plain inputs with
+               an external <label> instead. -->
+          <label class="field-label" for="login-email">Email</label>
           <v-text-field
+            id="login-email"
             v-model="email"
-            label="Email"
+            placeholder="ban@congty.vn"
             type="email"
             variant="outlined"
             autocomplete="email"
+            hide-details
             required
-            class="mb-3"
+            class="mb-4"
           />
+          <label class="field-label" for="login-password">Mật khẩu</label>
           <v-text-field
+            id="login-password"
             v-model="password"
-            label="Mật khẩu"
+            placeholder="••••••••"
             type="password"
             variant="outlined"
             autocomplete="current-password"
+            hide-details
             required
             class="mb-5"
           />
-          <v-btn type="submit" color="primary" block size="large" :loading="loading" rounded="lg">
+          <v-btn
+            type="submit"
+            color="primary"
+            variant="flat"
+            block
+            size="large"
+            :loading="loading"
+            rounded="pill"
+            class="submit-btn"
+          >
             Đăng nhập
           </v-btn>
+
+          <!-- Visual link only — password reset flow isn't built yet, so
+               clicking shows a toast explaining where to go. Honest
+               affordance > pretending. -->
+          <div class="text-center mt-4">
+            <span class="text-body-2" style="color: #5c6675;">Quên mật khẩu? </span>
+            <a href="#" class="forgot-link" @click.prevent="onForgot">Khôi phục</a>
+          </div>
         </v-form>
 
         <v-alert v-if="error" type="error" class="mt-4" density="compact" closable variant="tonal">
           {{ error }}
         </v-alert>
       </v-card>
+
+      <v-snackbar v-model="forgotToast" :timeout="4000">
+        Tính năng khôi phục mật khẩu đang được xây dựng. Liên hệ quản trị viên để reset.
+      </v-snackbar>
 
       <p class="footer text-caption">
         © 2026 ZaloCRM — CRM cho đội Sales bán hàng qua Zalo
@@ -222,6 +253,35 @@
   border-radius: 14px !important;
   box-shadow: 0 12px 36px rgba(13, 12, 34, 0.08), 0 2px 6px rgba(13, 12, 34, 0.04) !important;
 }
+
+/* Static field labels above each input — match mockup vs Vuetify's
+   floating-label default. */
+.field-label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0b1220;
+  margin-bottom: 6px;
+}
+
+/* Submit button — match the bold solid indigo + pill radius from the
+   mockup. Vuetify's default flat variant on a coloured button can read
+   slightly washed depending on theme; pin the styling here so it stays
+   the prominent CTA. */
+.submit-btn {
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+  height: 52px !important;
+  box-shadow: 0 6px 16px rgba(79, 70, 229, 0.32) !important;
+}
+
+.forgot-link {
+  color: #4f46e5;
+  font-weight: 600;
+  text-decoration: none;
+}
+.forgot-link:hover { text-decoration: underline; }
 .footer {
   display: block;
   margin-top: 20px;
@@ -244,8 +304,13 @@ const email = ref('');
 const password = ref('');
 const loading = ref(false);
 const error = ref('');
+const forgotToast = ref(false);
 const router = useRouter();
 const authStore = useAuthStore();
+
+function onForgot() {
+  forgotToast.value = true;
+}
 
 onMounted(async () => {
   // If already authenticated, skip login page
